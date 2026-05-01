@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "test": "node --test",
+    "claim": "node scripts/telecom-monthly-claim.js",
+    "sms-server": "node scripts/sms-inbox-server.js",
+    "lint": "node --check scripts/telecom-monthly-claim.js && node --check scripts/sms-inbox-server.js && node --check scripts/create-failure-issue.js && node --check src/*.js"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20"
+  },
+  "name": "telecom-monthly-claim",
+  "private": true
+}
