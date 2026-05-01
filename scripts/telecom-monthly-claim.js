@@ -140,7 +140,9 @@ async function sendLoginCode(page, config) {
   await sleep(1000);
   await page.locator('.content_send_unlog').click({ force: true });
   await sleep(3000);
-  await closeDialogs(page);
+  const closedDialogs = await closeDialogs(page);
+  const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+  log('Login SMS send page summary', { closedDialogs, summary });
 }
 
 async function submitLoginCode(page, code) {
@@ -164,7 +166,8 @@ async function loginWithRetry(page, smsInbox, config) {
     await sendLoginCode(page, config);
     const sms = await smsInbox.waitForCode({ stage: 'login', since, timeoutMs: config.smsTimeoutMs, pollMs: config.smsPollMs });
     if (!sms) {
-      log('Login SMS not received before timeout');
+      const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+      log('Login SMS not received before timeout', summary);
       continue;
     }
     const ok = await submitLoginCode(page, sms.code);
