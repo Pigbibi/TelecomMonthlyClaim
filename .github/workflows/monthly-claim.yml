@@ -10,6 +10,10 @@ on:
         description: "Ignore monthly success state and run anyway"
         required: false
         default: "false"
+      dry_run:
+        description: "Stop before the final telecom submit button"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -36,8 +40,9 @@ jobs:
       BWG_KNOWN_HOSTS: ${{ secrets.BWG_KNOWN_HOSTS }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
-      FAIL_ONLY_FINAL_DAY: "true"
+      FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
       FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
+      DRY_RUN_BEFORE_FINAL_SUBMIT: ${{ github.event.inputs.dry_run || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +104,7 @@ jobs:
           fi
 
       - name: Create issue on final failure
-        if: failure()
+        if: failure() && github.event.inputs.dry_run != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/create-failure-issue.js

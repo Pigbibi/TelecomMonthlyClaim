@@ -296,6 +296,11 @@ async function confirmWithRetry(page, smsInbox, config) {
       log('Confirmation SMS not received before timeout');
       continue;
     }
+    if (config.dryRunBeforeFinalSubmit) {
+      const summary = await getPageSummary(page);
+      log('Dry run reached final submit step; confirmation SMS was received, final submit was not clicked.', summary);
+      return 'dry-run';
+    }
     await page.locator('#smsCodeProtocol').fill(sms.code);
     await sleep(1000);
     await page.locator('#secondConfirmation').click({ force: true });
@@ -360,7 +365,8 @@ async function runClaim(config) {
     const { page } = await newMobilePage(browser);
     await loginWithRetry(page, smsInbox, config);
     await choosePackage(page, config);
-    await confirmWithRetry(page, smsInbox, config);
+    const result = await confirmWithRetry(page, smsInbox, config);
+    if (result === 'dry-run') return;
     if (!await waitForSuccess(page, 5000)) throw new Error('No success page after final submit');
     const summary = await getPageSummary(page);
     log('Claim succeeded', summary);
