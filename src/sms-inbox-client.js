@@ -4,13 +4,35 @@ const { parseTelecomSms } = require('./sms-parser');
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+function maybeUnwrapForwarderPayload(text) {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeMessage(raw) {
   if (typeof raw === 'string') return { text: raw };
+  const wrapped = maybeUnwrapForwarderPayload(raw.text || raw.content || raw.body || raw.message || raw.sms || '');
   return {
     id: raw.id || raw.messageId || raw.uuid,
-    sender: raw.sender || raw.from || raw.address || raw.phone || '',
-    text: raw.text || raw.content || raw.body || raw.message || raw.sms || '',
+    sender: wrapped?.sender || wrapped?.from || wrapped?.address || raw.sender || raw.from || raw.address || raw.phone || '',
+    text: wrapped?.text || wrapped?.content || wrapped?.body || wrapped?.message || raw.text || raw.content || raw.body || raw.message || raw.sms || '',
     receivedAt: raw.receivedAt || raw.timestamp || raw.time || raw.date || Date.now(),
+  };
+}
+
+function describeMessage(msg) {
+  return {
+    id: msg.id,
+    sender: msg.sender,
+    receivedAt: msg.receivedAt,
   };
 }
 
@@ -32,7 +54,7 @@ class SmsInboxClient {
     if (!res.ok) throw new Error(`SMS inbox HTTP ${res.status}`);
     const data = await res.json();
     const items = Array.isArray(data) ? data : data.messages || data.items || [];
-    return items.map(normalizeMessage);
+    return items.map(normalizeMessage).sort((a, b) => Number(b.receivedAt || 0) - Number(a.receivedAt || 0));
   }
 
   async waitForCode({ stage, since, timeoutMs, pollMs }) {
@@ -53,6 +75,7 @@ class SmsInboxClient {
         });
         if (parsed) {
           this.seen.add(key);
+          console.log(`Matched ${stage} SMS ${JSON.stringify(describeMessage(msg))}`);
           return { ...parsed, source: 'inbox' };
         }
       }
@@ -70,4 +93,4 @@ class SmsInboxClient {
   }
 }
 
-module.exports = { SmsInboxClient, sleep };
+module.exports = { SmsInboxClient, normalizeMessage, sleep };

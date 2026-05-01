@@ -169,8 +169,12 @@ async function loginWithRetry(page, smsInbox, config) {
     }
     const ok = await submitLoginCode(page, sms.code);
     if (ok) return;
-    log('Login code rejected, retrying');
-    await sleep(5000);
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    log('Login code rejected, retrying', summary);
+    if (attempt < config.sendCodeAttempts) {
+      await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await sleep(60000);
+    }
   }
   throw new Error('Login SMS verification failed after retries');
 }
