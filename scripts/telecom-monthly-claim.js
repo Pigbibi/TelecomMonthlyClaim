@@ -59,7 +59,7 @@ async function launchBrowser(config) {
     headless: config.headless,
     args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
   };
-  if (config.openwrtProxy) options.proxy = { server: config.openwrtProxy };
+  if (config.openwrtProxy) options.proxy = buildProxyOptions(config.openwrtProxy);
   if (config.browserChannel) options.channel = config.browserChannel;
   try {
     return await chromium.launch(options);
@@ -69,6 +69,14 @@ async function launchBrowser(config) {
     delete options.channel;
     return chromium.launch(options);
   }
+}
+
+function buildProxyOptions(proxyUrl) {
+  const parsed = new URL(proxyUrl);
+  const proxy = { server: `${parsed.protocol}//${parsed.host}` };
+  if (parsed.username) proxy.username = decodeURIComponent(parsed.username);
+  if (parsed.password) proxy.password = decodeURIComponent(parsed.password);
+  return proxy;
 }
 
 async function newMobilePage(browser) {

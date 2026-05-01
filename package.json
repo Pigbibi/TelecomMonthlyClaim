@@ -3,7 +3,8 @@
     "test": "node --test",
     "claim": "node scripts/telecom-monthly-claim.js",
     "sms-server": "node scripts/sms-inbox-server.js",
-    "lint": "node --check scripts/telecom-monthly-claim.js && node --check scripts/sms-inbox-server.js && node --check scripts/create-failure-issue.js && node --check src/*.js"
+    "lint": "bash -n scripts/*.sh && sh -n openwrt/* && node --check scripts/telecom-monthly-claim.js && node --check scripts/sms-inbox-server.js && node --check scripts/home-http-proxy.js && node --check scripts/create-failure-issue.js && node --check src/*.js",
+    "home-proxy": "node scripts/home-http-proxy.js"
   },
   "dependencies": {
     "playwright": "^1.52.0"

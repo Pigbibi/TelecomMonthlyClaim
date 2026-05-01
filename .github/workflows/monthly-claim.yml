@@ -25,10 +25,15 @@ jobs:
       TELECOM_TARGET_PACKAGE: ${{ vars.TELECOM_TARGET_PACKAGE || '5g' }}
       TELECOM_PRODUCT_NAME: ${{ vars.TELECOM_PRODUCT_NAME || '互联网卡网龄享5GB国内通用流量' }}
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '24BJ100433' }}
-      SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL }}
+      SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
+      SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
       SMS_INBOX_TOKEN: ${{ secrets.SMS_INBOX_TOKEN }}
-      OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY }}
-      WG_CONFIG_BASE64: ${{ secrets.WG_CONFIG_BASE64 }}
+      OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || 'http://127.0.0.1:13128' }}
+      BWG_SSH_HOST: ${{ secrets.BWG_SSH_HOST }}
+      BWG_SSH_USER: ${{ secrets.BWG_SSH_USER || 'root' }}
+      BWG_SSH_PORT: ${{ secrets.BWG_SSH_PORT || '22' }}
+      BWG_SSH_PRIVATE_KEY: ${{ secrets.BWG_SSH_PRIVATE_KEY }}
+      BWG_KNOWN_HOSTS: ${{ secrets.BWG_KNOWN_HOSTS }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
       FAIL_ONLY_FINAL_DAY: "true"
@@ -45,11 +50,39 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm run lint
       - run: npm test
       - run: npx playwright install --with-deps chromium
 
-      - name: Run claim through optional WireGuard/OpenWrt proxy
-        run: ./scripts/run-with-wireguard.sh xvfb-run -a node scripts/telecom-monthly-claim.js
+      - name: Open SSH tunnel to home proxy and SMS inbox via BWG
+        run: |
+          set -euo pipefail
+          : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"
+          : "${BWG_SSH_PRIVATE_KEY:?Missing BWG_SSH_PRIVATE_KEY secret}"
+          : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BWG_SSH_PRIVATE_KEY" > ~/.ssh/bwg_key
+          chmod 600 ~/.ssh/bwg_key
+          if [ -n "${BWG_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$BWG_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$BWG_SSH_PORT" -H "$BWG_SSH_HOST" >> ~/.ssh/known_hosts
+          fi
+          ssh -i ~/.ssh/bwg_key \
+            -p "$BWG_SSH_PORT" \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            -N -f \
+            -L 127.0.0.1:18787:127.0.0.1:18787 \
+            -L 127.0.0.1:13128:127.0.0.1:13128 \
+            "$BWG_SSH_USER@$BWG_SSH_HOST"
+          curl -fsS -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL"
+          curl -sSI --proxy "http://127.0.0.1:13128" --max-time 20 https://wapbj.189.cn/ >/dev/null
+
+      - name: Run claim through home exit proxy
+        run: xvfb-run -a node scripts/telecom-monthly-claim.js
 
       - name: Commit monthly state
         if: always()
