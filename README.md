@@ -101,11 +101,19 @@ OPENWRT_HTTP_PROXY=http://127.0.0.1:13128
 
 如果路由器 tinyproxy 配了 BasicAuth，`OPENWRT_HTTP_PROXY` 需要写成 `http://user:password@127.0.0.1:13128`，脚本会自动拆出代理用户名密码给 Playwright。
 
-短信转发器目标改为：
+短信转发器如果只在家里 Wi-Fi 使用，目标可以是：
 
 ```text
 POST http://192.168.5.1/cgi-bin/telecom-sms?token=<SMS_INBOX_TOKEN>
 ```
+
+如果手机不一定连家里 Wi-Fi，改用 BWG 公网入口：
+
+```text
+POST http://67.209.184.240:18789/telecom-sms?token=<SMS_INBOX_TOKEN>
+```
+
+BWG 公网入口由 `scripts/install-bwg-public-webhook.sh` 安装，systemd 服务名是 `telecom-public-webhook`。它只把 `/telecom-sms`、`/telecom-messages`、`/telecom-sms-health` 转发到 OpenWrt 反向隧道，不暴露路由器代理端口。
 
 ## MacBook 常驻服务
 
