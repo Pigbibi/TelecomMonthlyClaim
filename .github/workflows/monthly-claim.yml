@@ -90,7 +90,7 @@ jobs:
         run: xvfb-run -a node scripts/telecom-monthly-claim.js
 
       - name: Commit monthly state
-        if: always()
+        if: always() && github.event.inputs.dry_run != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

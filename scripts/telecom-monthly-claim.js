@@ -382,6 +382,11 @@ async function main() {
     await runClaim(config);
   } catch (err) {
     log('Claim failed', { message: err.message, stack: err.stack?.split('\n').slice(0, 4).join('\n') });
+    if (config.dryRunBeforeFinalSubmit) {
+      log('Dry run failed; state file was not updated.');
+      process.exitCode = 1;
+      return;
+    }
     writeState('failed', { error: err.message, finalRetryDay: isFinalRetryDay(new Date(), config.finalRetryDay) });
     if (config.failOnlyFinalDay && !isFinalRetryDay(new Date(), config.finalRetryDay)) {
       log('Not final retry day yet; keeping workflow green so next scheduled day can retry.');
