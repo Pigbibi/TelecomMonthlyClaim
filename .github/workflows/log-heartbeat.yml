@@ -1,0 +1,24 @@
+name: Repository Log Heartbeat
+
+on:
+  schedule:
+    # Beijing time 07:17 every Monday.
+    - cron: "17 23 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record heartbeat on logs branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_LOG_KIND: heartbeat
+          RUN_LOG_STATUS: success
+          RUN_LOG_CLAIM_OUTCOME: not_applicable
+        run: bash scripts/write-run-log-branch.sh

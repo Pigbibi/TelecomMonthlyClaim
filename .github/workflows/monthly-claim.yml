@@ -87,6 +87,7 @@ jobs:
           curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --max-time 20 https://wapbj.189.cn/ >/dev/null
 
       - name: Run claim through home exit proxy
+        id: claim
         run: xvfb-run -a node scripts/telecom-monthly-claim.js
 
       - name: Commit monthly state
@@ -108,3 +109,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/create-failure-issue.js
+
+      - name: Record run log on logs branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_LOG_STATUS: ${{ job.status }}
+          RUN_LOG_CLAIM_OUTCOME: ${{ steps.claim.outcome || 'skipped' }}
+          RUN_LOG_FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
+          RUN_LOG_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: bash scripts/write-run-log-branch.sh
