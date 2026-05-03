@@ -57,9 +57,50 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      - run: npx playwright install --with-deps chromium
+
+      - name: Decide whether claim is needed
+        id: claim_plan
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const forceRun = /^true$/i.test(process.env.FORCE_RUN || '');
+          const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+          }).formatToParts(new Date());
+          const year = parts.find(part => part.type === 'year')?.value;
+          const month = parts.find(part => part.type === 'month')?.value;
+          const stateFile = `state/${year}-${month}.json`;
+
+          let alreadySuccessful = false;
+          if (fs.existsSync(stateFile)) {
+            try {
+              alreadySuccessful = JSON.parse(fs.readFileSync(stateFile, 'utf8')).status === 'success';
+            } catch {
+              alreadySuccessful = false;
+            }
+          }
+
+          const shouldRun = forceRun || !alreadySuccessful;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `should_run=${shouldRun ? 'true' : 'false'}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `state_file=${stateFile}\n`);
+
+          if (!shouldRun) {
+            console.log(`State ${stateFile} already records success; skip external tunnel. Set FORCE_RUN=true to override.`);
+          } else if (forceRun) {
+            console.log('FORCE_RUN=true; claim will run even if state already records success.');
+          } else {
+            console.log(`No successful state found in ${stateFile}; claim will run.`);
+          }
+          NODE
+
+      - if: steps.claim_plan.outputs.should_run == 'true'
+        run: npx playwright install --with-deps chromium
 
       - name: Open SSH tunnel to home proxy and SMS inbox via BWG
+        if: steps.claim_plan.outputs.should_run == 'true'
         run: |
           set -euo pipefail
           : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"
@@ -88,10 +129,11 @@ jobs:
 
       - name: Run claim through home exit proxy
         id: claim
+        if: steps.claim_plan.outputs.should_run == 'true'
         run: xvfb-run -a node scripts/telecom-monthly-claim.js
 
       - name: Commit monthly state
-        if: always() && github.event.inputs.dry_run != 'true'
+        if: always() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -105,7 +147,7 @@ jobs:
           fi
 
       - name: Create issue on final failure
-        if: failure() && github.event.inputs.dry_run != 'true'
+        if: failure() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/create-failure-issue.js
