@@ -124,7 +124,10 @@ jobs:
             -L 127.0.0.1:18787:127.0.0.1:18787 \
             -L 127.0.0.1:13128:127.0.0.1:13128 \
             "$BWG_SSH_USER@$BWG_SSH_HOST"
-          curl -fsS -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL"
+          echo "Checking SMS inbox health via BWG tunnel..."
+          curl -fsS --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
+            -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
+          echo "Checking home proxy via BWG tunnel..."
           curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --max-time 20 https://wapbj.189.cn/ >/dev/null
 
       - name: Run claim through home exit proxy
