@@ -68,11 +68,12 @@ echo "Copying files to OpenWrt router ${ROUTER_SSH_TARGET}..."
 "${router_scp[@]}" openwrt/telecom-sms-inbox.cgi "$ROUTER_SSH_TARGET:/usr/libexec/telecom-sms-inbox.cgi"
 "${router_scp[@]}" openwrt/telecom-bwg-tunnel.init "$ROUTER_SSH_TARGET:/etc/init.d/telecom-bwg-tunnel"
 "${router_scp[@]}" openwrt/telecom-bwg-tunnel-watchdog.sh "$ROUTER_SSH_TARGET:/usr/bin/telecom-bwg-tunnel-watchdog"
+"${router_scp[@]}" openwrt/repo-proxy-status.sh "$ROUTER_SSH_TARGET:/usr/bin/repo-proxy-status"
 
 "${router_ssh[@]}" "$ROUTER_SSH_TARGET" <<'REMOTE'
 set -eu
 chmod 600 /root/.ssh/telecom_bwg_key /etc/telecom-monthly-claim.env
-chmod 755 /usr/libexec/telecom-sms-inbox.cgi /etc/init.d/telecom-bwg-tunnel /usr/bin/telecom-bwg-tunnel-watchdog
+chmod 755 /usr/libexec/telecom-sms-inbox.cgi /etc/init.d/telecom-bwg-tunnel /usr/bin/telecom-bwg-tunnel-watchdog /usr/bin/repo-proxy-status
 cat > /www/cgi-bin/telecom-sms-health <<'EOF'
 #!/bin/sh
 exec /usr/libexec/telecom-sms-inbox.cgi health
