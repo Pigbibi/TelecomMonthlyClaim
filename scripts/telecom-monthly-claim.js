@@ -20,6 +20,34 @@ function log(message, data) {
   else console.log(`${message} ${mask(JSON.stringify(data))}`);
 }
 
+function maskProxyUrl(proxyUrl) {
+  if (!proxyUrl) return '';
+  try {
+    const parsed = new URL(proxyUrl);
+    if (parsed.username) parsed.username = '***';
+    if (parsed.password) parsed.password = '***';
+    return parsed.toString();
+  } catch {
+    return String(proxyUrl).replace(/\/\/[^/@]+@/, '//***:***@');
+  }
+}
+
+function isProxyPathError(err) {
+  const text = `${err?.message || ''}\n${err?.stack || ''}`;
+  return [
+    /ERR_PROXY_CONNECTION_FAILED/i,
+    /ERR_TUNNEL_CONNECTION_FAILED/i,
+    /ERR_CONNECTION_RESET/i,
+    /ERR_CONNECTION_CLOSED/i,
+    /ECONNREFUSED/i,
+    /ECONNRESET/i,
+    /ETIMEDOUT/i,
+    /EHOSTUNREACH/i,
+    /socket hang up/i,
+    /proxy/i,
+  ].some(pattern => pattern.test(text));
+}
+
 async function applyAndroidEmulation(context, page) {
   const client = await context.newCDPSession(page);
   await client.send('Network.enable').catch(() => {});
@@ -59,7 +87,12 @@ async function launchBrowser(config) {
     headless: config.headless,
     args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
   };
-  if (config.openwrtProxy) options.proxy = buildProxyOptions(config.openwrtProxy);
+  if (config.openwrtProxy) {
+    log('Launching browser through home proxy', { proxy: maskProxyUrl(config.openwrtProxy) });
+    options.proxy = buildProxyOptions(config.openwrtProxy);
+  } else {
+    log('Launching browser without OPENWRT_HTTP_PROXY');
+  }
   if (config.browserChannel) options.channel = config.browserChannel;
   try {
     return await chromium.launch(options);
@@ -383,10 +416,26 @@ async function runClaim(config) {
   }
 }
 
+async function runClaimWithOptionalDirectFallback(config) {
+  try {
+    await runClaim(config);
+  } catch (err) {
+    if (config.allowDirectProxyFallback && config.openwrtProxy && isProxyPathError(err)) {
+      log('Home proxy path failed; retrying this run without OPENWRT_HTTP_PROXY', {
+        proxy: maskProxyUrl(config.openwrtProxy),
+        error: err.message,
+      });
+      await runClaim({ ...config, openwrtProxy: '' });
+      return;
+    }
+    throw err;
+  }
+}
+
 async function main() {
   const config = loadConfig();
   try {
-    await runClaim(config);
+    await runClaimWithOptionalDirectFallback(config);
   } catch (err) {
     log('Claim failed', { message: err.message, stack: err.stack?.split('\n').slice(0, 4).join('\n') });
     if (config.dryRunBeforeFinalSubmit) {

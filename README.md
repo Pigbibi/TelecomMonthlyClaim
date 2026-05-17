@@ -57,6 +57,7 @@ Variables：
 | `TELECOM_TARGET_PACKAGE` | `5g` |
 | `TELECOM_PRODUCT_NAME` | `互联网卡网龄享5GB国内通用流量` |
 | `TELECOM_EXPECTED_PLAN_ID` | `24BJ100433` |
+| `ALLOW_DIRECT_PROXY_FALLBACK` | `true` |
 
 不要把私钥、手机号、短信 token 写进仓库文件。
 
@@ -89,7 +90,8 @@ SMS_INBOX_TOKEN=change-me
   - `POST /cgi-bin/telecom-sms`
   - `GET /cgi-bin/telecom-messages`
   - `GET /cgi-bin/telecom-sms-health`
-- 安装 `/etc/init.d/telecom-bwg-tunnel`，让 OpenWrt 开机后自动连 BWG，并反向转发短信 inbox 与路由器代理端口。
+- 安装 `/etc/init.d/telecom-bwg-tunnel`，让 OpenWrt 开机后自动连 BWG，并反向转发短信 inbox 与路由器代理端口；
+- 安装 `/usr/bin/telecom-bwg-tunnel-watchdog`，通过 cron 定期检查 BWG 反向端口和 home proxy，不通时重启隧道。
 
 OpenWrt 模式下 GitHub secrets 需要这样设置：
 
@@ -97,6 +99,7 @@ OpenWrt 模式下 GitHub secrets 需要这样设置：
 SMS_INBOX_URL=http://127.0.0.1:18787/cgi-bin/telecom-messages
 SMS_INBOX_HEALTH_URL=http://127.0.0.1:18787/cgi-bin/telecom-sms-health
 OPENWRT_HTTP_PROXY=http://127.0.0.1:13128
+ALLOW_DIRECT_PROXY_FALLBACK=true
 ```
 
 如果路由器 tinyproxy 配了 BasicAuth，`OPENWRT_HTTP_PROXY` 需要写成 `http://user:password@127.0.0.1:13128`，脚本会自动拆出代理用户名密码给 Playwright。

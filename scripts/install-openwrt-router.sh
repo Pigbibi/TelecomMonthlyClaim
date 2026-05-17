@@ -67,11 +67,12 @@ echo "Copying files to OpenWrt router ${ROUTER_SSH_TARGET}..."
 "${router_scp[@]}" "$tmp_env" "$ROUTER_SSH_TARGET:/etc/telecom-monthly-claim.env"
 "${router_scp[@]}" openwrt/telecom-sms-inbox.cgi "$ROUTER_SSH_TARGET:/usr/libexec/telecom-sms-inbox.cgi"
 "${router_scp[@]}" openwrt/telecom-bwg-tunnel.init "$ROUTER_SSH_TARGET:/etc/init.d/telecom-bwg-tunnel"
+"${router_scp[@]}" openwrt/telecom-bwg-tunnel-watchdog.sh "$ROUTER_SSH_TARGET:/usr/bin/telecom-bwg-tunnel-watchdog"
 
 "${router_ssh[@]}" "$ROUTER_SSH_TARGET" <<'REMOTE'
 set -eu
 chmod 600 /root/.ssh/telecom_bwg_key /etc/telecom-monthly-claim.env
-chmod 755 /usr/libexec/telecom-sms-inbox.cgi /etc/init.d/telecom-bwg-tunnel
+chmod 755 /usr/libexec/telecom-sms-inbox.cgi /etc/init.d/telecom-bwg-tunnel /usr/bin/telecom-bwg-tunnel-watchdog
 cat > /www/cgi-bin/telecom-sms-health <<'EOF'
 #!/bin/sh
 exec /usr/libexec/telecom-sms-inbox.cgi health
@@ -101,6 +102,8 @@ if ! command -v ssh >/dev/null 2>&1 || ssh -V 2>&1 | grep -qi dropbear; then
 fi
 /etc/init.d/telecom-bwg-tunnel enable
 /etc/init.d/telecom-bwg-tunnel restart
+(crontab -l 2>/dev/null | grep -v '/usr/bin/telecom-bwg-tunnel-watchdog' || true; echo '*/2 * * * * /usr/bin/telecom-bwg-tunnel-watchdog >/dev/null 2>&1') | crontab -
+/usr/bin/telecom-bwg-tunnel-watchdog || true
 REMOTE
 
 echo "OpenWrt install done."

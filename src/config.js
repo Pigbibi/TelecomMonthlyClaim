@@ -25,6 +25,7 @@ function loadConfig() {
     failOnlyFinalDay: process.env.FAIL_ONLY_FINAL_DAY !== 'false',
     forceRun: process.env.FORCE_RUN === 'true',
     dryRunBeforeFinalSubmit: process.env.DRY_RUN_BEFORE_FINAL_SUBMIT === 'true',
+    allowDirectProxyFallback: process.env.ALLOW_DIRECT_PROXY_FALLBACK === 'true',
   };
 }
 
