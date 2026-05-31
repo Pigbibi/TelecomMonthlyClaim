@@ -7,7 +7,7 @@
 1. GitHub Actions 在北京时间每月 1-3 日 08:00 运行。
 2. Hosted runner 先 SSH 到 BWG，建立两个本地转发：短信 inbox 和家里出口代理。
 3. Playwright 以移动 Chrome 环境打开 189 活动页，并通过家里出口访问。
-4. 手机上的短信转发器 App 把 `10001` 短信投递到 OpenWrt 或家里电脑上的 SMS inbox。
+4. 手机上的短信转发器 App，或硬件短信转发器，把 `10001` 短信投递到 OpenWrt / 家里电脑 SMS inbox；也可选用 PushPlus 作为短信源。
 5. 脚本读取第一步登录验证码，根据 `TELECOM_TARGET_PACKAGE` 选中目标套餐。
 6. 通过二次确认滑块后读取第二步办理验证码。
 7. 校验手机号、产品名和方案编号后提交，避免误填其他业务验证码。
@@ -52,6 +52,33 @@ OPENWRT_HTTP_PROXY=
 
 本仓库默认不设置 `TELECOM_CONNECTIVITY_MODE=direct`，仍使用方案二的 `bwg` 模式。不要为了省事把未鉴权的短信收件箱或代理端口直接暴露到公网。
 
+### 兼容可选：PushPlus 短信源
+
+如果硬件短信转发器只能把短信发到 PushPlus，不能配置自定义 webhook，可以让脚本从 PushPlus 拉取最近消息，再复用现有的 `10001` 验证码解析逻辑。
+
+PushPlus 后台需要先做这些设置：
+
+1. 开启开放接口能力；
+2. 设置 `secretKey`，建议用随机长字符串；
+3. 安全 IP 白名单如果保持关闭，则 GitHub-hosted runner 可以直接调用；如果你开启白名单，就需要固定出口 IP，否则可能返回 `403`。
+
+GitHub 配置示例：
+
+```text
+# Variables
+SMS_INBOX_PROVIDER=pushplus
+PUSHPLUS_PAGE_SIZE=10
+PUSHPLUS_TITLE_KEYWORD=短信        # 可选；硬件推送标题固定时再填写
+
+# Secrets
+PUSHPLUS_TOKEN=你的 PushPlus 用户 token，不能用消息 token
+PUSHPLUS_SECRET_KEY=你的 PushPlus OpenAPI secretKey
+```
+
+PushPlus 模式不需要 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。如果 `TELECOM_CONNECTIVITY_MODE=bwg`，BWG 隧道仍可继续用于家里出口代理，只是不再检查本地 SMS inbox。
+
+注意：PushPlus OpenAPI 会先用用户 token 和 secretKey 换取短期 `accessKey`。脚本只会读取消息列表和消息详情，不会把验证码写入运行日志；但验证码会短暂停留在 PushPlus 平台，安全性低于直接投递到自己的 SMS inbox。
+
 ## 快速部署
 
 推荐先按方案二部署，整体顺序如下：
@@ -59,7 +86,7 @@ OPENWRT_HTTP_PROXY=
 1. Fork 或新建私有仓库，暂时不要公开。
 2. 准备一台 BWG/VPS，并确认 GitHub Actions 可以 SSH 登录。
 3. 在 OpenWrt 或家里电脑上部署 SMS inbox、家里出口代理和到 BWG 的反向隧道。
-4. 手机上的短信转发器 App 只转发 `10001` 短信到 OpenWrt、家里电脑或 BWG 公网 webhook。
+4. 手机 App 或硬件短信转发器只转发 `10001` 短信到 OpenWrt、家里电脑、BWG 公网 webhook；如果硬件只能推 PushPlus，可用 PushPlus 模式。
 5. 在 GitHub Secrets / Variables 填好配置。
 6. 先手动触发 `Monthly Beijing Telecom Claim` workflow，`dry_run=true` 跑到最终提交前。
 7. 确认产品名、方案编号、短信收件箱都正常后，再手动触发一次 `dry_run=false`。
@@ -127,7 +154,9 @@ git show origin/logs:latest.json
 | --- | --- |
 | `TELECOM_PHONE` | 办理手机号 |
 | `TELECOM_ENTRY_URL` | 189 活动入口 URL |
-| `SMS_INBOX_TOKEN` | 手机转发器、GitHub runner、SMS inbox 共享的 Bearer token |
+| `SMS_INBOX_TOKEN` | 手机转发器、GitHub runner、SMS inbox 共享的 Bearer token；PushPlus 模式不需要 |
+| `PUSHPLUS_TOKEN` | PushPlus 用户 token，不能用消息 token；仅 `SMS_INBOX_PROVIDER=pushplus` 时需要 |
+| `PUSHPLUS_SECRET_KEY` | PushPlus OpenAPI secretKey；仅 `SMS_INBOX_PROVIDER=pushplus` 时需要 |
 | `BWG_SSH_HOST` | BWG/VPS IP 或域名 |
 | `BWG_SSH_PRIVATE_KEY` | GitHub runner 登录 BWG 用的私钥 |
 
@@ -153,6 +182,9 @@ Variables：
 | `TELECOM_POST_SUCCESS_WAIT_MS` | `8000` | 办理成功后保留成功页多久再关闭浏览器。 |
 | `TELECOM_CONNECTIVITY_MODE` | `bwg` | 网络连接模式。默认 `bwg`；兼容可选 `direct`，但本仓库不设置该方式。 |
 | `ALLOW_DIRECT_PROXY_FALLBACK` | `true` | 家里代理不可用时是否允许 runner 直接访问活动页。 |
+| `SMS_INBOX_PROVIDER` | `http` | 短信来源。默认 `http` 使用现有 SMS inbox；可选 `pushplus` 从 PushPlus 拉取消息。 |
+| `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
+| `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
 
 内置 preset：
 

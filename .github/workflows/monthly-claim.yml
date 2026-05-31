@@ -32,9 +32,14 @@ jobs:
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
       TELECOM_CONNECTIVITY_MODE: ${{ vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
+      SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'http' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
       SMS_INBOX_TOKEN: ${{ secrets.SMS_INBOX_TOKEN }}
+      PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+      PUSHPLUS_SECRET_KEY: ${{ secrets.PUSHPLUS_SECRET_KEY }}
+      PUSHPLUS_TITLE_KEYWORD: ${{ vars.PUSHPLUS_TITLE_KEYWORD || '' }}
+      PUSHPLUS_PAGE_SIZE: ${{ vars.PUSHPLUS_PAGE_SIZE || '10' }}
       OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || 'http://127.0.0.1:13128' }}
       BWG_SSH_HOST: ${{ secrets.BWG_SSH_HOST }}
       BWG_SSH_USER: ${{ secrets.BWG_SSH_USER || 'root' }}
@@ -107,21 +112,28 @@ jobs:
         if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE == 'direct'
         run: |
           set -euo pipefail
-          : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
-          case "$SMS_INBOX_URL" in
-            http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
-              echo "Direct mode requires SMS_INBOX_URL reachable from the GitHub-hosted runner, not the default loopback URL."
-              exit 1
-              ;;
-          esac
-          case "$SMS_INBOX_HEALTH_URL" in
-            http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
-              echo "Direct mode requires SMS_INBOX_HEALTH_URL reachable from the GitHub-hosted runner, not the default loopback URL."
-              exit 1
-              ;;
-          esac
-          curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
-            -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
+          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-http}" | tr '[:upper:]' '[:lower:]')"
+          if [ "$sms_provider" = "pushplus" ]; then
+            : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
+            : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
+            echo "Direct mode will read SMS from PushPlus; skipping SMS inbox health check."
+          else
+            : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
+            case "$SMS_INBOX_URL" in
+              http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+                echo "Direct mode requires SMS_INBOX_URL reachable from the GitHub-hosted runner, not the default loopback URL."
+                exit 1
+                ;;
+            esac
+            case "$SMS_INBOX_HEALTH_URL" in
+              http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+                echo "Direct mode requires SMS_INBOX_HEALTH_URL reachable from the GitHub-hosted runner, not the default loopback URL."
+                exit 1
+                ;;
+            esac
+            curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
+              -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
+          fi
           if [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ]; then
             echo "Direct mode: clearing default loopback OPENWRT_HTTP_PROXY."
             echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
@@ -135,7 +147,13 @@ jobs:
           set -euo pipefail
           : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"
           : "${BWG_SSH_PRIVATE_KEY:?Missing BWG_SSH_PRIVATE_KEY secret}"
-          : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
+          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-http}" | tr '[:upper:]' '[:lower:]')"
+          if [ "$sms_provider" = "pushplus" ]; then
+            : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
+            : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
+          else
+            : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
+          fi
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "$BWG_SSH_PRIVATE_KEY" > ~/.ssh/bwg_key
@@ -163,6 +181,10 @@ jobs:
           }
 
           check_sms_inbox() {
+            if [ "$sms_provider" = "pushplus" ]; then
+              echo "Using PushPlus as SMS inbox provider; no local SMS inbox health check is required."
+              return 0
+            fi
             curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
               -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
           }

@@ -11,6 +11,7 @@ function withCleanTelecomEnv(fn) {
       || key === 'OPENWRT_HTTP_PROXY'
       || key === 'HTTPS_PROXY'
       || key === 'HTTP_PROXY'
+      || key.startsWith('PUSHPLUS_')
       || key === 'ALLOW_DIRECT_PROXY_FALLBACK'
     ) {
       delete process.env[key];
@@ -102,4 +103,23 @@ test('loads pacing delays from env', () => withCleanTelecomEnv(() => {
 
   assert.equal(config.actionDelayMs, 1200);
   assert.equal(config.postSuccessWaitMs, 15000);
+}));
+
+
+test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+  process.env.SMS_INBOX_PROVIDER = 'pushplus';
+  process.env.PUSHPLUS_TOKEN = 'token-1';
+  process.env.PUSHPLUS_SECRET_KEY = 'secret-1';
+  process.env.PUSHPLUS_PAGE_SIZE = '20';
+  process.env.PUSHPLUS_TITLE_KEYWORD = '短信转发';
+
+  const config = loadConfig();
+
+  assert.equal(config.smsInboxProvider, 'pushplus');
+  assert.equal(config.pushPlusToken, 'token-1');
+  assert.equal(config.pushPlusSecretKey, 'secret-1');
+  assert.equal(config.pushPlusPageSize, 20);
+  assert.equal(config.pushPlusTitleKeyword, '短信转发');
 }));
