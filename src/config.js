@@ -51,6 +51,7 @@ function loadConfig() {
     pushPlusBaseUrl: optionalEnv('PUSHPLUS_BASE_URL', 'https://www.pushplus.plus'),
     pushPlusPageSize: numberEnv('PUSHPLUS_PAGE_SIZE', 10),
     pushPlusTitleKeyword: process.env.PUSHPLUS_TITLE_KEYWORD || '',
+    pushPlusDebug: process.env.PUSHPLUS_DEBUG === 'true',
     sendCodeAttempts: numberEnv('SEND_CODE_ATTEMPTS', 3),
     actionDelayMs: numberEnv('TELECOM_ACTION_DELAY_MS', 800),
     postSuccessWaitMs: numberEnv('TELECOM_POST_SUCCESS_WAIT_MS', 8000),

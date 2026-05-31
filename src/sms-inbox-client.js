@@ -90,6 +90,17 @@ function pushPlusUrl(baseUrl, pathname) {
   return new URL(pathname, base.endsWith('/') ? base : `${base}/`);
 }
 
+function summarizePushPlusDetail(text) {
+  const normalized = String(text || '').replace(/\s+/g, '');
+  return {
+    detailLength: String(text || '').length,
+    hasTelecomSender: normalized.includes('10001'),
+    hasCodeHint: /验证码[:：]?\d{4,8}/.test(normalized),
+    hasBeijingTelecomLoginText: normalized.includes('感谢使用北京电信掌上营业厅'),
+    hasConfirmHint: normalized.includes('办理提醒'),
+  };
+}
+
 class SmsInboxClient {
   constructor(config) {
     this.config = config;
@@ -172,13 +183,31 @@ class SmsInboxClient {
     if (data?.code !== 200) throw new Error(`PushPlus message list failed: ${data?.msg || 'unknown error'}`);
     const titleKeyword = this.config.pushPlusTitleKeyword || '';
     const list = data?.data?.list || [];
+    if (this.config.pushPlusDebug) {
+      console.log(`PushPlus message list fetched ${JSON.stringify({ count: list.length, titleKeyword })}`);
+    }
     const messages = [];
     for (const item of list) {
       if (!item?.shortCode) continue;
       if (titleKeyword && !String(item.title || '').includes(titleKeyword)) continue;
       const receivedAt = parsePushPlusUpdateTime(item.updateTime);
+      if (this.config.pushPlusDebug) {
+        console.log(`PushPlus message candidate ${JSON.stringify({
+          shortCode: item.shortCode,
+          title: item.title || '',
+          updateTime: item.updateTime || '',
+          receivedAt,
+          ignoredBySince: Boolean(since && receivedAt && receivedAt < since),
+        })}`);
+      }
       if (since && receivedAt && receivedAt < since) continue;
       const detail = await this.fetchPushPlusDetail(item.shortCode);
+      if (this.config.pushPlusDebug) {
+        console.log(`PushPlus message detail summary ${JSON.stringify({
+          shortCode: item.shortCode,
+          ...summarizePushPlusDetail(detail),
+        })}`);
+      }
       messages.push({
         id: item.shortCode,
         sender: '',
@@ -231,4 +260,5 @@ module.exports = {
   sleep,
   htmlToText,
   parsePushPlusUpdateTime,
+  summarizePushPlusDetail,
 };

@@ -69,6 +69,7 @@ GitHub 配置示例：
 SMS_INBOX_PROVIDER=pushplus
 PUSHPLUS_PAGE_SIZE=10
 PUSHPLUS_TITLE_KEYWORD=短信        # 可选；硬件推送标题固定时再填写
+PUSHPLUS_DEBUG=false               # 临时排障时可设 true；不会打印验证码正文
 
 # Secrets
 PUSHPLUS_TOKEN=你的 PushPlus 用户 token，不能用消息 token
@@ -185,6 +186,7 @@ Variables：
 | `SMS_INBOX_PROVIDER` | `http` | 短信来源。默认 `http` 使用现有 SMS inbox；可选 `pushplus` 从 PushPlus 拉取消息。 |
 | `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
 | `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
+| `PUSHPLUS_DEBUG` | `false` | PushPlus 模式临时诊断日志；只打印标题、时间、关键字命中情况，不打印短信正文或验证码。 |
 
 内置 preset：
 

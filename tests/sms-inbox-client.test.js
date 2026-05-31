@@ -5,6 +5,7 @@ const {
   normalizeMessage,
   htmlToText,
   parsePushPlusUpdateTime,
+  summarizePushPlusDetail,
 } = require('../src/sms-inbox-client');
 
 test('unwraps JSON payload from SMS forwarding apps', () => {
@@ -27,6 +28,14 @@ test('converts PushPlus html message details to searchable text', () => {
 
   assert.equal(text.includes('验证码：123456'), true);
   assert.equal(text.includes('ignore'), false);
+});
+
+test('summarizes PushPlus details without exposing the code', () => {
+  const summary = summarizePushPlusDetail('验证码：406560。尊敬的用户，感谢使用北京电信掌上营业厅。发件号码: 10001');
+
+  assert.equal(summary.hasTelecomSender, true);
+  assert.equal(summary.hasCodeHint, true);
+  assert.equal(summary.hasBeijingTelecomLoginText, true);
 });
 
 test('parses PushPlus updateTime as China local time', () => {
