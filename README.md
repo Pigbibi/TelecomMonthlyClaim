@@ -70,6 +70,7 @@ SMS_INBOX_PROVIDER=pushplus
 PUSHPLUS_PAGE_SIZE=10
 PUSHPLUS_TITLE_KEYWORD=短信        # 可选；硬件推送标题固定时再填写
 PUSHPLUS_DEBUG=false               # 临时排障时可设 true；不会打印验证码正文
+SEND_CODE_ATTEMPTS=3               # 临时排障时可设 1，减少重复发码
 
 # Secrets
 PUSHPLUS_TOKEN=你的 PushPlus 用户 token，不能用消息 token
@@ -187,6 +188,9 @@ Variables：
 | `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
 | `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
 | `PUSHPLUS_DEBUG` | `false` | PushPlus 模式临时诊断日志；只打印标题、时间、关键字命中情况，不打印短信正文或验证码。 |
+| `SEND_CODE_ATTEMPTS` | `3` | 验证码发送重试次数；临时排障时可设为 `1`，减少重复发码。 |
+| `SMS_TIMEOUT_MS` | `90000` | 每次等待短信的超时时间。 |
+| `SMS_POLL_MS` | `5000` | 短信轮询间隔。 |
 
 内置 preset：
 

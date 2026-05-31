@@ -40,6 +40,10 @@ jobs:
       PUSHPLUS_SECRET_KEY: ${{ secrets.PUSHPLUS_SECRET_KEY }}
       PUSHPLUS_TITLE_KEYWORD: ${{ vars.PUSHPLUS_TITLE_KEYWORD || '' }}
       PUSHPLUS_PAGE_SIZE: ${{ vars.PUSHPLUS_PAGE_SIZE || '10' }}
+      PUSHPLUS_DEBUG: ${{ vars.PUSHPLUS_DEBUG || 'false' }}
+      SEND_CODE_ATTEMPTS: ${{ vars.SEND_CODE_ATTEMPTS || '' }}
+      SMS_TIMEOUT_MS: ${{ vars.SMS_TIMEOUT_MS || '' }}
+      SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
       OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || 'http://127.0.0.1:13128' }}
       BWG_SSH_HOST: ${{ secrets.BWG_SSH_HOST }}
       BWG_SSH_USER: ${{ secrets.BWG_SSH_USER || 'root' }}
