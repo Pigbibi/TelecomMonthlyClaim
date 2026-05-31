@@ -48,6 +48,11 @@ function isProxyPathError(err) {
   ].some(pattern => pattern.test(text));
 }
 
+async function actionDelay(config) {
+  const delayMs = Number(config?.actionDelayMs || 0);
+  if (delayMs > 0) await sleep(delayMs);
+}
+
 async function applyAndroidEmulation(context, page) {
   const client = await context.newCDPSession(page);
   await client.send('Network.enable').catch(() => {});
@@ -169,8 +174,9 @@ async function getPageSummary(page) {
 
 async function sendLoginCode(page, config) {
   await page.locator('#phoneNumber').waitFor({ state: 'visible' });
+  await actionDelay(config);
   await page.locator('#phoneNumber').fill(config.phone);
-  await sleep(1000);
+  await actionDelay(config);
   await page.locator('.content_send_unlog').click({ force: true });
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
@@ -178,13 +184,27 @@ async function sendLoginCode(page, config) {
   log('Login SMS send page summary', { closedDialogs, summary });
 }
 
-async function submitLoginCode(page, code) {
+async function submitLoginCode(page, code, config) {
+  await closeDialogs(page);
+  await sleep(500);
+  await actionDelay(config);
   await page.locator('#code').fill(code);
-  await sleep(1000);
+  await actionDelay(config);
+  await closeDialogs(page);
+  await sleep(300);
   await page.locator('.know-box.button').click({ force: true });
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await sleep(7000);
-  const text = await visibleText(page);
+  let text = await visibleText(page);
+  if (/验证码已下发|请注意查收/.test(text) && !/短信输入错误|验证码.*错误|验证码.*过期/.test(text)) {
+    await closeDialogs(page);
+    await sleep(500);
+    await actionDelay(config);
+    await page.locator('.know-box.button').click({ force: true });
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    await sleep(7000);
+    text = await visibleText(page);
+  }
   if (/请选择档位|去办理/.test(text) && page.url().includes('preDepositCfg_list')) return true;
   if (/短信输入错误|验证码.*错误|验证码.*过期/.test(text)) return false;
   return page.url().includes('preDepositCfg_list');
@@ -203,7 +223,7 @@ async function loginWithRetry(page, smsInbox, config) {
       log('Login SMS not received before timeout', summary);
       continue;
     }
-    const ok = await submitLoginCode(page, sms.code);
+    const ok = await submitLoginCode(page, sms.code, config);
     if (ok) return;
     const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
     log('Login code rejected, retrying', summary);
@@ -217,11 +237,12 @@ async function loginWithRetry(page, smsInbox, config) {
 
 async function choosePackage(page, config) {
   await page.locator('li').filter({ hasText: config.productName }).waitFor({ state: 'visible' });
+  await actionDelay(config);
   await page.locator('li').filter({ hasText: config.productName }).click({ force: true });
   await sleep(1500);
   const checked = await page.locator('li.checked').innerText().catch(() => '');
   if (!checked.includes(config.productName)) throw new Error(`Target package not selected: ${checked}`);
-  await sleep(1500);
+  await actionDelay(config);
   await page.locator('#conduct').click({ force: true });
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await sleep(8000);
@@ -314,20 +335,22 @@ async function solvePuzzle(page) {
   throw new Error('Slider verification failed');
 }
 
-async function openSecondPopup(page) {
+async function openSecondPopup(page, config) {
   const activeName = await page.locator('#activeName').innerText().catch(() => '');
   if (!activeName) throw new Error('Not on confirm page');
+  await actionDelay(config);
   await page.locator('#payConfirm').click({ force: true });
   await page.locator('#secondPopCombo').waitFor({ state: 'visible' });
   await sleep(2500);
 }
 
 async function confirmWithRetry(page, smsInbox, config) {
-  await openSecondPopup(page);
+  await openSecondPopup(page, config);
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending confirmation SMS attempt ${attempt}/${config.sendCodeAttempts}`);
     const since = Date.now() - 10000;
     await closeDialogs(page);
+    await actionDelay(config);
     await page.locator('#SecondConfirmationSms').click({ force: true });
     await solvePuzzle(page);
     await closeDialogs(page);
@@ -341,39 +364,45 @@ async function confirmWithRetry(page, smsInbox, config) {
       log('Dry run reached final submit step; confirmation SMS was received, final submit was not clicked.', summary);
       return 'dry-run';
     }
+    await actionDelay(config);
     await page.locator('#smsCodeProtocol').fill(sms.code);
-    await sleep(1000);
+    await actionDelay(config);
     await page.locator('#secondConfirmation').click({ force: true });
     await sleep(12000);
-    if (await waitForSuccess(page, 20000)) return;
+    if (await waitForSuccess(page, 20000, config)) return;
     const text = await visibleText(page);
     if (/验证码.*错误|验证码.*过期|随机短信输入错误/.test(text)) {
       log('Confirmation code rejected, retrying');
       continue;
     }
-    if (await clickFinalAgreementIfPresent(page)) {
-      if (await waitForSuccess(page, 20000)) return;
+    if (await clickFinalAgreementIfPresent(page, config)) {
+      if (await waitForSuccess(page, 20000, config)) return;
     }
   }
   throw new Error('Confirmation SMS verification failed after retries');
 }
 
-async function clickFinalAgreementIfPresent(page) {
+async function clickFinalAgreementIfPresent(page, config) {
   const visible = await page.locator('#confirm2').evaluate(e => {
     const r = e.getBoundingClientRect();
     return getComputedStyle(e).display !== 'none' && r.width > 0 && r.height > 0;
   }).catch(() => false);
   if (!visible) return false;
+  await actionDelay(config);
   await page.locator('#confirm2').click({ force: true });
   await sleep(8000);
   return true;
 }
 
-async function waitForSuccess(page, timeoutMs) {
+async function waitForSuccess(page, timeoutMs, config) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const body = await visibleText(page);
-    if (/已办理成功|支付成功|业务名称:.*5GB国内通用流量/.test(body) || page.url().includes('preDeposit_result')) return true;
+    if (
+      /已办理成功|支付成功/.test(body)
+      || (config?.productName && body.includes('业务名称') && body.includes(config.productName))
+      || page.url().includes('preDeposit_result')
+    ) return true;
     await sleep(2000);
   }
   return false;
@@ -391,7 +420,8 @@ function alreadySucceeded(config) {
 
 function writeState(status, details) {
   ensureStateDir();
-  fs.writeFileSync(stateFile(), `${JSON.stringify({ status, month: stateMonth(), beijing: beijingParts(), ...details }, null, 2)}\n`);
+  const payload = { status, month: stateMonth(), beijing: beijingParts(), ...details };
+  fs.writeFileSync(stateFile(), `${mask(JSON.stringify(payload, null, 2))}\n`);
 }
 
 async function runClaim(config) {
@@ -407,10 +437,18 @@ async function runClaim(config) {
     await choosePackage(page, config);
     const result = await confirmWithRetry(page, smsInbox, config);
     if (result === 'dry-run') return;
-    if (!await waitForSuccess(page, 5000)) throw new Error('No success page after final submit');
+    if (!await waitForSuccess(page, 5000, config)) throw new Error('No success page after final submit');
     const summary = await getPageSummary(page);
     log('Claim succeeded', summary);
-    writeState('success', { summary });
+    writeState('success', {
+      targetPackage: config.targetPackage,
+      productName: config.productName,
+      expectedPlanId: config.expectedPlanId,
+    });
+    if (config.postSuccessWaitMs > 0) {
+      log('Keeping success page open before closing browser', { waitMs: config.postSuccessWaitMs });
+      await sleep(config.postSuccessWaitMs);
+    }
   } finally {
     await browser.close().catch(() => {});
   }

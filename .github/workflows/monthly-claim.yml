@@ -26,9 +26,12 @@ jobs:
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
       TELECOM_ENTRY_URL: ${{ secrets.TELECOM_ENTRY_URL }}
-      TELECOM_TARGET_PACKAGE: ${{ vars.TELECOM_TARGET_PACKAGE || '5g' }}
-      TELECOM_PRODUCT_NAME: ${{ vars.TELECOM_PRODUCT_NAME || '互联网卡网龄享5GB国内通用流量' }}
-      TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '24BJ100433' }}
+      TELECOM_TARGET_PACKAGE: ${{ vars.TELECOM_TARGET_PACKAGE || 'voice200' }}
+      TELECOM_PRODUCT_NAME: ${{ vars.TELECOM_PRODUCT_NAME || '' }}
+      TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}
+      TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
+      TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
+      TELECOM_CONNECTIVITY_MODE: ${{ vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
       SMS_INBOX_TOKEN: ${{ secrets.SMS_INBOX_TOKEN }}
@@ -100,8 +103,34 @@ jobs:
       - if: steps.claim_plan.outputs.should_run == 'true'
         run: npx playwright install --with-deps chromium
 
+      - name: Validate direct connectivity
+        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE == 'direct'
+        run: |
+          set -euo pipefail
+          : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
+          case "$SMS_INBOX_URL" in
+            http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+              echo "Direct mode requires SMS_INBOX_URL reachable from the GitHub-hosted runner, not the default loopback URL."
+              exit 1
+              ;;
+          esac
+          case "$SMS_INBOX_HEALTH_URL" in
+            http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+              echo "Direct mode requires SMS_INBOX_HEALTH_URL reachable from the GitHub-hosted runner, not the default loopback URL."
+              exit 1
+              ;;
+          esac
+          curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
+            -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
+          if [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ]; then
+            echo "Direct mode: clearing default loopback OPENWRT_HTTP_PROXY."
+            echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
+          elif [ -n "${OPENWRT_HTTP_PROXY:-}" ]; then
+            curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
+          fi
+
       - name: Open SSH tunnel to home proxy and SMS inbox via BWG
-        if: steps.claim_plan.outputs.should_run == 'true'
+        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct'
         run: |
           set -euo pipefail
           : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"

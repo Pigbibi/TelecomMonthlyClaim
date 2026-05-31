@@ -1,33 +1,125 @@
 # TelecomMonthlyClaim
 
-每月自动办理北京电信“互联网卡网龄享 5GB 国内通用流量”。
+每月自动办理北京电信网龄权益，支持通过 GitHub Variables 在 5GB 国内通用流量和 200 分钟国内语音之间切换。
 
 默认流程：
 
 1. GitHub Actions 在北京时间每月 1-3 日 08:00 运行。
 2. Hosted runner 先 SSH 到 BWG，建立两个本地转发：短信 inbox 和家里出口代理。
-3. Playwright 以 Android Chrome 移动环境打开 189 活动页，并通过家里出口访问。
-4. 手机短信转发器把 `10001` 短信投递到 OpenWrt 或 Mac 上的 SMS inbox。
-5. 脚本读取第一步登录验证码，选中 5GB 套餐。
+3. Playwright 以移动 Chrome 环境打开 189 活动页，并通过家里出口访问。
+4. 手机上的短信转发器 App 把 `10001` 短信投递到 OpenWrt 或家里电脑上的 SMS inbox。
+5. 脚本读取第一步登录验证码，根据 `TELECOM_TARGET_PACKAGE` 选中目标套餐。
 6. 通过二次确认滑块后读取第二步办理验证码。
-7. 校验手机号、产品名和方案编号后提交。
+7. 校验手机号、产品名和方案编号后提交，避免误填其他业务验证码。
 8. 成功写入 `state/YYYY-MM.json`，后续同月自动跳过。
 9. 1/2 日失败不报警，3 日仍失败时 workflow 失败并创建 GitHub issue。
 
 ## 内网穿透架构
 
-现在默认用“方案二”：GitHub hosted runner + BWG 跳板 + 本机反向 SSH 隧道。
+本仓库支持两种部署方式：
+
+| 方案 | 适用场景 | runner 如何访问短信和家里出口 | 说明 |
+| --- | --- | --- | --- |
+| 方案一：直连模式 | 本机调试，或你已经有 WireGuard / 内网穿透 / 公网 HTTPS，把家里的 SMS inbox 和代理安全暴露给 runner | `SMS_INBOX_URL`、`SMS_INBOX_HEALTH_URL`、`OPENWRT_HTTP_PROXY` 直接填可访问地址 | 配置少，但需要你自己保证网络和鉴权安全。不建议把家里代理直接暴露到公网。 |
+| 方案二：BWG 跳板反向隧道 | 推荐的无人值守部署 | 家里 OpenWrt 或家里电脑主动 SSH 到 BWG 建反向端口；GitHub hosted runner 再 SSH 到 BWG 建本地转发 | GitHub 不需要直连家里 IP；BWG 上的 SMS/代理上游默认只绑定 `127.0.0.1`。 |
+
+现在默认用方案二：GitHub hosted runner + BWG 跳板 + 家里 OpenWrt / 家里电脑反向 SSH 隧道。
 
 ```text
-小米短信转发器 -> OpenWrt:80/cgi-bin/telecom-sms 或 Mac:8787/sms
-GitHub runner -> SSH -L -> BWG:127.0.0.1:18787 -> SSH -R -> OpenWrt:80 或 Mac:8787
-GitHub runner -> SSH -L -> BWG:127.0.0.1:13128 -> SSH -R -> OpenWrt 代理端口 或 Mac:13128
+短信转发器 App -> OpenWrt:80/cgi-bin/telecom-sms 或 家里电脑:8787/sms
+GitHub runner -> SSH -L -> BWG:127.0.0.1:18787 -> SSH -R -> OpenWrt:80 或 家里电脑:8787
+GitHub runner -> SSH -L -> BWG:127.0.0.1:13128 -> SSH -R -> OpenWrt 代理端口 或 家里电脑:13128
 OpenWrt/家里网络 -> 189 页面
 ```
 
 这样 GitHub 不需要直连家里 IP，也不用把代理暴露到公网；BWG 上的两个端口只绑定 `127.0.0.1`，必须 SSH 登录后才能访问。
 
-## GitHub Secrets / Variables
+### 兼容可选：direct 模式
+
+如果你已经有安全的公网 HTTPS、内网穿透、专线或其他方式，让 GitHub-hosted runner 能直接访问 SMS inbox 和可选的家里出口代理，可以把 GitHub Variables / Secrets 设置为：
+
+```text
+# Variable
+TELECOM_CONNECTIVITY_MODE=direct
+
+# Secrets
+SMS_INBOX_URL=https://your-public-inbox.example.com/messages
+SMS_INBOX_HEALTH_URL=https://your-public-inbox.example.com/health
+OPENWRT_HTTP_PROXY=
+```
+
+`direct` 模式会跳过 BWG SSH 隧道步骤，直接使用你提供的 `SMS_INBOX_URL` 和 `SMS_INBOX_HEALTH_URL`。如果你还提供了 `OPENWRT_HTTP_PROXY`，workflow 会先检查该代理是否能访问 189 页面；如果不提供，就让 runner 直接访问活动页。
+
+本仓库默认不设置 `TELECOM_CONNECTIVITY_MODE=direct`，仍使用方案二的 `bwg` 模式。不要为了省事把未鉴权的短信收件箱或代理端口直接暴露到公网。
+
+## 快速部署
+
+推荐先按方案二部署，整体顺序如下：
+
+1. Fork 或新建私有仓库，暂时不要公开。
+2. 准备一台 BWG/VPS，并确认 GitHub Actions 可以 SSH 登录。
+3. 在 OpenWrt 或家里电脑上部署 SMS inbox、家里出口代理和到 BWG 的反向隧道。
+4. 手机上的短信转发器 App 只转发 `10001` 短信到 OpenWrt、家里电脑或 BWG 公网 webhook。
+5. 在 GitHub Secrets / Variables 填好配置。
+6. 先手动触发 `Monthly Beijing Telecom Claim` workflow，`dry_run=true` 跑到最终提交前。
+7. 确认产品名、方案编号、短信收件箱都正常后，再手动触发一次 `dry_run=false`。
+8. 成功后检查 `state/YYYY-MM.json` 和 `logs` 分支。
+
+最小部署清单：
+
+```bash
+npm ci
+cp .env.example .env.local
+chmod 600 .env.local
+
+# 二选一：
+./scripts/install-openwrt-router.sh        # 推荐：OpenWrt 常驻
+./scripts/install-local-services-macos.sh  # 备选：家里电脑常驻服务脚本
+
+# 如果手机需要走公网 webhook 投递短信：
+./scripts/install-bwg-public-webhook.sh
+```
+
+首次验证建议：
+
+```bash
+npm run lint
+npm test
+
+# 本机 dry-run，只走到最终提交前
+FORCE_RUN=true DRY_RUN_BEFORE_FINAL_SUBMIT=true npm run claim
+```
+
+本机命令不会自动读取 `.env.local`；运行前需要先把里面的值导出为环境变量。`TELECOM_ENTRY_URL` 这类 URL 如果包含 `&`，请加引号，避免 shell 截断。
+
+GitHub Actions 手动运行时，建议第一轮设置：
+
+```text
+force_run=true
+dry_run=true
+```
+
+确认没问题后第二轮再设置：
+
+```text
+force_run=true
+dry_run=false
+```
+
+## 运行日志
+
+workflow 每次运行都会把脱敏后的运行元数据写到 `logs` 分支：
+
+```bash
+git fetch origin logs
+git show origin/logs:latest.json
+```
+
+日志只记录仓库、workflow、run id、状态、是否 dry-run、目标套餐等信息；不会记录手机号、短信验证码、token、私钥或电信页面正文。
+
+如果是本机临时跑通真实办理，也可以在 `logs` 分支追加一条 `manual-local-claim` 日志，用于标记这次月份已经通过本机验证成功。`state/YYYY-MM.json` 只记录月份、目标套餐、产品名和方案编号，不保存订单号或页面 URL。
+
+## GitHub Secrets / Variables 配置
 
 必填 secrets：
 
@@ -52,18 +144,52 @@ OpenWrt/家里网络 -> 189 页面
 
 Variables：
 
-| Variable | 默认值 |
-| --- | --- |
-| `TELECOM_TARGET_PACKAGE` | `5g` |
-| `TELECOM_PRODUCT_NAME` | `互联网卡网龄享5GB国内通用流量` |
-| `TELECOM_EXPECTED_PLAN_ID` | `24BJ100433` |
-| `ALLOW_DIRECT_PROXY_FALLBACK` | `true` |
+| Variable | 默认值 | 说明 |
+| --- | --- | --- |
+| `TELECOM_TARGET_PACKAGE` | `voice200` | 目标套餐 preset。可选 `voice200` 或 `5g`。 |
+| `TELECOM_PRODUCT_NAME` | 空 | 可选覆盖项。为空时由 `TELECOM_TARGET_PACKAGE` 对应 preset 自动填充。 |
+| `TELECOM_EXPECTED_PLAN_ID` | 空 | 可选覆盖项。为空时由 `TELECOM_TARGET_PACKAGE` 对应 preset 自动填充。 |
+| `TELECOM_ACTION_DELAY_MS` | `800` | 关键填表、点击动作之间的固定等待，降低页面状态未稳定导致的误点。 |
+| `TELECOM_POST_SUCCESS_WAIT_MS` | `8000` | 办理成功后保留成功页多久再关闭浏览器。 |
+| `TELECOM_CONNECTIVITY_MODE` | `bwg` | 网络连接模式。默认 `bwg`；兼容可选 `direct`，但本仓库不设置该方式。 |
+| `ALLOW_DIRECT_PROXY_FALLBACK` | `true` | 家里代理不可用时是否允许 runner 直接访问活动页。 |
+
+内置 preset：
+
+| `TELECOM_TARGET_PACKAGE` | 产品名 | 方案编号 |
+| --- | --- | --- |
+| `voice200` | `互联网卡网龄享200分钟国内语音` | `24BJ102053` |
+| `5g` | `互联网卡网龄享5GB国内通用流量` | `24BJ100433` |
+
+常用选择：
+
+```text
+# 领取 200 分钟国内语音
+TELECOM_TARGET_PACKAGE=voice200
+TELECOM_PRODUCT_NAME=
+TELECOM_EXPECTED_PLAN_ID=
+
+# 领取 5GB 国内通用流量
+TELECOM_TARGET_PACKAGE=5g
+TELECOM_PRODUCT_NAME=
+TELECOM_EXPECTED_PLAN_ID=
+```
+
+如果活动页或短信文案变了，可以不改代码，直接在 GitHub Variables 里覆盖。使用 `custom` 时必须填写 `TELECOM_PRODUCT_NAME`，`TELECOM_EXPECTED_PLAN_ID` 建议填写：
+
+```text
+TELECOM_TARGET_PACKAGE=custom
+TELECOM_PRODUCT_NAME=短信和确认页里出现的完整产品名
+TELECOM_EXPECTED_PLAN_ID=短信里的方案编号
+```
+
+脚本会用产品名选中页面套餐，并在二次确认短信里校验手机号、产品名和方案编号。`TELECOM_ACTION_DELAY_MS` 和 `TELECOM_POST_SUCCESS_WAIT_MS` 只是稳定性等待，不用于绕过验证码或风控。
 
 不要把私钥、手机号、短信 token 写进仓库文件。
 
-## OpenWrt 路由器常驻服务
+## OpenWrt 路由器收件箱与常驻服务
 
-如果路由器 SSH 可用，推荐把常驻端放到 OpenWrt 上；这样 MacBook 休眠也不影响每月任务。
+如果路由器 SSH 可用，推荐把短信收件箱和反向隧道放到 OpenWrt 上；这样家里电脑关机或休眠也不影响每月任务。
 
 先在 `.env.local` 填好这些值：
 
@@ -83,7 +209,7 @@ SMS_INBOX_TOKEN=change-me
 ./scripts/install-openwrt-router.sh
 ```
 
-脚本会做这些事：
+安装脚本会做这些事：
 
 - 生成一把专用 `telecom_openwrt_bwg` key，并加入 BWG `authorized_keys`；
 - 在 OpenWrt 安装 CGI 短信 inbox：
@@ -104,7 +230,7 @@ ALLOW_DIRECT_PROXY_FALLBACK=true
 
 如果路由器 tinyproxy 配了 BasicAuth，`OPENWRT_HTTP_PROXY` 需要写成 `http://user:password@127.0.0.1:13128`，脚本会自动拆出代理用户名密码给 Playwright。
 
-短信转发器如果只在家里 Wi-Fi 使用，目标可以是：
+短信转发器 App 如果只在家里 Wi-Fi 使用，目标可以是：
 
 ```text
 POST http://192.168.5.1/cgi-bin/telecom-sms?token=<SMS_INBOX_TOKEN>
@@ -113,13 +239,25 @@ POST http://192.168.5.1/cgi-bin/telecom-sms?token=<SMS_INBOX_TOKEN>
 如果手机不一定连家里 Wi-Fi，改用 BWG 公网入口：
 
 ```text
-POST http://67.209.184.240:18789/telecom-sms?token=<SMS_INBOX_TOKEN>
+POST http://<BWG_PUBLIC_IP>:18789/telecom-sms?token=<SMS_INBOX_TOKEN>
 ```
 
-BWG 公网入口由 `scripts/install-bwg-public-webhook.sh` 安装，systemd 服务名是 `telecom-public-webhook`。它只把 `/telecom-sms`、`/telecom-messages`、`/telecom-sms-health` 转发到 OpenWrt 反向隧道，不暴露路由器代理端口。
+BWG 公网入口由 `scripts/install-bwg-public-webhook.sh` 安装，systemd 服务名是 `telecom-public-webhook`。它只把下面三个路径转发到反向隧道，不暴露路由器代理端口：
 
-## MacBook 常驻服务
+| 公网路径 | OpenWrt 上游路径 | 说明 |
+| --- | --- | --- |
+| `/telecom-sms` | `/cgi-bin/telecom-sms` | 接收短信转发器 POST |
+| `/telecom-messages` | `/cgi-bin/telecom-messages` | GitHub runner 查询短信 |
+| `/telecom-sms-health` | `/cgi-bin/telecom-sms-health` | 健康检查 |
 
+验证命令：
+
+```bash
+curl "http://<BWG_PUBLIC_IP>:18789/telecom-sms-health?token=<SMS_INBOX_TOKEN>"
+curl "http://<BWG_PUBLIC_IP>:18789/telecom-messages?token=<SMS_INBOX_TOKEN>&sender=10001"
+```
+
+## 家里电脑收件箱与常驻服务
 
 先准备 `.env.local`，至少包含：
 
@@ -129,12 +267,14 @@ cp .env.example .env.local
 chmod 600 .env.local
 ```
 
-安装并启动 launchd 服务：
+安装并启动本机常驻服务：
 
 ```bash
 npm ci
 ./scripts/install-local-services-macos.sh
 ```
+
+这个脚本用于支持 launchd 的家里电脑环境；如果你的家里电脑不是这类环境，可以直接参考 `scripts/run-local-service.sh` 自行接入 systemd、supervisor 或其他常驻方式。
 
 会启动三个用户级服务：
 
@@ -157,12 +297,22 @@ curl -H "Authorization: Bearer $SMS_INBOX_TOKEN" http://127.0.0.1:8787/health
 curl -I --proxy http://127.0.0.1:13128 https://wapbj.189.cn/
 ```
 
-## 小米 14T 短信转发
+本机收件箱支持两组路径，方便和 OpenWrt/BWG webhook 共用配置：
 
-如果使用 MacBook 模式，把 `10001` 短信转发到家里 Mac：
+| 作用 | 标准路径 | 兼容路径 |
+| --- | --- | --- |
+| 接收短信 | `POST /sms` | `POST /cgi-bin/telecom-sms`、`POST /telecom-sms` |
+| 查询短信 | `GET /messages` | `GET /cgi-bin/telecom-messages`、`GET /telecom-messages` |
+| 健康检查 | `GET /health` | `GET /cgi-bin/telecom-sms-health`、`GET /telecom-sms-health` |
+
+## 手机短信转发器 App 配置
+
+手机端使用支持 HTTP POST 的短信转发 App。本文默认使用的 App 名称写作“短信转发器 / SmsForwarder”；如果你使用其他同类 App，只要能把短信正文、发送方和接收时间以 JSON POST 到 webhook，也可以复用同一套接口。
+
+如果使用家里电脑模式，把 `10001` 短信转发到家里电脑：
 
 ```text
-POST http://<Mac-LAN-IP>:8787/sms
+POST http://<HOME_COMPUTER_LAN_IP>:8787/sms
 Authorization: Bearer <SMS_INBOX_TOKEN>
 Content-Type: application/json
 
@@ -176,10 +326,10 @@ Content-Type: application/json
 如果 App 不能设置 HTTP header，也可以把 token 放 query：
 
 ```text
-POST http://<Mac-LAN-IP>:8787/sms?token=<SMS_INBOX_TOKEN>
+POST http://<HOME_COMPUTER_LAN_IP>:8787/sms?token=<SMS_INBOX_TOKEN>
 ```
 
-小米/HyperOS 需要给短信转发器：
+手机系统需要给短信转发器 App：
 
 - 读取短信、接收短信、通知权限；
 - 自启动允许；
@@ -202,6 +352,9 @@ npm test
 
 TELECOM_PHONE=18500000000 \
 TELECOM_ENTRY_URL='https://wapbj.189.cn/...' \
+TELECOM_TARGET_PACKAGE=voice200 \
+TELECOM_ACTION_DELAY_MS=800 \
+TELECOM_POST_SUCCESS_WAIT_MS=8000 \
 SMS_INBOX_URL='http://127.0.0.1:8787/messages' \
 SMS_INBOX_TOKEN='token' \
 HEADLESS=false \
@@ -234,7 +387,7 @@ TELECOM_LOGIN_CODE=123456 TELECOM_CONFIRM_CODE=654321 npm run claim
 第二步：
 
 ```text
-【办理提醒】尊敬的客户，您的验证码是：654321，号码...办理互联网卡网龄享5GB国内通用流量（方案编号：24BJ100433）...
+【办理提醒】尊敬的客户，您的验证码是：654321，号码...办理互联网卡网龄享200分钟国内语音（方案编号：24BJ102053）...
 ```
 
-第二步会额外校验手机号、产品名和方案编号，避免误填其他验证码。
+第二步会额外校验手机号、产品名和方案编号。产品名和方案编号来自 preset，或来自 GitHub Variables 覆盖值。

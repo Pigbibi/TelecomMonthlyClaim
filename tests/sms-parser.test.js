@@ -9,14 +9,21 @@ test('parses first Beijing Telecom login code', () => {
 });
 
 test('parses second confirmation code with phone and product checks', () => {
-  const text = '【办理提醒】尊敬的客户，您的验证码是：654321，号码18500000000于2026年05月02日在中国电信北京公司wap电子渠道办理互联网卡网龄享5GB国内通用流量（方案编号：24BJ100433），立即生效，当月有效';
+  const text = '【办理提醒】尊敬的客户，您的验证码是：654321，号码18500000000于2026年05月02日在中国电信北京公司wap电子渠道办理互联网卡网龄享200分钟国内语音（方案编号：24BJ102053），立即生效，当月有效';
   assert.equal(parseTelecomSms({ sender: '10001', text }, {
-    stage: 'confirm', expectedPhone: '18500000000', product: '互联网卡网龄享5GB国内通用流量', planId: '24BJ100433',
+    stage: 'confirm', expectedPhone: '18500000000', product: '互联网卡网龄享200分钟国内语音', planId: '24BJ102053',
   }).code, '654321');
 });
 
+test('rejects confirmation code for mismatched plan when plan is configured', () => {
+  const text = '【办理提醒】尊敬的客户，您的验证码是：654321，号码18500000000于2026年05月02日办理互联网卡网龄享200分钟国内语音（方案编号：24BJ102053）';
+  assert.equal(parseTelecomSms({ sender: '10001', text }, {
+    stage: 'confirm', expectedPhone: '18500000000', product: '互联网卡网龄享200分钟国内语音', planId: '24BJ999999',
+  }), null);
+});
+
 test('rejects confirmation code for wrong phone', () => {
-  const text = '【办理提醒】尊敬的客户，您的验证码是：654321，号码18500000000于2026年05月02日办理互联网卡网龄享5GB国内通用流量（方案编号：24BJ100433）';
+  const text = '【办理提醒】尊敬的客户，您的验证码是：654321，号码18500000000于2026年05月02日办理互联网卡网龄享200分钟国内语音（方案编号：24BJ102053）';
   assert.equal(parseTelecomSms({ sender: '10001', text }, { stage: 'confirm', expectedPhone: '18511112222' }), null);
 });
 

@@ -55,16 +55,16 @@ const server = http.createServer(async (req, res) => {
   if (!authorized(req, url)) {
     res.writeHead(401); res.end(JSON.stringify({ ok: false, error: 'unauthorized' })); return;
   }
-  if (req.method === 'GET' && url.pathname === '/health') {
+  if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/cgi-bin/telecom-sms-health' || url.pathname === '/telecom-sms-health')) {
     res.end(JSON.stringify({ ok: true })); return;
   }
-  if (req.method === 'POST' && url.pathname === '/sms') {
+  if (req.method === 'POST' && (url.pathname === '/sms' || url.pathname === '/cgi-bin/telecom-sms' || url.pathname === '/telecom-sms')) {
     const body = await readBody(req);
     const msg = parseIncoming(body, req.headers['content-type']);
     fs.appendFileSync(FILE, `${JSON.stringify(msg)}\n`, { mode: 0o600 });
     res.end(JSON.stringify({ ok: true, id: msg.id })); return;
   }
-  if (req.method === 'GET' && (url.pathname === '/messages' || url.pathname === '/sms')) {
+  if (req.method === 'GET' && (url.pathname === '/messages' || url.pathname === '/sms' || url.pathname === '/cgi-bin/telecom-messages' || url.pathname === '/telecom-messages')) {
     const since = Number(url.searchParams.get('since') || 0);
     const sender = url.searchParams.get('sender') || '';
     const limit = Number(url.searchParams.get('limit') || 30);

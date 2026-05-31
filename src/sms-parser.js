@@ -7,8 +7,8 @@ function parseTelecomSms(input, options = {}) {
   const sender = String(input?.sender || input?.from || input?.address || '');
   const stage = options.stage;
   const expectedPhone = options.expectedPhone ? String(options.expectedPhone) : '';
-  const product = options.product || '互联网卡网龄享5GB国内通用流量';
-  const planId = options.planId || '24BJ100433';
+  const product = options.product || '';
+  const planId = options.planId || '';
 
   if (sender && !/10001/.test(sender)) return null;
 

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-BWG_SSH_HOST="${BWG_SSH_HOST:-67.209.184.240}"
+BWG_SSH_HOST="${BWG_SSH_HOST:?Missing BWG_SSH_HOST}"
 BWG_SSH_USER="${BWG_SSH_USER:-root}"
 BWG_SSH_PORT="${BWG_SSH_PORT:-22}"
 BWG_SSH_KEY="${BWG_SSH_KEY:-$HOME/.ssh/bwg_20260501}"
