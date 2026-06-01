@@ -7,7 +7,7 @@
 1. GitHub Actions 在北京时间每月 1-3 日 08:00 运行。
 2. Hosted runner 先 SSH 到 BWG，建立家里出口代理转发；只有 `SMS_INBOX_PROVIDER=http` 时才需要本地 SMS inbox 转发。
 3. Playwright 以移动 Chrome 环境打开 189 活动页，并通过家里出口访问。
-4. 北京电信手机号收到的 `10001` 短信默认进入 PushPlus，脚本通过 PushPlus OpenAPI 拉取验证码；原 OpenWrt / 家里电脑 SMS inbox 方案仍保留为兼容选项。
+4. 北京电信手机号收到的 `10001` 短信默认进入 PushPlus；如果同时部署 `PushPlusSmsToTelegram`，脚本优先从其受保护 relay inbox 拉取被拦截的验证码，未配置 relay 时回退到 PushPlus OpenAPI；原 OpenWrt / 家里电脑 SMS inbox 方案仍保留为兼容选项。
 5. 脚本读取第一步登录验证码，根据 `TELECOM_TARGET_PACKAGE` 选中目标套餐。
 6. 通过二次确认滑块后读取第二步办理验证码。
 7. 校验手机号、产品名和方案编号后提交，避免误填其他业务验证码。
@@ -21,12 +21,12 @@
 | 方案 | 适用场景 | runner 如何访问短信和家里出口 | 说明 |
 | --- | --- | --- | --- |
 | 方案一：直连模式 | 本机调试，或你已经有 WireGuard / 内网穿透 / 公网 HTTPS，把家里的 SMS inbox 和代理安全暴露给 runner | `SMS_INBOX_URL`、`SMS_INBOX_HEALTH_URL`、`OPENWRT_HTTP_PROXY` 直接填可访问地址 | 配置少，但需要你自己保证网络和鉴权安全。不建议把家里代理直接暴露到公网。 |
-| 方案二：BWG 跳板反向隧道 | 推荐的无人值守部署 | 默认从 PushPlus OpenAPI 拉短信；家里 OpenWrt 或家里电脑主动 SSH 到 BWG 建代理反向端口，GitHub hosted runner 再 SSH 到 BWG 建本地转发 | GitHub 不需要直连家里 IP；如切回 `SMS_INBOX_PROVIDER=http`，仍可继续使用 BWG 上只绑定 `127.0.0.1` 的 SMS inbox 上游。 |
+| 方案二：BWG 跳板反向隧道 | 推荐的无人值守部署 | 默认从 PushPlus relay inbox 或 OpenAPI 拉短信；家里 OpenWrt 或家里电脑主动 SSH 到 BWG 建代理反向端口，GitHub hosted runner 再 SSH 到 BWG 建本地转发 | GitHub 不需要直连家里 IP；如切回 `SMS_INBOX_PROVIDER=http`，仍可继续使用 BWG 上只绑定 `127.0.0.1` 的 SMS inbox 上游。 |
 
 现在实际 workflow 默认用 `SMS_INBOX_PROVIDER=pushplus` 读取短信，同时保留方案二的 BWG 跳板作为家里出口代理。需要回退到原 SMS inbox 时，把 GitHub Variable `SMS_INBOX_PROVIDER` 设为 `http` 并继续使用 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。
 
 ```text
-10001 短信 -> PushPlus -> GitHub runner 通过 PushPlus OpenAPI 拉取验证码
+10001 短信 -> PushPlus -> PushPlusSmsToTelegram webhook -> relay inbox -> GitHub runner 拉取验证码
 GitHub runner -> SSH -L -> BWG:127.0.0.1:13128 -> SSH -R -> OpenWrt 代理端口 或 家里电脑:13128
 OpenWrt/家里网络 -> 189 页面
 
@@ -59,7 +59,7 @@ OPENWRT_HTTP_PROXY=
 
 当前实际 workflow 默认从 PushPlus 拉取北京电信 `10001` 验证码，再复用现有的验证码解析逻辑。这个模式适合手机号已经配置成 PushPlus 收短信、且不再使用 SmsForwarder / 自建 SMS inbox 的部署。
 
-如果同时部署了 `PushPlusSmsToTelegram`，建议在那个仓库配置 `SMS_INTERCEPT_PRESETS=telecom-claim-silent`。这样 PushPlus webhook 仍会接收所有短信，但北京电信月度领取相关的登录/确认验证码只会被通用拦截规则静默标记为已处理，不会再通知到 Telegram；本仓库仍通过 PushPlus OpenAPI 拉取同一条短信并用于办理流程。
+如果同时部署了 `PushPlusSmsToTelegram`，建议在那个仓库配置 `SMS_INTERCEPT_PRESETS=telecom-claim-silent`。这样 PushPlus webhook 仍会接收所有短信，但北京电信月度领取相关的登录/确认验证码会被通用拦截规则静默处理，不再通知到 Telegram，并临时写入受保护 relay inbox；本仓库配置 `PUSHPLUS_RELAY_INBOX_URL` 后会优先从该 inbox 获取验证码。
 
 PushPlus 后台需要先做这些设置：
 
@@ -77,13 +77,15 @@ PUSHPLUS_BASE_URL=https://www.pushplus.plus  # 可选；通常不用改
 PUSHPLUS_TITLE_KEYWORD=短信        # 可选；硬件推送标题固定时再填写
 PUSHPLUS_DEBUG=false               # 临时排障时可设 true；不会打印验证码正文
 SEND_CODE_ATTEMPTS=3               # 临时排障时可设 1，减少重复发码
+PUSHPLUS_RELAY_INBOX_URL=https://pushplus-sms-to-telegram.pigbibi.workers.dev/messages  # 可选；配置后优先使用 relay inbox
 
 # Secrets
 PUSHPLUS_TOKEN=你的 PushPlus 用户 token，不能用消息 token
 PUSHPLUS_SECRET_KEY=你的 PushPlus OpenAPI secretKey
+PUSHPLUS_RELAY_INBOX_TOKEN=与 PushPlusSmsToTelegram 的 INBOX_TOKEN 保持一致；仅配置 relay inbox 时需要
 ```
 
-PushPlus 模式不需要 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。如果 `TELECOM_CONNECTIVITY_MODE=bwg`，BWG 隧道仍可继续用于家里出口代理，只是不再检查本地 SMS inbox。
+PushPlus 模式不需要 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。如果配置了 `PUSHPLUS_RELAY_INBOX_URL`，本仓库优先使用 relay inbox；未配置时才使用 PushPlus OpenAPI。`TELECOM_CONNECTIVITY_MODE=bwg` 时，BWG 隧道仍可继续用于家里出口代理，只是不再检查本地 SMS inbox。
 
 注意：PushPlus OpenAPI 会先用用户 token 和 secretKey 换取短期 `accessKey`。脚本只会读取消息列表和消息详情，不会把验证码写入运行日志；但验证码会短暂停留在 PushPlus 平台，安全性低于直接投递到自己的 SMS inbox。
 
@@ -163,7 +165,7 @@ git show origin/logs:latest.json
 | `TELECOM_PHONE` | 办理手机号 |
 | `TELECOM_ENTRY_URL` | 189 活动入口 URL |
 | `PUSHPLUS_TOKEN` | PushPlus 用户 token，不能用消息 token；默认 PushPlus 模式需要 |
-| `PUSHPLUS_SECRET_KEY` | PushPlus OpenAPI secretKey；默认 PushPlus 模式需要 |
+| `PUSHPLUS_SECRET_KEY` | PushPlus OpenAPI secretKey；默认 PushPlus 模式未配置 relay inbox 时需要 |
 | `BWG_SSH_HOST` | BWG/VPS IP 或域名 |
 | `BWG_SSH_PRIVATE_KEY` | GitHub runner 登录 BWG 用的私钥 |
 
@@ -178,6 +180,7 @@ git show origin/logs:latest.json
 | `SMS_INBOX_TOKEN` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时需要，手机转发器、GitHub runner、SMS inbox 共享的 Bearer token |
 | `SMS_INBOX_URL` | `http://127.0.0.1:18787/messages` | 仅 `SMS_INBOX_PROVIDER=http` 时使用，runner 经 SSH 转发后的 inbox 查询地址；OpenWrt 用 `/cgi-bin/telecom-messages` |
 | `SMS_INBOX_HEALTH_URL` | `http://127.0.0.1:18787/health` | 仅 `SMS_INBOX_PROVIDER=http` 时使用，inbox 健康检查地址；OpenWrt 用 `/cgi-bin/telecom-sms-health` |
+| `PUSHPLUS_RELAY_INBOX_TOKEN` | 空 | 仅配置 `PUSHPLUS_RELAY_INBOX_URL` 时需要；与 `PushPlusSmsToTelegram` 仓库的 `INBOX_TOKEN` 保持一致。 |
 
 Variables：
 
@@ -195,6 +198,7 @@ Variables：
 | `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
 | `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
 | `PUSHPLUS_DEBUG` | `false` | PushPlus 模式临时诊断日志；只打印标题、时间、关键字命中情况，不打印短信正文或验证码。 |
+| `PUSHPLUS_RELAY_INBOX_URL` | 空 | 可选；配置后优先从 `PushPlusSmsToTelegram` 的受保护 `/messages` inbox 拉取被拦截短信。 |
 | `SEND_CODE_ATTEMPTS` | `3` | 验证码发送重试次数；临时排障时可设为 `1`，减少重复发码。 |
 | `SMS_TIMEOUT_MS` | `90000` | 每次等待短信的超时时间。 |
 | `SMS_POLL_MS` | `5000` | 短信轮询间隔。 |

@@ -101,6 +101,22 @@ function summarizePushPlusDetail(text) {
   };
 }
 
+function sortMessages(messages) {
+  return messages.sort((a, b) => Number(b.receivedAt || 0) - Number(a.receivedAt || 0));
+}
+
+function dedupeMessages(messages) {
+  const seen = new Set();
+  const result = [];
+  for (const msg of messages) {
+    const key = msg.id || `${msg.sender}:${msg.receivedAt}:${msg.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(msg);
+  }
+  return sortMessages(result);
+}
+
 class SmsInboxClient {
   constructor(config) {
     this.config = config;
@@ -127,7 +143,7 @@ class SmsInboxClient {
     if (!res.ok) throw new Error(`SMS inbox HTTP ${res.status}`);
     const data = await res.json();
     const items = Array.isArray(data) ? data : data.messages || data.items || [];
-    return items.map(normalizeMessage).sort((a, b) => Number(b.receivedAt || 0) - Number(a.receivedAt || 0));
+    return sortMessages(items.map(normalizeMessage));
   }
 
   async getPushPlusAccessKey() {
@@ -166,7 +182,27 @@ class SmsInboxClient {
     return text;
   }
 
-  async fetchPushPlusMessages(since) {
+  async fetchPushPlusRelayMessages(since) {
+    if (!this.config.pushPlusRelayInboxUrl) return [];
+    const url = new URL(this.config.pushPlusRelayInboxUrl);
+    url.searchParams.set('since', String(since || 0));
+    url.searchParams.set('sender', this.config.smsSender || '10001');
+    url.searchParams.set('limit', '30');
+    const headers = { accept: 'application/json' };
+    if (this.config.pushPlusRelayInboxToken) {
+      headers.authorization = `Bearer ${this.config.pushPlusRelayInboxToken}`;
+    }
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`PushPlus relay inbox HTTP ${res.status}`);
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : data.messages || data.items || [];
+    if (this.config.pushPlusDebug) {
+      console.log(`PushPlus relay inbox fetched ${JSON.stringify({ count: items.length })}`);
+    }
+    return sortMessages(items.map(normalizeMessage));
+  }
+
+  async fetchPushPlusOpenApiMessages(since) {
     const accessKey = await this.getPushPlusAccessKey();
     const pageSize = Math.max(1, Math.min(Number(this.config.pushPlusPageSize || 10), 50));
     const res = await fetch(pushPlusUrl(this.config.pushPlusBaseUrl, '/api/open/message/list'), {
@@ -215,7 +251,14 @@ class SmsInboxClient {
         receivedAt,
       });
     }
-    return messages.sort((a, b) => Number(b.receivedAt || 0) - Number(a.receivedAt || 0));
+    return sortMessages(messages);
+  }
+
+  async fetchPushPlusMessages(since) {
+    if (this.config.pushPlusRelayInboxUrl) {
+      return dedupeMessages(await this.fetchPushPlusRelayMessages(since));
+    }
+    return dedupeMessages(await this.fetchPushPlusOpenApiMessages(since));
   }
 
   async waitForCode({ stage, since, timeoutMs, pollMs }) {

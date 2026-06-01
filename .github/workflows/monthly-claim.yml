@@ -42,6 +42,8 @@ jobs:
       PUSHPLUS_TITLE_KEYWORD: ${{ vars.PUSHPLUS_TITLE_KEYWORD || '' }}
       PUSHPLUS_PAGE_SIZE: ${{ vars.PUSHPLUS_PAGE_SIZE || '10' }}
       PUSHPLUS_DEBUG: ${{ vars.PUSHPLUS_DEBUG || 'false' }}
+      PUSHPLUS_RELAY_INBOX_URL: ${{ vars.PUSHPLUS_RELAY_INBOX_URL || '' }}
+      PUSHPLUS_RELAY_INBOX_TOKEN: ${{ secrets.PUSHPLUS_RELAY_INBOX_TOKEN }}
       SEND_CODE_ATTEMPTS: ${{ vars.SEND_CODE_ATTEMPTS || '' }}
       SMS_TIMEOUT_MS: ${{ vars.SMS_TIMEOUT_MS || '' }}
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
@@ -119,8 +121,12 @@ jobs:
           set -euo pipefail
           sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
           if [ "$sms_provider" = "pushplus" ]; then
-            : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
-            : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
+            if [ -n "${PUSHPLUS_RELAY_INBOX_URL:-}" ]; then
+              : "${PUSHPLUS_RELAY_INBOX_TOKEN:?Missing PUSHPLUS_RELAY_INBOX_TOKEN secret}"
+            else
+              : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
+              : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
+            fi
             echo "Direct mode will read SMS from PushPlus; skipping SMS inbox health check."
           else
             : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
@@ -154,8 +160,12 @@ jobs:
           : "${BWG_SSH_PRIVATE_KEY:?Missing BWG_SSH_PRIVATE_KEY secret}"
           sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
           if [ "$sms_provider" = "pushplus" ]; then
-            : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
-            : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
+            if [ -n "${PUSHPLUS_RELAY_INBOX_URL:-}" ]; then
+              : "${PUSHPLUS_RELAY_INBOX_TOKEN:?Missing PUSHPLUS_RELAY_INBOX_TOKEN secret}"
+            else
+              : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
+              : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
+            fi
           else
             : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
           fi

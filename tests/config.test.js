@@ -115,6 +115,8 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   process.env.PUSHPLUS_PAGE_SIZE = '20';
   process.env.PUSHPLUS_BASE_URL = 'https://pushplus.example.test';
   process.env.PUSHPLUS_TITLE_KEYWORD = '短信转发';
+  process.env.PUSHPLUS_RELAY_INBOX_URL = 'https://relay.example.test/messages';
+  process.env.PUSHPLUS_RELAY_INBOX_TOKEN = 'relay-token-1';
 
   const config = loadConfig();
 
@@ -124,4 +126,6 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   assert.equal(config.pushPlusPageSize, 20);
   assert.equal(config.pushPlusBaseUrl, 'https://pushplus.example.test');
   assert.equal(config.pushPlusTitleKeyword, '短信转发');
+  assert.equal(config.pushPlusRelayInboxUrl, 'https://relay.example.test/messages');
+  assert.equal(config.pushPlusRelayInboxToken, 'relay-token-1');
 }));

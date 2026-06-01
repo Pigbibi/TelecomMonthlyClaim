@@ -115,3 +115,55 @@ test('reads login code from PushPlus messages without logging SMS body', async (
     global.fetch = originalFetch;
   }
 });
+
+test('reads login code from PushPlus relay inbox without calling OpenAPI', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    calls.push({ pathname: parsed.pathname, search: parsed.searchParams, options });
+    assert.equal(parsed.pathname, '/messages');
+    assert.equal(parsed.searchParams.get('sender'), '10001');
+    assert.equal(parsed.searchParams.get('limit'), '30');
+    assert.equal(options.headers.authorization, 'Bearer relay-token-1');
+    return {
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'relay-1',
+            sender: '10001',
+            receivedAt: Date.UTC(2026, 5, 1, 0, 0, 20),
+            text: '验证码：123456。尊敬的用户，感谢使用北京电信掌上营业厅。',
+          },
+        ],
+      }),
+    };
+  };
+
+  try {
+    const client = new SmsInboxClient({
+      smsInboxProvider: 'pushplus',
+      smsSender: '10001',
+      pushPlusToken: 'token-1',
+      pushPlusSecretKey: 'secret-1',
+      pushPlusRelayInboxUrl: 'https://relay.example.test/messages',
+      pushPlusRelayInboxToken: 'relay-token-1',
+      phone: '18500000000',
+      productName: '互联网卡网龄享200分钟国内语音',
+      expectedPlanId: '24BJ102053',
+    });
+
+    const sms = await client.waitForCode({
+      stage: 'login',
+      since: Date.UTC(2026, 5, 1, 0, 0, 0),
+      timeoutMs: 100,
+      pollMs: 1,
+    });
+
+    assert.deepEqual(sms, { code: '123456', stage: 'login', source: 'pushplus' });
+    assert.deepEqual(calls.map(call => call.pathname), ['/messages']);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
