@@ -32,12 +32,13 @@ jobs:
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
       TELECOM_CONNECTIVITY_MODE: ${{ vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
-      SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'http' }}
+      SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'pushplus' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
       SMS_INBOX_TOKEN: ${{ secrets.SMS_INBOX_TOKEN }}
       PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
       PUSHPLUS_SECRET_KEY: ${{ secrets.PUSHPLUS_SECRET_KEY }}
+      PUSHPLUS_BASE_URL: ${{ vars.PUSHPLUS_BASE_URL || 'https://www.pushplus.plus' }}
       PUSHPLUS_TITLE_KEYWORD: ${{ vars.PUSHPLUS_TITLE_KEYWORD || '' }}
       PUSHPLUS_PAGE_SIZE: ${{ vars.PUSHPLUS_PAGE_SIZE || '10' }}
       PUSHPLUS_DEBUG: ${{ vars.PUSHPLUS_DEBUG || 'false' }}
@@ -116,7 +117,7 @@ jobs:
         if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE == 'direct'
         run: |
           set -euo pipefail
-          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-http}" | tr '[:upper:]' '[:lower:]')"
+          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
           if [ "$sms_provider" = "pushplus" ]; then
             : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
             : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
@@ -145,13 +146,13 @@ jobs:
             curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
           fi
 
-      - name: Open SSH tunnel to home proxy and SMS inbox via BWG
+      - name: Open SSH tunnel to home proxy and optional SMS inbox via BWG
         if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct'
         run: |
           set -euo pipefail
           : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"
           : "${BWG_SSH_PRIVATE_KEY:?Missing BWG_SSH_PRIVATE_KEY secret}"
-          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-http}" | tr '[:upper:]' '[:lower:]')"
+          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
           if [ "$sms_provider" = "pushplus" ]; then
             : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
             : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
@@ -167,8 +168,13 @@ jobs:
           else
             ssh-keyscan -p "$BWG_SSH_PORT" -H "$BWG_SSH_HOST" >> ~/.ssh/known_hosts
           fi
+          ssh_forwards=(-L 127.0.0.1:13128:127.0.0.1:13128)
+          if [ "$sms_provider" != "pushplus" ]; then
+            ssh_forwards=(-L 127.0.0.1:18787:127.0.0.1:18787 "${ssh_forwards[@]}")
+          fi
+
           close_tunnel() {
-            pkill -f 'ssh .*127[.]0[.]0[.]1:18787:127[.]0[.]0[.]1:18787.*127[.]0[.]0[.]1:13128:127[.]0[.]0[.]1:13128' >/dev/null 2>&1 || true
+            pkill -f 'ssh .*127[.]0[.]0[.]1:13128:127[.]0[.]0[.]1:13128' >/dev/null 2>&1 || true
           }
 
           open_tunnel() {
@@ -179,8 +185,7 @@ jobs:
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=3 \
               -N -f \
-              -L 127.0.0.1:18787:127.0.0.1:18787 \
-              -L 127.0.0.1:13128:127.0.0.1:13128 \
+              "${ssh_forwards[@]}" \
               "$BWG_SSH_USER@$BWG_SSH_HOST"
           }
 
@@ -206,7 +211,7 @@ jobs:
 
             if check_sms_inbox; then
               sms_ok=true
-              echo "SMS inbox health check passed."
+              echo "SMS provider check passed."
             else
               sms_ok=false
               echo "SMS inbox health check failed."
