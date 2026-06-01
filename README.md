@@ -164,7 +164,7 @@ git show origin/logs:latest.json
 | --- | --- |
 | `TELECOM_PHONE` | 办理手机号 |
 | `TELECOM_ENTRY_URL` | 189 活动入口 URL |
-| `PUSHPLUS_TOKEN` | PushPlus 用户 token，不能用消息 token；默认 PushPlus 模式需要 |
+| `PUSHPLUS_TOKEN` | PushPlus 用户 token，不能用消息 token；默认 PushPlus 模式未配置 relay inbox 时需要 |
 | `PUSHPLUS_SECRET_KEY` | PushPlus OpenAPI secretKey；默认 PushPlus 模式未配置 relay inbox 时需要 |
 | `BWG_SSH_HOST` | BWG/VPS IP 或域名 |
 | `BWG_SSH_PRIVATE_KEY` | GitHub runner 登录 BWG 用的私钥 |
