@@ -1,0 +1,13 @@
+{
+  "status": "failed",
+  "month": "2026-07",
+  "beijing": {
+    "year": "2026",
+    "month": "07",
+    "day": 1,
+    "hour": 12,
+    "minute": 6
+  },
+  "error": "locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator('.content_send_unlog')\n",
+  "finalRetryDay": false
+}
