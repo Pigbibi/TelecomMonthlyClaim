@@ -472,7 +472,11 @@ async function gotoLoginEntryPage(page, config, reason) {
     summary = await getPageSummary(page).catch(err => ({ error: err.message }));
     log('Login entry still missing after reload', { reason, strategy: candidate.label, summary });
   }
-  throw new Error('Login entry phone field not visible after entry retries');
+  const diagnosticsText = JSON.stringify(page.__telecomDiagnostics || []);
+  const proxyHint = /ERR_TUNNEL_CONNECTION_FAILED/i.test(diagnosticsText)
+    ? '; ERR_TUNNEL_CONNECTION_FAILED while loading login entry resources'
+    : '';
+  throw new Error(`Login entry phone field not visible after entry retries${proxyHint}`);
 }
 
 async function resetLoginEntryPage(page) {
