@@ -129,6 +129,7 @@ async function newMobilePage(browser) {
     ignoreHTTPSErrors: true,
   });
   await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
     Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5, configurable: true });
     Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv8l', configurable: true });
   });
@@ -163,21 +164,168 @@ async function closeDialogs(page, pattern = /验证码已下发|请注意查收|
 async function getPageSummary(page) {
   return page.evaluate(() => {
     const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+    const describe = e => ({
+      tag: e.tagName,
+      id: e.id || '',
+      className: String(e.className || '').slice(0, 120),
+      type: e.getAttribute('type') || '',
+      text: String(e.innerText || e.value || e.getAttribute('aria-label') || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+    });
     return {
       url: location.href,
       title: document.title,
       body: document.body?.innerText?.slice(0, 1000) || '',
       dialogs: Array.from(document.querySelectorAll('#wap-dialog,.wap-dialog,.diaog-popup,#popDetails')).filter(visible).map(e => (e.innerText || '').trim().slice(0, 300)),
+      controls: Array.from(document.querySelectorAll('button,a,span,div,input,canvas'))
+        .filter(visible)
+        .filter(e => /(验证码|短信|动态码|随机码|校验码|安全验证|滑块|send|sms|code|yzm|rand|slider|captcha|puzzle|checknum)/i.test([
+          e.id,
+          e.className,
+          e.getAttribute('type'),
+          e.value,
+          e.innerText,
+          e.getAttribute('aria-label'),
+          e.getAttribute('title'),
+          e.getAttribute('placeholder'),
+        ].join(' ')))
+        .slice(0, 20)
+        .map(describe),
     };
   });
+}
+
+const LOGIN_SMS_SEND_SELECTORS = [
+  '.content_send_unlog',
+  '.content_send_log',
+  '.content_send',
+  '[class*="content_send"]',
+  '#sendCode',
+  '#sendSms',
+  '#getCode',
+  'input[type="button"][value*="验证码"]',
+  'input[type="button"][value*="短信"]',
+  'input[type="button"][value*="动态码"]',
+  'input[type="button"][value*="随机码"]',
+  'input[type="submit"][value*="验证码"]',
+  '[id*="send" i]',
+  '[class*="send" i]',
+  '[id*="sms" i]',
+  '[class*="sms" i]',
+  '[id*="rand" i]',
+  '[class*="rand" i]',
+  '[id*="yzm" i]',
+  '[class*="yzm" i]',
+  'button:has-text("获取验证码")',
+  'button:has-text("发送验证码")',
+  'button:has-text("验证码")',
+  'a:has-text("获取验证码")',
+  'a:has-text("发送验证码")',
+  'span:has-text("获取验证码")',
+  'span:has-text("发送验证码")',
+  'div:has-text("获取验证码")',
+  'div:has-text("发送验证码")',
+];
+
+async function markLoginSmsButtonCandidate(page) {
+  return page.evaluate(() => {
+    const visible = e => {
+      if (!e) return false;
+      const style = getComputedStyle(e);
+      const rect = e.getBoundingClientRect();
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.pointerEvents !== 'none'
+        && rect.width > 0
+        && rect.height > 0
+        && rect.width <= window.innerWidth * 0.9
+        && rect.height <= 120;
+    };
+    const textOf = e => [
+      e.innerText,
+      e.value,
+      e.textContent,
+      e.id,
+      e.className,
+      e.getAttribute('aria-label'),
+      e.getAttribute('title'),
+      e.getAttribute('placeholder'),
+    ].join(' ').replace(/\s+/g, '');
+    const clickable = e => {
+      if (e.disabled) return false;
+      if (['BUTTON', 'A', 'SPAN', 'DIV'].includes(e.tagName)) return true;
+      if (e.tagName !== 'INPUT') return false;
+      return /^(button|submit)$/i.test(e.getAttribute('type') || '');
+    };
+    const target = Array.from(document.querySelectorAll('button,a,span,div,input'))
+      .filter(e => clickable(e) && visible(e))
+      .find(e => /(获取|发送|点击)?(短信)?(验证|动态|随机|校验)码|send.*(sms|code)|sms.*send|get.*code|rand.*code|yzm/i.test(textOf(e)));
+    if (!target) return '';
+    target.setAttribute('data-telecom-login-sms-send', 'true');
+    return '[data-telecom-login-sms-send="true"]';
+  });
+}
+
+async function clickLoginSmsButton(page, config) {
+  const tried = [];
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    for (const selector of LOGIN_SMS_SEND_SELECTORS) {
+      if (!tried.includes(selector)) tried.push(selector);
+      const candidate = page.locator(selector).first();
+      const count = await candidate.count().catch(() => 0);
+      if (count < 1) continue;
+      const visible = await candidate.isVisible().catch(() => false);
+      if (!visible) continue;
+      await actionDelay(config);
+      await candidate.click({ force: true });
+      log('Clicked login SMS send button', { selector });
+      return selector;
+    }
+    await sleep(500);
+  }
+
+  const fallbackSelector = await markLoginSmsButtonCandidate(page).catch(() => '');
+  if (fallbackSelector) {
+    await actionDelay(config);
+    await page.locator(fallbackSelector).first().click({ force: true });
+    log('Clicked login SMS send button', { selector: fallbackSelector });
+    return fallbackSelector;
+  }
+
+  const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+  throw new Error(`Login SMS send button not found after trying selectors: ${tried.join(', ')}; page summary: ${mask(JSON.stringify(summary))}`);
+}
+
+async function hasSliderVerification(page) {
+  return page.evaluate(() => {
+    const visible = e => {
+      if (!e) return false;
+      const style = getComputedStyle(e);
+      const rect = e.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+    const text = document.body?.innerText || '';
+    return /安全验证|向右滑动滑块|滑动滑块/.test(text)
+      && (
+        visible(document.querySelector('#secondPop_puzzle_check'))
+        || visible(document.querySelector('.sliderContainer'))
+        || visible(document.querySelector('.slider'))
+        || visible(document.querySelector('[class*="slider" i]'))
+        || visible(document.querySelector('[id*="slider" i]'))
+      );
+  }).catch(() => false);
 }
 
 async function sendLoginCode(page, config) {
   await page.locator('#phoneNumber').waitFor({ state: 'visible' });
   await actionDelay(config);
   await page.locator('#phoneNumber').fill(config.phone);
-  await actionDelay(config);
-  await page.locator('.content_send_unlog').click({ force: true });
+  await clickLoginSmsButton(page, config);
+  await sleep(1000);
+  if (await hasSliderVerification(page)) {
+    log('Login SMS send requires slider verification');
+    await solvePuzzle(page);
+  }
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
   const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
@@ -210,13 +358,77 @@ async function submitLoginCode(page, code, config) {
   return page.url().includes('preDepositCfg_list');
 }
 
+async function resetLoginEntryPage(page, config) {
+  await page.locator('.slider-check-close').first().click({ force: true }).catch(() => {});
+  await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await sleep(6000);
+  if (await page.locator('#phoneNumber').isVisible().catch(() => false)) return;
+  await page.context().clearCookies().catch(() => {});
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  }).catch(() => {});
+  await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await sleep(6000);
+}
+
+function isRetryableLoginSendError(err) {
+  return /Slider verification (failed|service busy)|#phoneNumber/.test(err?.message || '');
+}
+
+async function dragSlider(page, sx, sy, moveX) {
+  const client = await page.context().newCDPSession(page).catch(() => null);
+  const points = [];
+  const steps = 62;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const ease = 1 - Math.pow(1 - t, 2.35);
+    const overshoot = i > steps - 7 ? (steps - i) * 0.22 : 0;
+    points.push({
+      x: sx + moveX * ease - overshoot,
+      y: sy + Math.sin(t * Math.PI * 3.2) * 2.4 + Math.sin(t * Math.PI * 9.5) * 0.8,
+      wait: 35 + (i % 7) * 9,
+    });
+  }
+  if (client) {
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy, radiusX: 5, radiusY: 5, force: 0.6 }] });
+    for (const point of points.slice(1)) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x, y: point.y, radiusX: 5, radiusY: 5, force: 0.6 }] });
+      await sleep(point.wait);
+    }
+    await sleep(260);
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    return;
+  }
+  await page.mouse.move(sx, sy);
+  await sleep(650);
+  await page.mouse.down();
+  for (const point of points.slice(1)) {
+    await page.mouse.move(point.x, point.y);
+    await sleep(point.wait);
+  }
+  await sleep(260);
+  await page.mouse.up();
+}
+
 async function loginWithRetry(page, smsInbox, config) {
   await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' });
   await sleep(6000);
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending login SMS attempt ${attempt}/${config.sendCodeAttempts}`);
     const since = Date.now() - 10000;
-    await sendLoginCode(page, config);
+    try {
+      await sendLoginCode(page, config);
+    } catch (err) {
+      const summary = await getPageSummary(page).catch(summaryErr => ({ error: summaryErr.message }));
+      log('Login SMS send failed before code wait', { error: err.message, summary });
+      if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
+        await sleep(60000);
+        await resetLoginEntryPage(page, config);
+        continue;
+      }
+      throw err;
+    }
     const sms = await smsInbox.waitForCode({ stage: 'login', since, timeoutMs: config.smsTimeoutMs, pollMs: config.smsPollMs });
     if (!sms) {
       const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
@@ -253,7 +465,21 @@ async function choosePackage(page, config) {
 async function transparentPuzzleInfo(page) {
   return page.evaluate(() => {
     const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
-    const canvas = document.querySelector('#secondPop_captcha canvas:not(.block)');
+    const describe = e => {
+      const rect = e.getBoundingClientRect();
+      const style = getComputedStyle(e);
+      return {
+        tag: e.tagName,
+        id: e.id || '',
+        className: String(e.className || '').slice(0, 120),
+        text: String(e.innerText || e.value || e.getAttribute('aria-label') || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+        rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+        bg: String(style.backgroundImage || '').slice(0, 160),
+        src: String(e.getAttribute('src') || '').slice(0, 160),
+      };
+    };
+    const canvas = Array.from(document.querySelectorAll('#secondPop_captcha canvas:not(.block), canvas'))
+      .find(e => visible(e) && e.width >= 100 && e.height >= 50);
     let bbox = null;
     if (canvas) {
       const ctx = canvas.getContext('2d');
@@ -268,58 +494,202 @@ async function transparentPuzzleInfo(page) {
       }
       if (count > 500) bbox = { minx, miny, maxx, maxy, count };
     }
-    const slider = document.querySelector('.slider')?.getBoundingClientRect();
-    const container = document.querySelector('.sliderContainer')?.getBoundingClientRect();
+    const imageMatchInfo = () => {
+      const bg = document.querySelector('#slider_bg_image');
+      const block = document.querySelector('#slider_block_image');
+      if (!bg || !block || !visible(bg) || !visible(block) || !bg.complete || !block.complete) return null;
+      const bgRect = bg.getBoundingClientRect();
+      const blockRect = block.getBoundingClientRect();
+      const bgCanvas = document.createElement('canvas');
+      bgCanvas.width = bg.naturalWidth || Math.round(bgRect.width);
+      bgCanvas.height = bg.naturalHeight || Math.round(bgRect.height);
+      const blockCanvas = document.createElement('canvas');
+      blockCanvas.width = block.naturalWidth || Math.round(blockRect.width);
+      blockCanvas.height = block.naturalHeight || Math.round(blockRect.height);
+      const bgCtx = bgCanvas.getContext('2d');
+      const blockCtx = blockCanvas.getContext('2d');
+      bgCtx.drawImage(bg, 0, 0, bgCanvas.width, bgCanvas.height);
+      blockCtx.drawImage(block, 0, 0, blockCanvas.width, blockCanvas.height);
+      const bgData = bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height).data;
+      const blockData = blockCtx.getImageData(0, 0, blockCanvas.width, blockCanvas.height).data;
+      const scaleY = bgCanvas.height / bgRect.height;
+      const scaleX = bgCanvas.width / bgRect.width;
+      const targetY = Math.max(0, Math.min(
+        bgCanvas.height - blockCanvas.height,
+        Math.round((blockRect.y - bgRect.y) * scaleY),
+      ));
+      const gray = data => {
+        const out = new Uint16Array(data.length / 4);
+        for (let i = 0; i < out.length; i += 1) out[i] = Math.round(data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114);
+        return out;
+      };
+      const bgGray = gray(bgData);
+      const edge = (data, width, height) => {
+        const out = new Uint16Array(width * height);
+        for (let y = 1; y < height - 1; y += 1) {
+          for (let x = 1; x < width - 1; x += 1) {
+            const i = y * width + x;
+            out[i] = Math.abs(data[i + 1] - data[i - 1]) + Math.abs(data[i + width] - data[i - width]);
+          }
+        }
+        return out;
+      };
+      const bgEdge = edge(bgGray, bgCanvas.width, bgCanvas.height);
+      const alphaAt = (x, y) => blockData[(y * blockCanvas.width + x) * 4 + 3];
+      const edgePoints = [];
+      const innerPoints = [];
+      for (let by = 1; by < blockCanvas.height - 1; by += 1) {
+        for (let bx = 1; bx < blockCanvas.width - 1; bx += 1) {
+          if (alphaAt(bx, by) < 80) continue;
+          const boundary = alphaAt(bx - 1, by) < 80
+            || alphaAt(bx + 1, by) < 80
+            || alphaAt(bx, by - 1) < 80
+            || alphaAt(bx, by + 1) < 80;
+          if (boundary) edgePoints.push({ x: bx, y: by });
+          else if (bx % 4 === 0 && by % 4 === 0) innerPoints.push({ x: bx, y: by });
+        }
+      }
+      let textureX = 0;
+      let textureScore = Number.POSITIVE_INFINITY;
+      let edgeX = 0;
+      let edgeScore = Number.NEGATIVE_INFINITY;
+      for (let x = 0; x <= bgCanvas.width - blockCanvas.width; x += 1) {
+        let texture = 0;
+        let textureSamples = 0;
+        for (let by = 4; by < blockCanvas.height - 4; by += 2) {
+          for (let bx = 4; bx < blockCanvas.width - 4; bx += 2) {
+            const bi = (by * blockCanvas.width + bx) * 4;
+            const alpha = blockData[bi + 3];
+            if (alpha < 80) continue;
+            const gi = ((targetY + by) * bgCanvas.width + x + bx) * 4;
+            texture += Math.abs(blockData[bi] - bgData[gi])
+              + Math.abs(blockData[bi + 1] - bgData[gi + 1])
+              + Math.abs(blockData[bi + 2] - bgData[gi + 2]);
+            textureSamples += 1;
+          }
+        }
+        if (textureSamples > 0) texture /= textureSamples;
+        if (texture < textureScore) {
+          textureScore = texture;
+          textureX = x;
+        }
+        if (edgePoints.length > 0) {
+          const boundary = edgePoints.reduce((sum, p) => sum + bgEdge[(targetY + p.y) * bgCanvas.width + x + p.x], 0) / edgePoints.length;
+          const inner = innerPoints.length > 0
+            ? innerPoints.reduce((sum, p) => sum + bgEdge[(targetY + p.y) * bgCanvas.width + x + p.x], 0) / innerPoints.length
+            : 0;
+          const score = boundary - inner * 0.35;
+          if (score > edgeScore) {
+            edgeScore = score;
+            edgeX = x;
+          }
+        }
+      }
+      const useEdge = edgePoints.length >= 20
+        && edgeX >= 45 * scaleX
+        && edgeX <= bgCanvas.width - blockCanvas.width + 10 * scaleX;
+      const bestX = useEdge ? edgeX : textureX;
+      return {
+        x: Math.round(bestX / scaleX),
+        y: Math.round(targetY / scaleY),
+        method: useEdge ? 'edge' : 'texture',
+        score: Math.round(useEdge ? edgeScore : textureScore),
+        texture: { x: Math.round(textureX / scaleX), score: Math.round(textureScore) },
+        edge: edgePoints.length > 0 ? { x: Math.round(edgeX / scaleX), score: Math.round(edgeScore), points: edgePoints.length } : null,
+        bg: { width: bgCanvas.width, height: bgCanvas.height },
+        block: { width: blockCanvas.width, height: blockCanvas.height },
+      };
+    };
+    const imageMatch = imageMatchInfo();
+    const sliderEl = document.querySelector('#slider_track_btn')
+      || document.querySelector('.slider')
+      || Array.from(document.querySelectorAll('[class*="slider" i],[id*="slider" i]'))
+      .filter(visible)
+      .sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0];
+    const containerEl = document.querySelector('#slider_track')
+      || document.querySelector('.sliderContainer')
+      || sliderEl?.closest('[class*="container" i]')
+      || Array.from(document.querySelectorAll('[class*="slider" i],[id*="slider" i]'))
+        .filter(visible)
+        .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
+    const slider = sliderEl?.getBoundingClientRect();
+    const container = containerEl?.getBoundingClientRect();
     return {
-      visible: visible(document.querySelector('#secondPop_puzzle_check')),
+      visible: visible(document.querySelector('#secondPop_puzzle_check')) || /安全验证|向右滑动滑块|滑动滑块/.test(document.body?.innerText || ''),
       canvas: canvas ? { width: canvas.width, height: canvas.height } : null,
       bbox,
+      imageMatch,
       slider: slider ? { x: slider.x, y: slider.y, w: slider.width, h: slider.height } : null,
       container: container ? { x: container.x, y: container.y, w: container.width, h: container.height } : null,
       message: document.querySelector('#secondPop_msg')?.innerText?.trim() || '',
+      elements: Array.from(document.querySelectorAll('canvas,img,button,a,span,div,input'))
+        .filter(e => visible(e) && /(slider|captcha|puzzle|checknum|verify|drag|block|滑块|验证)/i.test([
+          e.id,
+          e.className,
+          e.innerText,
+          e.value,
+          e.getAttribute('aria-label'),
+          e.getAttribute('title'),
+        ].join(' ')))
+        .slice(0, 30)
+        .map(describe),
     };
   });
 }
 
 async function solvePuzzle(page) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    await page.locator('#secondPop_puzzle_check').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => {
+      const visible = e => {
+        if (!e) return false;
+        const style = getComputedStyle(e);
+        const rect = e.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+      return /安全验证|向右滑动滑块|滑动滑块/.test(document.body?.innerText || '')
+        && (
+          visible(document.querySelector('#secondPop_puzzle_check'))
+          || visible(document.querySelector('.sliderContainer'))
+          || visible(document.querySelector('.slider'))
+          || visible(document.querySelector('[class*="slider" i]'))
+          || visible(document.querySelector('[id*="slider" i]'))
+        );
+    }, { timeout: 15000 });
     await sleep(2500);
     const info = await transparentPuzzleInfo(page);
-    if (!info.visible || !info.canvas || !info.bbox || !info.slider) {
-      await page.locator('.refreshIcon').click({ force: true }).catch(() => {});
+    const hasCanvasTarget = info.canvas && info.bbox;
+    const hasImageTarget = info.imageMatch;
+    if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget)) {
+      log('Slider puzzle info incomplete', { attempt, info });
+      await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
       await sleep(2000);
       continue;
     }
-    const ratio = (info.canvas.width - 40 - 20) / (info.canvas.width - 40);
-    const moveX = Math.round(info.bbox.minx / ratio);
-    if (moveX < 55 || moveX > info.canvas.width - 35) {
-      await page.locator('.refreshIcon').click({ force: true }).catch(() => {});
+    const moveX = info.imageMatch
+      ? info.imageMatch.x
+      : Math.round(info.bbox.minx / ((info.canvas.width - 40 - 20) / (info.canvas.width - 40)));
+    const maxMoveX = info.imageMatch ? (info.imageMatch.bg.width - info.imageMatch.block.width + 10) : info.canvas.width - 35;
+    if (moveX < 45 || moveX > maxMoveX) {
+      log('Slider puzzle target out of range', { attempt, info, moveX });
+      await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
       await sleep(2000);
       continue;
     }
 
-    log(`Solving slider attempt ${attempt}/3`, { targetX: info.bbox.minx, moveX });
+    log(`Solving slider attempt ${attempt}/3`, {
+      targetX: info.imageMatch?.x ?? info.bbox.minx,
+      moveX,
+      match: info.imageMatch ? {
+        method: info.imageMatch.method,
+        score: info.imageMatch.score,
+        texture: info.imageMatch.texture,
+        edge: info.imageMatch.edge,
+      } : null,
+    });
     const responsePromise = page.waitForResponse(r => r.url().includes('/re/sms/sendRandProtocolV3'), { timeout: 20000 }).catch(() => null);
     const sx = info.slider.x + info.slider.w / 2;
     const sy = info.slider.y + info.slider.h / 2;
-    await page.mouse.move(sx, sy);
-    await sleep(650);
-    await page.mouse.down();
-    const steps = 58;
-    for (let i = 1; i <= steps; i += 1) {
-      const t = i / steps;
-      const ease = 1 - Math.pow(1 - t, 2.45);
-      let x = sx + moveX * ease;
-      if (i > steps - 8) x = sx + moveX - (steps - i) * 0.16;
-      const y = sy + Math.sin(t * Math.PI * 3.4) * 2.1 + Math.sin(t * Math.PI * 9) * 0.7;
-      await page.mouse.move(x, y);
-      await sleep(39 + (i % 6) * 8);
-    }
-    await sleep(350);
-    await page.mouse.move(sx + moveX + 0.1, sy + 0.2);
-    await sleep(260);
-    await page.mouse.up();
+    await dragSlider(page, sx, sy, moveX);
 
     const response = await responsePromise;
     if (response) {
@@ -329,7 +699,8 @@ async function solvePuzzle(page) {
     }
     const body = await visibleText(page);
     if (/验证码已下发|请注意查收/.test(body)) return true;
-    await page.locator('.refreshIcon').click({ force: true }).catch(() => {});
+    if (/服务繁忙/.test(body)) throw new Error('Slider verification service busy');
+    await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
     await sleep(2500);
   }
   throw new Error('Slider verification failed');
@@ -490,4 +861,11 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  LOGIN_SMS_SEND_SELECTORS,
+  clickLoginSmsButton,
+};

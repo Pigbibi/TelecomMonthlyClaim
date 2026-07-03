@@ -281,12 +281,21 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/create-failure-issue.js
 
+      - name: Resolve run log outcome
+        id: run_log
+        if: always()
+        env:
+          SHOULD_RUN: ${{ steps.claim_plan.outputs.should_run || 'false' }}
+          STATE_FILE: ${{ steps.claim_plan.outputs.state_file || '' }}
+          STEP_OUTCOME: ${{ steps.claim.outcome || 'skipped' }}
+        run: node scripts/resolve-run-log-outcome.js
+
       - name: Record run log on logs branch
         if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_LOG_STATUS: ${{ job.status }}
-          RUN_LOG_CLAIM_OUTCOME: ${{ steps.claim.outcome || 'skipped' }}
+          RUN_LOG_CLAIM_OUTCOME: ${{ steps.run_log.outputs.claim_outcome || steps.claim.outcome || 'skipped' }}
           RUN_LOG_FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
           RUN_LOG_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: bash scripts/write-run-log-branch.sh
