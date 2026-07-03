@@ -87,6 +87,12 @@ async function applyAndroidEmulation(context, page) {
   return client;
 }
 
+function rememberPageDiagnostic(page, entry) {
+  page.__telecomDiagnostics = page.__telecomDiagnostics || [];
+  page.__telecomDiagnostics.push({ at: new Date().toISOString(), ...entry });
+  page.__telecomDiagnostics = page.__telecomDiagnostics.slice(-20);
+}
+
 async function launchBrowser(config) {
   const options = {
     headless: config.headless,
@@ -134,6 +140,16 @@ async function newMobilePage(browser) {
     Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv8l', configurable: true });
   });
   const page = await context.newPage();
+  page.on('console', msg => {
+    if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
+  });
+  page.on('pageerror', err => rememberPageDiagnostic(page, { type: 'pageerror', text: err.message.slice(0, 300) }));
+  page.on('requestfailed', request => {
+    if (/wapbj\.189\.cn/i.test(request.url())) rememberPageDiagnostic(page, { type: 'requestfailed', url: request.url(), error: request.failure()?.errorText || '' });
+  });
+  page.on('response', response => {
+    if (response.status() >= 400 && /wapbj\.189\.cn/i.test(response.url())) rememberPageDiagnostic(page, { type: 'response', url: response.url(), status: response.status() });
+  });
   await applyAndroidEmulation(context, page);
   page.setDefaultTimeout(15000);
   page.setDefaultNavigationTimeout(45000);
@@ -162,7 +178,7 @@ async function closeDialogs(page, pattern = /验证码已下发|请注意查收|
 }
 
 async function getPageSummary(page) {
-  return page.evaluate(() => {
+  const summary = await page.evaluate(() => {
     const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
     const describe = e => ({
       tag: e.tagName,
@@ -174,7 +190,10 @@ async function getPageSummary(page) {
     return {
       url: location.href,
       title: document.title,
+      readyState: document.readyState,
+      htmlLength: document.documentElement?.outerHTML?.length || 0,
       body: document.body?.innerText?.slice(0, 1000) || '',
+      scripts: Array.from(document.scripts || []).slice(0, 12).map(e => (e.src || '').slice(0, 160)),
       dialogs: Array.from(document.querySelectorAll('#wap-dialog,.wap-dialog,.diaog-popup,#popDetails')).filter(visible).map(e => (e.innerText || '').trim().slice(0, 300)),
       controls: Array.from(document.querySelectorAll('button,a,span,div,input,canvas'))
         .filter(visible)
@@ -192,6 +211,7 @@ async function getPageSummary(page) {
         .map(describe),
     };
   });
+  return { ...summary, diagnostics: page.__telecomDiagnostics || [] };
 }
 
 const LOGIN_SMS_SEND_SELECTORS = [
@@ -358,18 +378,56 @@ async function submitLoginCode(page, code, config) {
   return page.url().includes('preDepositCfg_list');
 }
 
-async function resetLoginEntryPage(page, config) {
+function withCacheBuster(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    url.searchParams.set('_claimRetry', `${Date.now()}`);
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+async function gotoLoginEntryPage(page, config, reason) {
+  const candidates = [
+    { label: 'entry', url: config.entryUrl },
+    { label: 'entry-cache-bust', url: withCacheBuster(config.entryUrl) },
+  ];
+  for (const candidate of candidates) {
+    await page.goto('about:blank', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    const response = await page.goto(candidate.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(err => {
+      rememberPageDiagnostic(page, { type: 'goto-error', url: candidate.url, error: err.message });
+      return null;
+    });
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    if (await page.locator('#phoneNumber').isVisible().catch(() => false)) {
+      log('Login entry ready', { reason, strategy: candidate.label, status: response?.status?.() || null, url: page.url() });
+      return;
+    }
+    let summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    log('Login entry phone field missing', { reason, strategy: candidate.label, status: response?.status?.() || null, summary });
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(err => {
+      rememberPageDiagnostic(page, { type: 'reload-error', url: page.url(), error: err.message });
+    });
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    if (await page.locator('#phoneNumber').isVisible().catch(() => false)) {
+      log('Login entry ready after reload', { reason, strategy: candidate.label, url: page.url() });
+      return;
+    }
+    summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    log('Login entry still missing after reload', { reason, strategy: candidate.label, summary });
+  }
+  throw new Error('Login entry phone field not visible after entry retries');
+}
+
+async function resetLoginEntryPage(page) {
   await page.locator('.slider-check-close').first().click({ force: true }).catch(() => {});
-  await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
-  await sleep(6000);
-  if (await page.locator('#phoneNumber').isVisible().catch(() => false)) return;
   await page.context().clearCookies().catch(() => {});
   await page.evaluate(() => {
     localStorage.clear();
     sessionStorage.clear();
   }).catch(() => {});
-  await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
-  await sleep(6000);
+  await page.goto('about:blank', { waitUntil: 'domcontentloaded' }).catch(() => {});
 }
 
 function isRetryableLoginSendError(err) {
@@ -412,19 +470,18 @@ async function dragSlider(page, sx, sy, moveX) {
 }
 
 async function loginWithRetry(page, smsInbox, config) {
-  await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' });
-  await sleep(6000);
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending login SMS attempt ${attempt}/${config.sendCodeAttempts}`);
     const since = Date.now() - 10000;
     try {
+      await gotoLoginEntryPage(page, config, `attempt-${attempt}`);
       await sendLoginCode(page, config);
     } catch (err) {
       const summary = await getPageSummary(page).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
         await sleep(60000);
-        await resetLoginEntryPage(page, config);
+        await resetLoginEntryPage(page);
         continue;
       }
       throw err;
@@ -440,7 +497,7 @@ async function loginWithRetry(page, smsInbox, config) {
     const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
     log('Login code rejected, retrying', summary);
     if (attempt < config.sendCodeAttempts) {
-      await page.goto(config.entryUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await resetLoginEntryPage(page);
       await sleep(60000);
     }
   }
