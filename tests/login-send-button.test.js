@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { clickLoginSmsButton } = require('../scripts/telecom-monthly-claim');
+const { clickLoginSmsButton, firstVisibleLocator } = require('../scripts/telecom-monthly-claim');
 
 function fakePage(visibleSelectors) {
   const clicked = [];
@@ -45,4 +45,24 @@ test('clicks the Vant login SMS send button text', async () => {
 
   assert.equal(selector, 'button:has-text("点击获取")');
   assert.deepEqual(page.clicked, ['button:has-text("点击获取")']);
+});
+
+test('picks a visible input when the first matching Vant input is hidden', async () => {
+  const page = {
+    locator(selector) {
+      const visibleByIndex = selector === 'input[placeholder*="手机号码"]' ? [false, true] : [];
+      return {
+        count: async () => visibleByIndex.length,
+        nth: index => ({
+          id: `${selector}:${index}`,
+          isVisible: async () => visibleByIndex[index],
+        }),
+      };
+    },
+  };
+
+  const match = await firstVisibleLocator(page, ['input[placeholder*="手机号码"]']);
+
+  assert.equal(match.selector, 'input[placeholder*="手机号码"]');
+  assert.equal(match.locator.id, 'input[placeholder*="手机号码"]:1');
 });

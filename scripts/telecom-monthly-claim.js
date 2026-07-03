@@ -252,10 +252,61 @@ const LOGIN_SUBMIT_SELECTORS = ['.know-box.button', 'button:has-text("立即办�
 
 async function firstVisibleLocator(page, selectors) {
   for (const selector of selectors) {
-    const locator = page.locator(selector).first();
-    if (await locator.isVisible().catch(() => false)) return { locator, selector };
+    const matches = page.locator(selector);
+    const count = Math.min(await matches.count().catch(() => 0), 20);
+    for (let i = 0; i < count; i += 1) {
+      const locator = matches.nth(i);
+      if (await locator.isVisible().catch(() => false)) return { locator, selector };
+    }
   }
   return null;
+}
+
+async function waitForVisibleLocator(page, selectors, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const match = await firstVisibleLocator(page, selectors);
+    if (match) return match;
+    await sleep(300);
+  }
+  return firstVisibleLocator(page, selectors);
+}
+
+async function activateSmsLoginByDom(page) {
+  return page.evaluate(() => {
+    const visible = e => {
+      if (!e) return false;
+      const style = getComputedStyle(e);
+      const rect = e.getBoundingClientRect();
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.pointerEvents !== 'none'
+        && rect.width > 0
+        && rect.height > 0;
+    };
+    const eventInit = { bubbles: true, cancelable: true, view: window };
+    const exact = text => String(text || '').replace(/\s+/g, '') === '短信验证码登录';
+    const targets = Array.from(document.querySelectorAll('button,a,span,div'))
+      .filter(e => visible(e) && exact(e.innerText || e.textContent));
+    for (const target of targets) {
+      for (let node = target; node && node !== document.body; node = node.parentElement) {
+        if (!visible(node)) continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width >= window.innerWidth * 0.95 && rect.height >= window.innerHeight * 0.5) continue;
+        node.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true }));
+        node.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }));
+        node.dispatchEvent(new MouseEvent('mousedown', eventInit));
+        node.dispatchEvent(new MouseEvent('mouseup', eventInit));
+        node.dispatchEvent(new MouseEvent('click', eventInit));
+        return {
+          tag: node.tagName,
+          className: String(node.className || '').slice(0, 120),
+          text: String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+        };
+      }
+    }
+    return null;
+  });
 }
 
 async function hasLoginEntry(page) {
@@ -279,9 +330,14 @@ async function ensureSmsLoginForm(page, config) {
   if (await smsLogin.isVisible().catch(() => false)) {
     await actionDelay(config);
     await smsLogin.click({ force: true });
-    await sleep(1000);
+    log('Clicked SMS login tab', { strategy: 'text' });
+    phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, 5000);
+    if (phoneField) return phoneField;
+    const domTarget = await activateSmsLoginByDom(page).catch(() => null);
+    if (domTarget) log('Clicked SMS login tab', { strategy: 'dom', target: domTarget });
+    await sleep(500);
   }
-  phoneField = await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS);
+  phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, 5000);
   if (phoneField) return phoneField;
   const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
   throw new Error(`Login phone field not found after opening SMS login form; page summary: ${mask(JSON.stringify(summary))}`);
@@ -487,7 +543,7 @@ async function resetLoginEntryPage(page) {
 }
 
 function isRetryableLoginSendError(err) {
-  return /Slider verification (failed|service busy)|#phoneNumber/.test(err?.message || '');
+  return /Slider verification (failed|service busy)|#phoneNumber|Login phone field not found|element is not visible/.test(err?.message || '');
 }
 
 async function dragSlider(page, sx, sy, moveX) {
@@ -981,4 +1037,5 @@ if (require.main === module) {
 module.exports = {
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
+  firstVisibleLocator,
 };
