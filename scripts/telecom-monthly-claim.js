@@ -55,7 +55,7 @@ async function actionDelay(config) {
   if (delayMs > 0) await sleep(delayMs);
 }
 
-async function applyAndroidEmulation(context, page) {
+async function alignAndroidClientHints(context, page) {
   const client = await context.newCDPSession(page);
   await client.send('Network.enable').catch(() => {});
   await client.send('Emulation.setUserAgentOverride', {
@@ -82,10 +82,6 @@ async function applyAndroidEmulation(context, page) {
       bitness: '',
     },
   });
-  await client.send('Emulation.setDeviceMetricsOverride', {
-    width: 393, height: 873, deviceScaleFactor: 2.75, mobile: true, screenWidth: 393, screenHeight: 873,
-  });
-  await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   return client;
 }
 
@@ -154,11 +150,18 @@ async function newMobilePage(browser) {
     if (/wapbj\.189\.cn/i.test(request.url())) rememberPageDiagnostic(page, { type: 'requestfailed', url: request.url(), error: request.failure()?.errorText || '' });
   });
   page.on('response', response => {
-    if (response.status() >= 400 && /wapbj\.189\.cn/i.test(response.url())) rememberPageDiagnostic(page, { type: 'response', url: response.url(), status: response.status() });
+    if (response.status() < 400 || !/wapbj\.189\.cn/i.test(response.url())) return;
+    const entry = { type: 'response', url: response.url(), status: response.status() };
+    rememberPageDiagnostic(page, entry);
+    if (!/preActiveMeta|getSliderChallenge|sendRandProtocolV3/i.test(response.url())) return;
+    response.text()
+      .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
+      .catch(() => {});
   });
-  // The Playwright mobile context is enough here. Extra CDP emulation or
-  // navigator overrides make Beijing Telecom's WAF challenge collapse to an
-  // empty 400 page.
+  // Keep Chromium client hints consistent with the Android UA. Avoid navigator
+  // overrides and metric CDP emulation; those made the WAF entry page collapse
+  // to an empty 400 page in CI.
+  await alignAndroidClientHints(context, page);
   page.setDefaultTimeout(15000);
   page.setDefaultNavigationTimeout(45000);
   return { context, page };
