@@ -33,6 +33,7 @@ function maskProxyUrl(proxyUrl) {
 
 function isProxyPathError(err) {
   const text = `${err?.message || ''}\n${err?.stack || ''}`;
+  if (/getSliderChallenge HTTP 400/i.test(text)) return false;
   return [
     /ERR_PROXY_CONNECTION_FAILED/i,
     /ERR_TUNNEL_CONNECTION_FAILED/i,
@@ -44,7 +45,6 @@ function isProxyPathError(err) {
     /EHOSTUNREACH/i,
     /ERR_NAME_NOT_RESOLVED/i,
     /socket hang up/i,
-    /getSliderChallenge HTTP 400/i,
     /proxy/i,
   ].some(pattern => pattern.test(text));
 }
@@ -458,6 +458,26 @@ async function waitForSliderVerification(page, timeoutMs = 7000) {
   return hasSliderVerification(page);
 }
 
+
+async function sendLoginSmsViaBackend(page, config) {
+  const result = await page.evaluate(async phone => {
+    const response = await fetch('/wap2017/re/sms/sendRandByUnlog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ accNo: phone, validType: 'SLIDER' }),
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch {}
+    return { status: response.status, ok: response.ok, data, body: text.slice(0, 300) };
+  }, config.phone);
+  log('Direct login SMS backend response', result);
+  const retCode = String(result.data?.retCode ?? '');
+  const apiResult = String(result.data?.result ?? '');
+  if (result.ok && (apiResult === '0' || retCode === '000000' || retCode === '0001')) return true;
+  return false;
+}
+
 async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
@@ -465,7 +485,13 @@ async function sendLoginCode(page, config) {
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
-    await solvePuzzle(page);
+    try {
+      await solvePuzzle(page);
+    } catch (err) {
+      if (!/getSliderChallenge HTTP 400/i.test(err.message || '')) throw err;
+      log('Slider challenge API failed; trying direct login SMS backend call');
+      if (!await sendLoginSmsViaBackend(page, config)) throw err;
+    }
   }
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
