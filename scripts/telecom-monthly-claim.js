@@ -64,37 +64,6 @@ function androidUserAgent(browser) {
   return `Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${fullVersion} Mobile Safari/537.36`;
 }
 
-async function alignAndroidClientHints(context, page, browser) {
-  const { fullVersion, majorVersion } = chromeVersionParts(browser);
-  const client = await context.newCDPSession(page);
-  await client.send('Network.enable').catch(() => {});
-  await client.send('Emulation.setUserAgentOverride', {
-    userAgent: androidUserAgent(browser),
-    acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
-    platform: 'Android',
-    userAgentMetadata: {
-      brands: [
-        { brand: 'Google Chrome', version: majorVersion },
-        { brand: 'Not.A/Brand', version: '8' },
-        { brand: 'Chromium', version: majorVersion },
-      ],
-      fullVersionList: [
-        { brand: 'Google Chrome', version: fullVersion },
-        { brand: 'Not.A/Brand', version: '8.0.0.0' },
-        { brand: 'Chromium', version: fullVersion },
-      ],
-      fullVersion,
-      platform: 'Android',
-      platformVersion: '13.0.0',
-      architecture: '',
-      model: 'Pixel 7',
-      mobile: true,
-      bitness: '',
-    },
-  });
-  return client;
-}
-
 function rememberPageDiagnostic(page, entry) {
   page.__telecomDiagnostics = page.__telecomDiagnostics || [];
   page.__telecomDiagnostics.push({ at: new Date().toISOString(), ...entry });
@@ -172,10 +141,8 @@ async function newMobilePage(browser) {
       .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
       .catch(() => {});
   });
-  // Keep Chromium client hints consistent with the Android UA. Avoid navigator
-  // overrides and metric CDP emulation; those made the WAF entry page collapse
-  // to an empty 400 page in CI.
-  await alignAndroidClientHints(context, page, browser);
+  // Avoid CDP emulation and navigator overrides; those made Beijing Telecom's
+  // WAF challenge collapse to an empty 400 page in CI.
   page.setDefaultTimeout(15000);
   page.setDefaultNavigationTimeout(45000);
   return { context, page };
