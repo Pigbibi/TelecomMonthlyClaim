@@ -134,11 +134,6 @@ async function newMobilePage(browser) {
     userAgent: ANDROID_UA,
     ignoreHTTPSErrors: true,
   });
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
-    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5, configurable: true });
-    Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv8l', configurable: true });
-  });
   const page = await context.newPage();
   page.on('console', msg => {
     if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
@@ -150,7 +145,9 @@ async function newMobilePage(browser) {
   page.on('response', response => {
     if (response.status() >= 400 && /wapbj\.189\.cn/i.test(response.url())) rememberPageDiagnostic(page, { type: 'response', url: response.url(), status: response.status() });
   });
-  await applyAndroidEmulation(context, page);
+  // The Playwright mobile context is enough here. Extra CDP emulation or
+  // navigator overrides make Beijing Telecom's WAF challenge collapse to an
+  // empty 400 page.
   page.setDefaultTimeout(15000);
   page.setDefaultNavigationTimeout(45000);
   return { context, page };
