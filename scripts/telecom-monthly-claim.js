@@ -6,7 +6,6 @@ const { loadConfig } = require('../src/config');
 const { SmsInboxClient, sleep } = require('../src/sms-inbox-client');
 const { stateMonth, isFinalRetryDay, beijingParts } = require('../src/retry-date');
 
-const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36';
 
 function mask(s) {
   const phone = process.env.TELECOM_PHONE || '';
@@ -55,25 +54,36 @@ async function actionDelay(config) {
   if (delayMs > 0) await sleep(delayMs);
 }
 
-async function alignAndroidClientHints(context, page) {
+function chromeVersionParts(browser) {
+  const fullVersion = /\d+\.\d+\.\d+\.\d+/.exec(browser.version())?.[0] || '120.0.0.0';
+  return { fullVersion, majorVersion: fullVersion.split('.')[0] };
+}
+
+function androidUserAgent(browser) {
+  const { fullVersion } = chromeVersionParts(browser);
+  return `Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${fullVersion} Mobile Safari/537.36`;
+}
+
+async function alignAndroidClientHints(context, page, browser) {
+  const { fullVersion, majorVersion } = chromeVersionParts(browser);
   const client = await context.newCDPSession(page);
   await client.send('Network.enable').catch(() => {});
   await client.send('Emulation.setUserAgentOverride', {
-    userAgent: ANDROID_UA,
+    userAgent: androidUserAgent(browser),
     acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
     platform: 'Android',
     userAgentMetadata: {
       brands: [
-        { brand: 'Google Chrome', version: '147' },
+        { brand: 'Google Chrome', version: majorVersion },
         { brand: 'Not.A/Brand', version: '8' },
-        { brand: 'Chromium', version: '147' },
+        { brand: 'Chromium', version: majorVersion },
       ],
       fullVersionList: [
-        { brand: 'Google Chrome', version: '147.0.7727.138' },
+        { brand: 'Google Chrome', version: fullVersion },
         { brand: 'Not.A/Brand', version: '8.0.0.0' },
-        { brand: 'Chromium', version: '147.0.7727.138' },
+        { brand: 'Chromium', version: fullVersion },
       ],
-      fullVersion: '147.0.7727.138',
+      fullVersion,
       platform: 'Android',
       platformVersion: '13.0.0',
       architecture: '',
@@ -113,12 +123,16 @@ async function launchBrowser(config) {
   }
   if (config.browserChannel) options.channel = config.browserChannel;
   try {
-    return await chromium.launch(options);
+    const browser = await chromium.launch(options);
+    log('Browser launched', { version: browser.version(), channel: options.channel || 'bundled' });
+    return browser;
   } catch (err) {
     if (!options.channel) throw err;
     log(`Browser channel ${options.channel} unavailable, falling back to bundled chromium`);
     delete options.channel;
-    return chromium.launch(options);
+    const browser = await chromium.launch(options);
+    log('Browser launched', { version: browser.version(), channel: 'bundled' });
+    return browser;
   }
 }
 
@@ -138,7 +152,7 @@ async function newMobilePage(browser) {
     hasTouch: true,
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
-    userAgent: ANDROID_UA,
+    userAgent: androidUserAgent(browser),
     ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
@@ -161,7 +175,7 @@ async function newMobilePage(browser) {
   // Keep Chromium client hints consistent with the Android UA. Avoid navigator
   // overrides and metric CDP emulation; those made the WAF entry page collapse
   // to an empty 400 page in CI.
-  await alignAndroidClientHints(context, page);
+  await alignAndroidClientHints(context, page, browser);
   page.setDefaultTimeout(15000);
   page.setDefaultNavigationTimeout(45000);
   return { context, page };
