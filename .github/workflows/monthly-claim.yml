@@ -32,6 +32,9 @@ jobs:
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
       TELECOM_CONNECTIVITY_MODE: ${{ vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
+      TELECOM_BROWSER_RUNNER: ${{ vars.TELECOM_BROWSER_RUNNER || 'github' }}
+      HOME_CLAIM_RUNNER_URL: ${{ vars.HOME_CLAIM_RUNNER_URL || 'http://127.0.0.1:19090/run' }}
+      HOME_CLAIM_RUNNER_HEALTH_URL: ${{ vars.HOME_CLAIM_RUNNER_HEALTH_URL || 'http://127.0.0.1:19090/health' }}
       SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'pushplus' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
@@ -179,6 +182,9 @@ jobs:
             ssh-keyscan -p "$BWG_SSH_PORT" -H "$BWG_SSH_HOST" >> ~/.ssh/known_hosts
           fi
           ssh_forwards=(-L 127.0.0.1:13128:127.0.0.1:13128)
+          if [ "${TELECOM_BROWSER_RUNNER:-github}" = "home" ]; then
+            ssh_forwards=(-L 127.0.0.1:19090:127.0.0.1:19090 "${ssh_forwards[@]}")
+          fi
           if [ "$sms_provider" != "pushplus" ]; then
             ssh_forwards=(-L 127.0.0.1:18787:127.0.0.1:18787 "${ssh_forwards[@]}")
           fi
@@ -213,6 +219,11 @@ jobs:
             curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
           }
 
+          check_home_runner() {
+            [ "${TELECOM_BROWSER_RUNNER:-github}" = "home" ] || return 0
+            curl -fsS --connect-timeout 8 --max-time 20 "$HOME_CLAIM_RUNNER_HEALTH_URL" >/dev/null
+          }
+
           sms_ok=false
           proxy_ok=false
           for attempt in 1 2 3; do
@@ -227,14 +238,17 @@ jobs:
               echo "SMS inbox health check failed."
             fi
 
-            if [ "$sms_ok" = "true" ] && check_home_proxy; then
+            if [ "$sms_ok" = "true" ] && check_home_proxy && check_home_runner; then
               proxy_ok=true
               echo "Home proxy check passed."
+              if [ "${TELECOM_BROWSER_RUNNER:-github}" = "home" ]; then
+                echo "Home claim runner check passed."
+              fi
               break
             fi
 
             proxy_ok=false
-            echo "Home proxy check failed."
+            echo "Home proxy or home runner check failed."
             if [ "$attempt" != "3" ]; then
               close_tunnel
               sleep $((attempt * 5))
@@ -256,10 +270,15 @@ jobs:
             fi
           fi
 
-      - name: Run claim through home exit proxy
+      - name: Run claim
         id: claim
         if: steps.claim_plan.outputs.should_run == 'true'
-        run: xvfb-run -a node scripts/telecom-monthly-claim.js
+        run: |
+          if [ "${TELECOM_BROWSER_RUNNER:-github}" = "home" ]; then
+            node scripts/invoke-home-claim-runner.js
+          else
+            xvfb-run -a node scripts/telecom-monthly-claim.js
+          fi
 
       - name: Commit monthly state
         if: always() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'

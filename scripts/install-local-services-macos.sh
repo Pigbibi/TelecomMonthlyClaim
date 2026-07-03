@@ -79,6 +79,7 @@ install_one() {
 
 install_one "com.lisiyi.telecom-sms-inbox" "sms-inbox"
 install_one "com.lisiyi.telecom-home-proxy" "home-proxy"
+install_one "com.lisiyi.telecom-home-claim-runner" "home-claim-runner"
 install_one "com.lisiyi.telecom-bwg-tunnel" "bwg-tunnel"
 
 echo
