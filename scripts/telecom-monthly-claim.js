@@ -425,6 +425,10 @@ async function hasSliderVerification(page) {
     return /安全验证|向右滑动滑块|滑动滑块/.test(text)
       && (
         visible(document.querySelector('#secondPop_puzzle_check'))
+        || visible(document.querySelector('.puzzle-verify-popup'))
+        || visible(document.querySelector('.captcha-wrapper'))
+        || visible(document.querySelector('.slider-track'))
+        || visible(document.querySelector('.slider-btn'))
         || visible(document.querySelector('.sliderContainer'))
         || visible(document.querySelector('.slider'))
         || visible(document.querySelector('[class*="slider" i]'))
@@ -433,13 +437,21 @@ async function hasSliderVerification(page) {
   }).catch(() => false);
 }
 
+async function waitForSliderVerification(page, timeoutMs = 7000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await hasSliderVerification(page)) return true;
+    await sleep(300);
+  }
+  return hasSliderVerification(page);
+}
+
 async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
   await phoneField.locator.fill(config.phone);
   await clickLoginSmsButton(page, config);
-  await sleep(1000);
-  if (await hasSliderVerification(page)) {
+  if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
     await solvePuzzle(page);
   }
@@ -771,13 +783,17 @@ async function transparentPuzzleInfo(page) {
     };
     const imageMatch = imageMatchInfo();
     const sliderEl = document.querySelector('#slider_track_btn')
+      || document.querySelector('.slider-btn')
       || document.querySelector('.slider')
       || Array.from(document.querySelectorAll('[class*="slider" i],[id*="slider" i]'))
       .filter(visible)
       .sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0];
     const containerEl = document.querySelector('#slider_track')
+      || document.querySelector('.slider-track')
+      || document.querySelector('.captcha-wrapper')
       || document.querySelector('.sliderContainer')
       || sliderEl?.closest('[class*="container" i]')
+      || sliderEl?.closest('[class*="wrapper" i]')
       || Array.from(document.querySelectorAll('[class*="slider" i],[id*="slider" i]'))
         .filter(visible)
         .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
@@ -790,7 +806,9 @@ async function transparentPuzzleInfo(page) {
       imageMatch,
       slider: slider ? { x: slider.x, y: slider.y, w: slider.width, h: slider.height } : null,
       container: container ? { x: container.x, y: container.y, w: container.width, h: container.height } : null,
-      message: document.querySelector('#secondPop_msg')?.innerText?.trim() || '',
+      message: document.querySelector('#secondPop_msg')?.innerText?.trim()
+        || document.querySelector('.puzzle-msg')?.innerText?.trim()
+        || '',
       elements: Array.from(document.querySelectorAll('canvas,img,button,a,span,div,input'))
         .filter(e => visible(e) && /(slider|captcha|puzzle|checknum|verify|drag|block|滑块|验证)/i.test([
           e.id,
@@ -818,6 +836,10 @@ async function solvePuzzle(page) {
       return /安全验证|向右滑动滑块|滑动滑块/.test(document.body?.innerText || '')
         && (
           visible(document.querySelector('#secondPop_puzzle_check'))
+          || visible(document.querySelector('.puzzle-verify-popup'))
+          || visible(document.querySelector('.captcha-wrapper'))
+          || visible(document.querySelector('.slider-track'))
+          || visible(document.querySelector('.slider-btn'))
           || visible(document.querySelector('.sliderContainer'))
           || visible(document.querySelector('.slider'))
           || visible(document.querySelector('[class*="slider" i]'))
