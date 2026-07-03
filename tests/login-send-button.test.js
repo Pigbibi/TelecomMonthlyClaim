@@ -66,3 +66,22 @@ test('picks a visible input when the first matching Vant input is hidden', async
   assert.equal(match.selector, 'input[placeholder*="手机号码"]');
   assert.equal(match.locator.id, 'input[placeholder*="手机号码"]:1');
 });
+
+test('does not trust Playwright visibility when DOM rect says input is hidden', async () => {
+  const page = {
+    locator(selector) {
+      return {
+        count: async () => (selector === 'input[placeholder*="手机号码"]' ? 2 : 0),
+        nth: index => ({
+          id: `${selector}:${index}`,
+          evaluate: async () => index === 1,
+          isVisible: async () => true,
+        }),
+      };
+    },
+  };
+
+  const match = await firstVisibleLocator(page, ['input[placeholder*="手机号码"]']);
+
+  assert.equal(match.locator.id, 'input[placeholder*="手机号码"]:1');
+});

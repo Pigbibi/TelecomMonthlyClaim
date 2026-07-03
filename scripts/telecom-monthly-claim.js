@@ -250,13 +250,30 @@ const LOGIN_PHONE_SELECTORS = ['#phoneNumber', 'input[placeholder*="手机号码
 const LOGIN_CODE_SELECTORS = ['#code', 'input[placeholder*="短信验证码"]', 'input[placeholder*="验证码"]'];
 const LOGIN_SUBMIT_SELECTORS = ['.know-box.button', 'button:has-text("立即办理")', 'div:has-text("立即办理")'];
 
+async function isLocatorActuallyVisible(locator) {
+  if (typeof locator.evaluate === 'function') {
+    const domVisible = await locator.evaluate(e => {
+      if (!e) return false;
+      const style = getComputedStyle(e);
+      const rect = e.getBoundingClientRect();
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.pointerEvents !== 'none'
+        && rect.width > 0
+        && rect.height > 0;
+    }).catch(() => null);
+    if (domVisible !== null) return domVisible;
+  }
+  return locator.isVisible().catch(() => false);
+}
+
 async function firstVisibleLocator(page, selectors) {
   for (const selector of selectors) {
     const matches = page.locator(selector);
     const count = Math.min(await matches.count().catch(() => 0), 20);
     for (let i = 0; i < count; i += 1) {
       const locator = matches.nth(i);
-      if (await locator.isVisible().catch(() => false)) return { locator, selector };
+      if (await isLocatorActuallyVisible(locator)) return { locator, selector };
     }
   }
   return null;
@@ -850,7 +867,8 @@ async function solvePuzzle(page) {
     const info = await transparentPuzzleInfo(page);
     const hasCanvasTarget = info.canvas && info.bbox;
     const hasImageTarget = info.imageMatch;
-    if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget)) {
+    const hasTrackFallback = info.slider && info.container && info.container.w > info.slider.w + 45;
+    if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget && !hasTrackFallback)) {
       log('Slider puzzle info incomplete', { attempt, info });
       await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
       await sleep(2000);
@@ -858,8 +876,14 @@ async function solvePuzzle(page) {
     }
     const moveX = info.imageMatch
       ? info.imageMatch.x
-      : Math.round(info.bbox.minx / ((info.canvas.width - 40 - 20) / (info.canvas.width - 40)));
-    const maxMoveX = info.imageMatch ? (info.imageMatch.bg.width - info.imageMatch.block.width + 10) : info.canvas.width - 35;
+      : hasCanvasTarget
+        ? Math.round(info.bbox.minx / ((info.canvas.width - 40 - 20) / (info.canvas.width - 40)))
+        : Math.round(info.container.w - info.slider.w - 4);
+    const maxMoveX = info.imageMatch
+      ? (info.imageMatch.bg.width - info.imageMatch.block.width + 10)
+      : hasCanvasTarget
+        ? info.canvas.width - 35
+        : info.container.w - 4;
     if (moveX < 45 || moveX > maxMoveX) {
       log('Slider puzzle target out of range', { attempt, info, moveX });
       await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
@@ -875,7 +899,7 @@ async function solvePuzzle(page) {
         score: info.imageMatch.score,
         texture: info.imageMatch.texture,
         edge: info.imageMatch.edge,
-      } : null,
+      } : hasCanvasTarget ? null : { method: 'track-end' },
     });
     const responsePromise = page.waitForResponse(r => r.url().includes('/re/sms/sendRandProtocolV3'), { timeout: 20000 }).catch(() => null);
     const sx = info.slider.x + info.slider.w / 2;
