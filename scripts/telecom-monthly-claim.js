@@ -54,14 +54,8 @@ async function actionDelay(config) {
   if (delayMs > 0) await sleep(delayMs);
 }
 
-function chromeVersionParts(browser) {
-  const fullVersion = /\d+\.\d+\.\d+\.\d+/.exec(browser.version())?.[0] || '120.0.0.0';
-  return { fullVersion, majorVersion: fullVersion.split('.')[0] };
-}
-
-function androidUserAgent(browser) {
-  const { fullVersion } = chromeVersionParts(browser);
-  return `Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${fullVersion} Mobile Safari/537.36`;
+function androidUserAgent() {
+  return 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36';
 }
 
 function rememberPageDiagnostic(page, entry) {
@@ -77,6 +71,12 @@ function sliderFailureHint(page) {
   if (/ERR_NAME_NOT_RESOLVED/i.test(text)) signals.push('ERR_NAME_NOT_RESOLVED');
   if (/getSliderChallenge/i.test(text) && /"status":400/.test(text)) signals.push('getSliderChallenge HTTP 400');
   return signals.length ? `; ${signals.join(', ')}` : '';
+}
+
+function isBlankSliderChallengeRejection(info, page) {
+  return /获取验证码失败，请重试/.test(info?.message || '')
+    && /getSliderChallenge/i.test(JSON.stringify(page.__telecomDiagnostics || []))
+    && /"status":400/.test(JSON.stringify(page.__telecomDiagnostics || []));
 }
 
 async function launchBrowser(config) {
@@ -459,25 +459,6 @@ async function waitForSliderVerification(page, timeoutMs = 7000) {
 }
 
 
-async function sendLoginSmsViaBackend(page, config) {
-  const result = await page.evaluate(async phone => {
-    const response = await fetch('/wap2017/re/sms/sendRandByUnlog', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ accNo: phone, validType: 'SLIDER' }),
-    });
-    const text = await response.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch {}
-    return { status: response.status, ok: response.ok, data, body: text.slice(0, 300) };
-  }, config.phone);
-  log('Direct login SMS backend response', result);
-  const retCode = String(result.data?.retCode ?? '');
-  const apiResult = String(result.data?.result ?? '');
-  if (result.ok && (apiResult === '0' || retCode === '000000' || retCode === '0001')) return true;
-  return false;
-}
-
 async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
@@ -485,13 +466,7 @@ async function sendLoginCode(page, config) {
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
-    try {
-      await solvePuzzle(page);
-    } catch (err) {
-      if (!/getSliderChallenge HTTP 400/i.test(err.message || '')) throw err;
-      log('Slider challenge API failed; trying direct login SMS backend call');
-      if (!await sendLoginSmsViaBackend(page, config)) throw err;
-    }
+    await solvePuzzle(page);
   }
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
@@ -593,6 +568,7 @@ async function resetLoginEntryPage(page) {
 }
 
 function isRetryableLoginSendError(err) {
+  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(err?.message || '')) return false;
   if (isProxyPathError(err)) return false;
   return /Slider verification (failed|service busy)|#phoneNumber|Login phone field not found|element is not visible/.test(err?.message || '');
 }
@@ -892,6 +868,9 @@ async function solvePuzzle(page) {
     const hasTrackFallback = info.slider && info.container && info.container.w > info.slider.w + 45;
     if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget && !hasTrackFallback)) {
       log('Slider puzzle info incomplete', { attempt, info });
+      if (isBlankSliderChallengeRejection(info, page)) {
+        throw new Error(`Telecom slider challenge rejected with blank HTTP 400${sliderFailureHint(page)}`);
+      }
       await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
       await sleep(2000);
       continue;
@@ -1106,4 +1085,5 @@ module.exports = {
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
   firstVisibleLocator,
+  isRetryableLoginSendError,
 };

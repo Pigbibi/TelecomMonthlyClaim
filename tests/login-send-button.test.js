@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { clickLoginSmsButton, firstVisibleLocator } = require('../scripts/telecom-monthly-claim');
+const { clickLoginSmsButton, firstVisibleLocator, isRetryableLoginSendError } = require('../scripts/telecom-monthly-claim');
 
 function fakePage(visibleSelectors) {
   const clicked = [];
@@ -84,4 +84,11 @@ test('does not trust Playwright visibility when DOM rect says input is hidden', 
   const match = await firstVisibleLocator(page, ['input[placeholder*="手机号码"]']);
 
   assert.equal(match.locator.id, 'input[placeholder*="手机号码"]:1');
+});
+
+test('does not retry blank telecom slider challenge rejections', () => {
+  assert.equal(
+    isRetryableLoginSendError(new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400')),
+    false,
+  );
 });

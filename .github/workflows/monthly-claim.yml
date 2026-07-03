@@ -55,7 +55,7 @@ jobs:
       BWG_KNOWN_HOSTS: ${{ secrets.BWG_KNOWN_HOSTS }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
-      ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'true' }}
+      ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
       FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
       FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
       DRY_RUN_BEFORE_FINAL_SUBMIT: ${{ github.event.inputs.dry_run || 'false' }}
