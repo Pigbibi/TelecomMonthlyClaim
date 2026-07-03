@@ -37,3 +37,12 @@ test('falls back to visible text selector when legacy class changes', async () =
   assert.equal(selector, 'button:has-text("验证码")');
   assert.deepEqual(page.clicked, ['button:has-text("验证码")']);
 });
+
+test('clicks the Vant login SMS send button text', async () => {
+  const page = fakePage(new Set(['button:has-text("点击获取")']));
+
+  const selector = await clickLoginSmsButton(page, { actionDelayMs: 0 });
+
+  assert.equal(selector, 'button:has-text("点击获取")');
+  assert.deepEqual(page.clicked, ['button:has-text("点击获取")']);
+});

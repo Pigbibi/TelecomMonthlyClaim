@@ -238,13 +238,57 @@ const LOGIN_SMS_SEND_SELECTORS = [
   'button:has-text("获取验证码")',
   'button:has-text("发送验证码")',
   'button:has-text("验证码")',
+  'button:has-text("点击获取")',
   'a:has-text("获取验证码")',
   'a:has-text("发送验证码")',
   'span:has-text("获取验证码")',
   'span:has-text("发送验证码")',
+  'span:has-text("点击获取")',
   'div:has-text("获取验证码")',
   'div:has-text("发送验证码")',
+  'div:has-text("点击获取")',
 ];
+
+const LOGIN_PHONE_SELECTORS = ['#phoneNumber', 'input[placeholder*="手机号码"]', 'input[placeholder*="手机号"]'];
+const LOGIN_CODE_SELECTORS = ['#code', 'input[placeholder*="短信验证码"]', 'input[placeholder*="验证码"]'];
+const LOGIN_SUBMIT_SELECTORS = ['.know-box.button', 'button:has-text("立即办理")', 'div:has-text("立即办理")'];
+
+async function firstVisibleLocator(page, selectors) {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await locator.isVisible().catch(() => false)) return { locator, selector };
+  }
+  return null;
+}
+
+async function hasLoginEntry(page) {
+  return !!(await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS))
+    || await page.getByText('短信验证码登录', { exact: true }).isVisible().catch(() => false);
+}
+
+async function waitForLoginEntry(page, timeoutMs = 25000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await hasLoginEntry(page)) return true;
+    await sleep(1000);
+  }
+  return false;
+}
+
+async function ensureSmsLoginForm(page, config) {
+  let phoneField = await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS);
+  if (phoneField) return phoneField;
+  const smsLogin = page.getByText('短信验证码登录', { exact: true });
+  if (await smsLogin.isVisible().catch(() => false)) {
+    await actionDelay(config);
+    await smsLogin.click({ force: true });
+    await sleep(1000);
+  }
+  phoneField = await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS);
+  if (phoneField) return phoneField;
+  const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+  throw new Error(`Login phone field not found after opening SMS login form; page summary: ${mask(JSON.stringify(summary))}`);
+}
 
 async function markLoginSmsButtonCandidate(page) {
   return page.evaluate(() => {
@@ -337,9 +381,9 @@ async function hasSliderVerification(page) {
 }
 
 async function sendLoginCode(page, config) {
-  await page.locator('#phoneNumber').waitFor({ state: 'visible' });
+  const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
-  await page.locator('#phoneNumber').fill(config.phone);
+  await phoneField.locator.fill(config.phone);
   await clickLoginSmsButton(page, config);
   await sleep(1000);
   if (await hasSliderVerification(page)) {
@@ -356,11 +400,21 @@ async function submitLoginCode(page, code, config) {
   await closeDialogs(page);
   await sleep(500);
   await actionDelay(config);
-  await page.locator('#code').fill(code);
+  const codeField = await firstVisibleLocator(page, LOGIN_CODE_SELECTORS);
+  if (!codeField) {
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    throw new Error(`Login code field not found; page summary: ${mask(JSON.stringify(summary))}`);
+  }
+  await codeField.locator.fill(code);
   await actionDelay(config);
   await closeDialogs(page);
   await sleep(300);
-  await page.locator('.know-box.button').click({ force: true });
+  const submitButton = await firstVisibleLocator(page, LOGIN_SUBMIT_SELECTORS);
+  if (!submitButton) {
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    throw new Error(`Login submit button not found; page summary: ${mask(JSON.stringify(summary))}`);
+  }
+  await submitButton.locator.click({ force: true });
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await sleep(7000);
   let text = await visibleText(page);
@@ -368,7 +422,8 @@ async function submitLoginCode(page, code, config) {
     await closeDialogs(page);
     await sleep(500);
     await actionDelay(config);
-    await page.locator('.know-box.button').click({ force: true });
+    const retrySubmitButton = await firstVisibleLocator(page, LOGIN_SUBMIT_SELECTORS);
+    if (retrySubmitButton) await retrySubmitButton.locator.click({ force: true });
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     await sleep(7000);
     text = await visibleText(page);
@@ -400,7 +455,7 @@ async function gotoLoginEntryPage(page, config, reason) {
       return null;
     });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    if (await page.locator('#phoneNumber').isVisible().catch(() => false)) {
+    if (await waitForLoginEntry(page)) {
       log('Login entry ready', { reason, strategy: candidate.label, status: response?.status?.() || null, url: page.url() });
       return;
     }
@@ -410,7 +465,7 @@ async function gotoLoginEntryPage(page, config, reason) {
       rememberPageDiagnostic(page, { type: 'reload-error', url: page.url(), error: err.message });
     });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    if (await page.locator('#phoneNumber').isVisible().catch(() => false)) {
+    if (await waitForLoginEntry(page)) {
       log('Login entry ready after reload', { reason, strategy: candidate.label, url: page.url() });
       return;
     }
