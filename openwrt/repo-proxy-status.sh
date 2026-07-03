@@ -39,11 +39,10 @@ tinyproxy_http_ok() {
     https://wapbj.189.cn/ >"$TMP_FILE" 2>/dev/null
 }
 
-tinyproxy_connect_ports_ok() {
+tinyproxy_connect_policy_ok() {
   config_file="/var/etc/tinyproxy.conf"
   [ -r "$config_file" ] || return 1
-  grep -qx 'ConnectPort 9002' "$config_file" || return 1
-  grep -qx 'ConnectPort 22443' "$config_file" || return 1
+  ! grep -q '^ConnectPort[[:space:]]' "$config_file"
 }
 
 tinyproxy_behavior_port_ok() {
@@ -112,7 +111,7 @@ run_check 'BWG transparent :11090 listener' has_listener ':11090'
 
 printf '\n[path probes]\n'
 run_check 'tinyproxy -> wapbj.189.cn path' tinyproxy_http_ok
-run_check 'tinyproxy WAF CONNECT ports' tinyproxy_connect_ports_ok
+run_check 'tinyproxy unrestricted CONNECT ports' tinyproxy_connect_policy_ok
 run_check 'tinyproxy -> behavior data :9002 path' tinyproxy_behavior_port_ok
 run_check 'Telecom BWG reverse tunnel endpoints' telecom_remote_tunnel_ok
 run_check 'Schwab VPS router tunnel TCP connection' schwab_vps_connection_ok

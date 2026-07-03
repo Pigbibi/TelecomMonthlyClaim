@@ -94,10 +94,7 @@ fi
 uci -q set tinyproxy.@tinyproxy[0].enabled='1'
 uci -q set tinyproxy.@tinyproxy[0].Listen='127.0.0.1'
 uci -q set tinyproxy.@tinyproxy[0].Port="$(. /etc/telecom-monthly-claim.env; printf '%s' "$ROUTER_PROXY_PORT")"
-for port in 443 563 9002 22443; do
-  uci -q del_list tinyproxy.@tinyproxy[0].ConnectPort="$port" || true
-  uci add_list tinyproxy.@tinyproxy[0].ConnectPort="$port"
-done
+uci -q delete tinyproxy.@tinyproxy[0].ConnectPort || true
 uci commit tinyproxy
 /etc/init.d/tinyproxy enable
 /etc/init.d/tinyproxy restart

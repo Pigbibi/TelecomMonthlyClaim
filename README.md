@@ -129,16 +129,13 @@ FORCE_RUN=true DRY_RUN_BEFORE_FINAL_SUBMIT=true npm run claim
 
 本机命令不会自动读取 `.env.local`；运行前需要先把里面的值导出为环境变量。`TELECOM_ENTRY_URL` 这类 URL 如果包含 `&`，请加引号，避免 shell 截断。
 
-OpenWrt 的 tinyproxy 必须允许北京电信风控依赖端口：
+OpenWrt 的 tinyproxy 不应限制 CONNECT 端口：
 
 ```text
-ConnectPort 443
-ConnectPort 563
-ConnectPort 9002
-ConnectPort 22443
+# 不配置 ConnectPort，允许所有 CONNECT 端口
 ```
 
-`9002`/`22443` 缺失时，页面行为数据连接会被 tinyproxy 拒绝，登录滑块可能只显示“获取验证码失败，请重试”，并返回空 HTTP 400。
+北京电信行为风控会访问 `bigdata-behaviordata.189.cn:9002` 和随机高端口域名；限制 CONNECT 端口时，登录滑块可能只显示“获取验证码失败，请重试”，并返回空 HTTP 400。本仓库的 OpenWrt 代理只监听 `127.0.0.1`，并通过 BWG SSH 本地端口访问，不对公网开放。
 
 GitHub Actions 手动运行时，建议第一轮设置：
 
