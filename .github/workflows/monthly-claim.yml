@@ -47,6 +47,7 @@ jobs:
       SEND_CODE_ATTEMPTS: ${{ vars.SEND_CODE_ATTEMPTS || '' }}
       SMS_TIMEOUT_MS: ${{ vars.SMS_TIMEOUT_MS || '' }}
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
+      PROXY_POOL_HTTP_PROXY: ${{ secrets.PROXY_POOL_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || '' }}
       OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || 'http://127.0.0.1:13128' }}
       BWG_SSH_HOST: ${{ secrets.BWG_SSH_HOST }}
       BWG_SSH_USER: ${{ secrets.BWG_SSH_USER || 'root' }}
@@ -116,7 +117,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Validate direct connectivity
-        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE == 'direct'
+        if: steps.claim_plan.outputs.should_run == 'true' && (env.TELECOM_CONNECTIVITY_MODE == 'direct' || env.TELECOM_CONNECTIVITY_MODE == 'proxy_pool')
         run: |
           set -euo pipefail
           sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
@@ -145,7 +146,12 @@ jobs:
             curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
               -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
           fi
-          if [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ]; then
+          if [ "${TELECOM_CONNECTIVITY_MODE:-}" = "proxy_pool" ]; then
+            : "${PROXY_POOL_HTTP_PROXY:?Missing PROXY_POOL_HTTP_PROXY secret for proxy_pool mode}"
+            curl -sSI --proxy "$PROXY_POOL_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
+            echo "Proxy pool check passed."
+            echo "OPENWRT_HTTP_PROXY=$PROXY_POOL_HTTP_PROXY" >> "$GITHUB_ENV"
+          elif [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ]; then
             echo "Direct mode: clearing default loopback OPENWRT_HTTP_PROXY."
             echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
           elif [ -n "${OPENWRT_HTTP_PROXY:-}" ]; then
@@ -153,7 +159,7 @@ jobs:
           fi
 
       - name: Open SSH tunnel to home proxy and optional SMS inbox via BWG
-        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct'
+        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool'
         run: |
           set -euo pipefail
           : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"

@@ -49,6 +49,10 @@ function isProxyPathError(err) {
   ].some(pattern => pattern.test(text));
 }
 
+function isTelecomWafRejection(err) {
+  return /Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err?.message || '');
+}
+
 async function actionDelay(config) {
   const delayMs = Number(config?.actionDelayMs || 0);
   if (delayMs > 0) await sleep(delayMs);
@@ -85,7 +89,8 @@ async function launchBrowser(config) {
     args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
   };
   if (config.openwrtProxy) {
-    log('Launching browser through home proxy', { proxy: maskProxyUrl(config.openwrtProxy) });
+    const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'home proxy';
+    log(`Launching browser through ${label}`, { proxy: maskProxyUrl(config.openwrtProxy) });
     options.proxy = buildProxyOptions(config.openwrtProxy);
   } else {
     log('Launching browser without OPENWRT_HTTP_PROXY');
@@ -1045,6 +1050,15 @@ async function runClaimWithOptionalDirectFallback(config) {
   try {
     await runClaim(config);
   } catch (err) {
+    if (config.proxyPoolProxy && config.openwrtProxy && config.openwrtProxy !== config.proxyPoolProxy && isTelecomWafRejection(err)) {
+      log('Telecom WAF rejected home proxy path; retrying once through proxy pool', {
+        homeProxy: maskProxyUrl(config.openwrtProxy),
+        proxyPool: maskProxyUrl(config.proxyPoolProxy),
+        error: err.message,
+      });
+      await runClaim({ ...config, openwrtProxy: config.proxyPoolProxy });
+      return;
+    }
     if (config.allowDirectProxyFallback && config.openwrtProxy && isProxyPathError(err)) {
       log('Home proxy path failed; retrying this run without OPENWRT_HTTP_PROXY', {
         proxy: maskProxyUrl(config.openwrtProxy),
@@ -1086,4 +1100,5 @@ module.exports = {
   clickLoginSmsButton,
   firstVisibleLocator,
   isRetryableLoginSendError,
+  isTelecomWafRejection,
 };

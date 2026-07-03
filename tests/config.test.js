@@ -9,6 +9,7 @@ function withCleanTelecomEnv(fn) {
       key.startsWith('TELECOM_')
       || key.startsWith('SMS_')
       || key === 'OPENWRT_HTTP_PROXY'
+      || key === 'PROXY_POOL_HTTP_PROXY'
       || key === 'HTTPS_PROXY'
       || key === 'HTTP_PROXY'
       || key.startsWith('PUSHPLUS_')
@@ -92,6 +93,16 @@ test('loads direct proxy fallback flag from env', () => {
     Object.assign(process.env, originalEnv);
   }
 });
+
+test('loads proxy pool proxy from env', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+  process.env.PROXY_POOL_HTTP_PROXY = 'http://proxy-pool.example.test:8080';
+
+  const config = loadConfig();
+
+  assert.equal(config.proxyPoolProxy, 'http://proxy-pool.example.test:8080');
+}));
 
 test('loads pacing delays from env', () => withCleanTelecomEnv(() => {
   process.env.TELECOM_PHONE = '18500000000';

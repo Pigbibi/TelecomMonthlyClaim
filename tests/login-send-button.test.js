@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { clickLoginSmsButton, firstVisibleLocator, isRetryableLoginSendError } = require('../scripts/telecom-monthly-claim');
+const {
+  clickLoginSmsButton,
+  firstVisibleLocator,
+  isRetryableLoginSendError,
+  isTelecomWafRejection,
+} = require('../scripts/telecom-monthly-claim');
 
 function fakePage(visibleSelectors) {
   const clicked = [];
@@ -90,5 +95,12 @@ test('does not retry blank telecom slider challenge rejections', () => {
   assert.equal(
     isRetryableLoginSendError(new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400')),
     false,
+  );
+});
+
+test('classifies blank telecom slider challenge as WAF rejection', () => {
+  assert.equal(
+    isTelecomWafRejection(new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400')),
+    true,
   );
 });

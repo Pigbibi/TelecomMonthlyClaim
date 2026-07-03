@@ -55,6 +55,21 @@ OPENWRT_HTTP_PROXY=
 
 本仓库默认不设置 `TELECOM_CONNECTIVITY_MODE=direct`，仍使用方案二的 `bwg` 模式。不要为了省事把未鉴权的短信收件箱或代理端口直接暴露到公网。
 
+### 临时：代理池模式
+
+当家里/OpenWrt 出口被北京电信风控限制时，可以临时切换到代理池，避免继续使用内网出口：
+
+```text
+# Variable
+TELECOM_CONNECTIVITY_MODE=proxy_pool
+SEND_CODE_ATTEMPTS=1
+
+# Secret
+PROXY_POOL_HTTP_PROXY=http://user:password@proxy-pool.example:port
+```
+
+`proxy_pool` 模式会跳过 BWG/OpenWrt 隧道，只用 `PROXY_POOL_HTTP_PROXY` 访问 189 页面；如果缺少该 secret，workflow 会在访问电信前失败。常规 `bwg` 模式下，如果家里出口遇到电信滑块空 HTTP 400 且配置了 `PROXY_POOL_HTTP_PROXY`，脚本也会只 fallback 一次到代理池。
+
 ### 默认：PushPlus 短信源
 
 当前实际 workflow 默认从 PushPlus 拉取北京电信 `10001` 验证码，再复用现有的验证码解析逻辑。这个模式适合手机号已经配置成 PushPlus 收短信、且不再使用 SmsForwarder / 自建 SMS inbox 的部署。
@@ -185,6 +200,7 @@ git show origin/logs:latest.json
 | `BWG_SSH_PORT` | `22` | BWG SSH 端口 |
 | `BWG_KNOWN_HOSTS` | 自动 `ssh-keyscan` | BWG host key，推荐固定下来 |
 | `OPENWRT_HTTP_PROXY` | `http://127.0.0.1:13128` | runner 经 SSH 转发后的家里出口代理 |
+| `PROXY_POOL_HTTP_PROXY` | 空 | 临时代理池出口；`TELECOM_CONNECTIVITY_MODE=proxy_pool` 时必填，也可作为家里出口被风控时的一次 fallback。 |
 | `SMS_INBOX_TOKEN` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时需要，手机转发器、GitHub runner、SMS inbox 共享的 Bearer token |
 | `SMS_INBOX_URL` | `http://127.0.0.1:18787/messages` | 仅 `SMS_INBOX_PROVIDER=http` 时使用，runner 经 SSH 转发后的 inbox 查询地址；OpenWrt 用 `/cgi-bin/telecom-messages` |
 | `SMS_INBOX_HEALTH_URL` | `http://127.0.0.1:18787/health` | 仅 `SMS_INBOX_PROVIDER=http` 时使用，inbox 健康检查地址；OpenWrt 用 `/cgi-bin/telecom-sms-health` |
@@ -199,7 +215,7 @@ Variables：
 | `TELECOM_EXPECTED_PLAN_ID` | 空 | 可选覆盖项。为空时由 `TELECOM_TARGET_PACKAGE` 对应 preset 自动填充。 |
 | `TELECOM_ACTION_DELAY_MS` | `800` | 关键填表、点击动作之间的固定等待，降低页面状态未稳定导致的误点。 |
 | `TELECOM_POST_SUCCESS_WAIT_MS` | `8000` | 办理成功后保留成功页多久再关闭浏览器。 |
-| `TELECOM_CONNECTIVITY_MODE` | `bwg` | 网络连接模式。默认 `bwg`；兼容可选 `direct`，但本仓库不设置该方式。 |
+| `TELECOM_CONNECTIVITY_MODE` | `bwg` | 网络连接模式。默认 `bwg`；兼容可选 `direct` / `proxy_pool`。 |
 | `ALLOW_DIRECT_PROXY_FALLBACK` | `false` | 家里代理不可用时是否允许 runner 直接访问活动页；默认关闭，避免绕过 OpenWrt 家里出口。 |
 | `SMS_INBOX_PROVIDER` | `pushplus` | 短信来源。默认 `pushplus` 从 PushPlus 拉取消息；设为 `http` 可回退到原 SMS inbox。 |
 | `PUSHPLUS_BASE_URL` | `https://www.pushplus.plus` | PushPlus OpenAPI 地址，通常不用改。 |

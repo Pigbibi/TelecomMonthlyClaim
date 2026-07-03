@@ -58,6 +58,7 @@ function loadConfig() {
     actionDelayMs: numberEnv('TELECOM_ACTION_DELAY_MS', 800),
     postSuccessWaitMs: numberEnv('TELECOM_POST_SUCCESS_WAIT_MS', 8000),
     openwrtProxy: process.env.OPENWRT_HTTP_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '',
+    proxyPoolProxy: process.env.PROXY_POOL_HTTP_PROXY || '',
     headless: process.env.HEADLESS !== 'false',
     browserChannel: process.env.BROWSER_CHANNEL || 'chrome',
     finalRetryDay: numberEnv('FINAL_RETRY_DAY', 3),
