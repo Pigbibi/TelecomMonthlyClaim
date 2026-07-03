@@ -53,7 +53,7 @@ jobs:
       BWG_SSH_PORT: ${{ secrets.BWG_SSH_PORT || '22' }}
       BWG_SSH_PRIVATE_KEY: ${{ secrets.BWG_SSH_PRIVATE_KEY }}
       BWG_KNOWN_HOSTS: ${{ secrets.BWG_KNOWN_HOSTS }}
-      HEADLESS: "false"
+      HEADLESS: "true"
       BROWSER_CHANNEL: chrome
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'true' }}
       FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
