@@ -43,7 +43,9 @@ function isProxyPathError(err) {
     /ECONNRESET/i,
     /ETIMEDOUT/i,
     /EHOSTUNREACH/i,
+    /ERR_NAME_NOT_RESOLVED/i,
     /socket hang up/i,
+    /getSliderChallenge HTTP 400/i,
     /proxy/i,
   ].some(pattern => pattern.test(text));
 }
@@ -91,6 +93,15 @@ function rememberPageDiagnostic(page, entry) {
   page.__telecomDiagnostics = page.__telecomDiagnostics || [];
   page.__telecomDiagnostics.push({ at: new Date().toISOString(), ...entry });
   page.__telecomDiagnostics = page.__telecomDiagnostics.slice(-20);
+}
+
+function sliderFailureHint(page) {
+  const text = JSON.stringify(page.__telecomDiagnostics || []);
+  const signals = [];
+  if (/ERR_TUNNEL_CONNECTION_FAILED/i.test(text)) signals.push('ERR_TUNNEL_CONNECTION_FAILED');
+  if (/ERR_NAME_NOT_RESOLVED/i.test(text)) signals.push('ERR_NAME_NOT_RESOLVED');
+  if (/getSliderChallenge/i.test(text) && /"status":400/.test(text)) signals.push('getSliderChallenge HTTP 400');
+  return signals.length ? `; ${signals.join(', ')}` : '';
 }
 
 async function launchBrowser(config) {
@@ -572,6 +583,7 @@ async function resetLoginEntryPage(page) {
 }
 
 function isRetryableLoginSendError(err) {
+  if (isProxyPathError(err)) return false;
   return /Slider verification (failed|service busy)|#phoneNumber|Login phone field not found|element is not visible/.test(err?.message || '');
 }
 
@@ -918,7 +930,7 @@ async function solvePuzzle(page) {
     await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
     await sleep(2500);
   }
-  throw new Error('Slider verification failed');
+  throw new Error(`Slider verification failed${sliderFailureHint(page)}`);
 }
 
 async function openSecondPopup(page, config) {
