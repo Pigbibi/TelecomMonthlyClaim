@@ -129,6 +129,17 @@ FORCE_RUN=true DRY_RUN_BEFORE_FINAL_SUBMIT=true npm run claim
 
 本机命令不会自动读取 `.env.local`；运行前需要先把里面的值导出为环境变量。`TELECOM_ENTRY_URL` 这类 URL 如果包含 `&`，请加引号，避免 shell 截断。
 
+OpenWrt 的 tinyproxy 必须允许北京电信风控依赖端口：
+
+```text
+ConnectPort 443
+ConnectPort 563
+ConnectPort 9002
+ConnectPort 22443
+```
+
+`9002`/`22443` 缺失时，页面行为数据连接会被 tinyproxy 拒绝，登录滑块可能只显示“获取验证码失败，请重试”，并返回空 HTTP 400。
+
 GitHub Actions 手动运行时，建议第一轮设置：
 
 ```text
@@ -192,7 +203,7 @@ Variables：
 | `TELECOM_ACTION_DELAY_MS` | `800` | 关键填表、点击动作之间的固定等待，降低页面状态未稳定导致的误点。 |
 | `TELECOM_POST_SUCCESS_WAIT_MS` | `8000` | 办理成功后保留成功页多久再关闭浏览器。 |
 | `TELECOM_CONNECTIVITY_MODE` | `bwg` | 网络连接模式。默认 `bwg`；兼容可选 `direct`，但本仓库不设置该方式。 |
-| `ALLOW_DIRECT_PROXY_FALLBACK` | `true` | 家里代理不可用时是否允许 runner 直接访问活动页。 |
+| `ALLOW_DIRECT_PROXY_FALLBACK` | `false` | 家里代理不可用时是否允许 runner 直接访问活动页；默认关闭，避免绕过 OpenWrt 家里出口。 |
 | `SMS_INBOX_PROVIDER` | `pushplus` | 短信来源。默认 `pushplus` 从 PushPlus 拉取消息；设为 `http` 可回退到原 SMS inbox。 |
 | `PUSHPLUS_BASE_URL` | `https://www.pushplus.plus` | PushPlus OpenAPI 地址，通常不用改。 |
 | `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
@@ -274,7 +285,7 @@ SMS_INBOX_TOKEN=change-me                         # 仅 SMS_INBOX_PROVIDER=http 
 SMS_INBOX_URL=http://127.0.0.1:18787/cgi-bin/telecom-messages
 SMS_INBOX_HEALTH_URL=http://127.0.0.1:18787/cgi-bin/telecom-sms-health
 OPENWRT_HTTP_PROXY=http://127.0.0.1:13128
-ALLOW_DIRECT_PROXY_FALLBACK=true
+ALLOW_DIRECT_PROXY_FALLBACK=false
 ```
 
 如果路由器 tinyproxy 配了 BasicAuth，`OPENWRT_HTTP_PROXY` 需要写成 `http://user:password@127.0.0.1:13128`，脚本会自动拆出代理用户名密码给 Playwright。

@@ -39,6 +39,20 @@ tinyproxy_http_ok() {
     https://wapbj.189.cn/ >"$TMP_FILE" 2>/dev/null
 }
 
+tinyproxy_connect_ports_ok() {
+  config_file="/var/etc/tinyproxy.conf"
+  [ -r "$config_file" ] || return 1
+  grep -qx 'ConnectPort 9002' "$config_file" || return 1
+  grep -qx 'ConnectPort 22443' "$config_file" || return 1
+}
+
+tinyproxy_behavior_port_ok() {
+  curl -ksS --proxy http://127.0.0.1:8888 \
+    --connect-timeout 5 \
+    --max-time 15 \
+    https://bigdata-behaviordata.189.cn:9002/ >"$TMP_FILE" 2>/dev/null
+}
+
 schwab_vps_connection_ok() {
   # The Schwab/GitHub-hosted proxy tunnel is healthy when the dbclient SSH
   # connection managed by schwab-vps-router-tunnel is established.
@@ -98,6 +112,8 @@ run_check 'BWG transparent :11090 listener' has_listener ':11090'
 
 printf '\n[path probes]\n'
 run_check 'tinyproxy -> wapbj.189.cn path' tinyproxy_http_ok
+run_check 'tinyproxy WAF CONNECT ports' tinyproxy_connect_ports_ok
+run_check 'tinyproxy -> behavior data :9002 path' tinyproxy_behavior_port_ok
 run_check 'Telecom BWG reverse tunnel endpoints' telecom_remote_tunnel_ok
 run_check 'Schwab VPS router tunnel TCP connection' schwab_vps_connection_ok
 
