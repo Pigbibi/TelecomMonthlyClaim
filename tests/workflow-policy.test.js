@@ -18,6 +18,7 @@ test('monthly workflow documents generic proxy modes instead of BWG-only executi
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE:/);
   assert.doesNotMatch(workflowText, /BWG_SSH_PRIVATE_KEY/);
   assert.match(workflowText, /Unsupported TELECOM_CONNECTIVITY_MODE/);
+  assert.match(workflowText, /direct\|http_proxy\|ssh_tunnel\|proxy_pool/);
 });
 
 test('repository does not ship Pigbibi internal home proxy automation', () => {
@@ -33,4 +34,14 @@ test('repository does not ship Pigbibi internal home proxy automation', () => {
   ]) {
     assert.equal(fs.existsSync(path.join(root, relativePath)), false, relativePath);
   }
+});
+
+test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
+  assert.match(workflowText, /ssh_tunnel/);
+  assert.match(workflowText, /PROXY_SSH_HOST/);
+  assert.match(workflowText, /PROXY_SSH_PRIVATE_KEY/);
+  assert.match(workflowText, /PROXY_TUNNEL_REMOTE_ENDPOINT/);
+  assert.match(workflowText, /ssh-keyscan/);
+  assert.match(workflowText, /OPENWRT_HTTP_PROXY=http:\/\/127\.0\.0\.1:\$\{PROXY_TUNNEL_LOCAL_PORT\}/);
+  assert.doesNotMatch(workflowText, /BWG_SSH/);
 });

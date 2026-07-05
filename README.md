@@ -20,12 +20,12 @@
 
 | 模式 | 适用场景 | 配置 |
 | --- | --- | --- |
-| `direct` | 本机运行、GitHub-hosted runner 直连，或你已经准备好可从 runner 访问的短信/代理入口 | 默认模式；可选配置 `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` |
+| `direct` | 本机运行，或接受 GitHub-hosted runner 直接访问活动页 | 默认模式，不使用代理 |
+| `http_proxy` | 你已经有一个 runner 可访问的 HTTP/SOCKS 代理 | 设置 `TELECOM_CONNECTIVITY_MODE=http_proxy`，并配置 `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` 等任一 secret |
+| `ssh_tunnel` | 你有一台 runner 可 SSH 登录的跳板机，跳板机能访问你的代理 | 设置 `TELECOM_CONNECTIVITY_MODE=ssh_tunnel`，并配置通用 `PROXY_SSH_*` / `PROXY_TUNNEL_*` |
 | `proxy_pool` | 需要使用你自己的可靠代理池出口 | 设置 `TELECOM_CONNECTIVITY_MODE=proxy_pool` 和 `PROXY_POOL_HTTP_PROXY` |
 
-注意：`http://127.0.0.1:13128` 只代表 runner 自己。除非你在同一个 runner 上自行建立了隧道，否则 GitHub-hosted runner 无法访问你家里的 `127.0.0.1`。本 workflow 会清空这个默认 loopback 值，避免误以为已经走了家里出口。
-
-如果你是 Pigbibi 私有仓库，需要使用家里出口代理，请在私有仓库里接入 `Pigbibi/InternalHomeProxyActions`；不要把这类内部网络实现放进本开源仓库。
+注意：`http://127.0.0.1:13128` 只代表 runner 自己。普通 `http_proxy` 模式不要填 loopback；如果需要先 SSH 到跳板机再转发本地端口，请使用 `ssh_tunnel`。本仓库只提供通用 SSH 端口转发，不内置任何 Pigbibi 专属 action 或私有仓库依赖。
 
 ### direct 模式
 
@@ -33,13 +33,50 @@
 # Variable
 TELECOM_CONNECTIVITY_MODE=direct
 
-# Secrets，可选
-OPENWRT_HTTP_PROXY=
+# Secrets，可选；仅 SMS_INBOX_PROVIDER=http 时需要
 SMS_INBOX_URL=https://your-public-inbox.example.com/messages
 SMS_INBOX_HEALTH_URL=https://your-public-inbox.example.com/health
 ```
 
-`direct` 模式不会创建任何 SSH/WireGuard/内网穿透。你提供的代理或 SMS inbox 必须已经能被当前 runner 访问；不提供代理时，runner 会直接访问活动页。
+`direct` 模式不会创建任何 SSH/WireGuard/内网穿透，也不会使用代理。runner 会直接访问活动页。
+
+### http_proxy 模式
+
+```text
+# Variable
+TELECOM_CONNECTIVITY_MODE=http_proxy
+
+# Secret，任选一个名称
+OPENWRT_HTTP_PROXY=http://user:password@proxy.example:port
+# 或 HOME_HTTP_PROXY / PUBLIC_HTTP_PROXY / SCHWAB_PROXY_URL / BROWSER_PROXY_SERVER
+```
+
+`http_proxy` 模式要求代理地址能被当前 runner 直接访问。不要在这个模式里填 `127.0.0.1` 或 `localhost`，除非你使用的是 self-hosted runner 且代理就在同一台机器上。
+
+### ssh_tunnel 模式
+
+```text
+# Variables
+TELECOM_CONNECTIVITY_MODE=ssh_tunnel
+PROXY_SSH_USER=root                  # 可选，默认 root
+PROXY_SSH_PORT=22                    # 可选，默认 22
+PROXY_TUNNEL_LOCAL_PORT=13128        # 可选，默认 13128
+PROXY_TUNNEL_REMOTE_ENDPOINT=127.0.0.1:13128
+PROXY_HEALTH_URL=https://wapbj.189.cn/  # 可选
+
+# Secrets
+PROXY_SSH_HOST=your-vps.example.com
+PROXY_SSH_PRIVATE_KEY=<private key>
+PROXY_SSH_KNOWN_HOSTS=<known_hosts line>  # 推荐；不填时 workflow 会 ssh-keyscan
+```
+
+`ssh_tunnel` 模式会在 GitHub runner 上执行通用 SSH 本地端口转发：
+
+```text
+runner:127.0.0.1:PROXY_TUNNEL_LOCAL_PORT -> PROXY_SSH_HOST -> PROXY_TUNNEL_REMOTE_ENDPOINT
+```
+
+这个模式适合用户自己的 VPS、Zero Trust 入口、家里反向隧道或其他跳板结构。仓库不会假设你使用哪种路由器、VPS 或内网穿透方案。
 
 ### proxy_pool 模式
 
@@ -90,7 +127,7 @@ PushPlus 模式不需要 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_T
 
 ## 快速部署
 
-推荐按“PushPlus 收短信 + direct/proxy_pool 网络配置”部署：
+推荐按“PushPlus 收短信 + direct/http_proxy/ssh_tunnel/proxy_pool 网络配置”部署：
 
 1. Fork 或新建仓库，先在私有仓库里完成配置和 dry-run 验证。
 2. 确认北京电信手机号收到的 `10001` 短信会进入 PushPlus。
@@ -121,13 +158,19 @@ PUSHPLUS_TOKEN=你的 PushPlus 用户 token
 PUSHPLUS_SECRET_KEY=你的 PushPlus OpenAPI secretKey
 ```
 
-如果你需要代理出口，二选一：
+如果你需要代理出口，选择一种模式：
 
 ```text
-# direct 模式下使用一个 runner 可访问的代理
+# runner 可直接访问的代理
+TELECOM_CONNECTIVITY_MODE=http_proxy
 OPENWRT_HTTP_PROXY=http://user:password@proxy.example:port
 
-# 或使用代理池模式
+# SSH 跳板转发到你的代理
+TELECOM_CONNECTIVITY_MODE=ssh_tunnel
+PROXY_SSH_HOST=your-vps.example.com
+PROXY_TUNNEL_REMOTE_ENDPOINT=127.0.0.1:13128
+
+# 可靠代理池
 TELECOM_CONNECTIVITY_MODE=proxy_pool
 PROXY_POOL_HTTP_PROXY=http://user:password@proxy-pool.example:port
 ```
@@ -162,8 +205,12 @@ git show origin/logs:latest.json
 
 | Secret | 默认值 | 说明 |
 | --- | --- | --- |
-| `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` | 空 | `direct` 模式下的代理地址；必须能从 runner 访问。不要填只存在于你家里网络的 loopback 地址。 |
+| `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` / `SCHWAB_PROXY_URL` / `BROWSER_PROXY_SERVER` | 空 | `http_proxy` 模式下的代理地址；必须能从 runner 访问。 |
 | `PROXY_POOL_HTTP_PROXY` | 空 | `TELECOM_CONNECTIVITY_MODE=proxy_pool` 时必填。 |
+| `PROXY_SSH_HOST` | 空 | `TELECOM_CONNECTIVITY_MODE=ssh_tunnel` 时必填，SSH 跳板机地址。 |
+| `PROXY_SSH_PRIVATE_KEY` | 空 | `ssh_tunnel` 时必填，登录跳板机的私钥。 |
+| `PROXY_SSH_KNOWN_HOSTS` | 空 | `ssh_tunnel` 推荐配置，跳板机 known_hosts。 |
+| `PROXY_TUNNEL_REMOTE_ENDPOINT` | `127.0.0.1:13128` | `ssh_tunnel` 可放 secret 或 variable，跳板机侧可访问的代理 `host:port`。 |
 | `SMS_INBOX_TOKEN` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时需要，手机转发器、runner、SMS inbox 共享的 Bearer token。 |
 | `SMS_INBOX_URL` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时使用，必须能从 runner 访问。 |
 | `SMS_INBOX_HEALTH_URL` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时使用，必须能从 runner 访问。 |
@@ -178,7 +225,7 @@ Variables：
 | `TELECOM_EXPECTED_PLAN_ID` | 空 | 可选覆盖项。为空时由 `TELECOM_TARGET_PACKAGE` 对应 preset 自动填充。 |
 | `TELECOM_ACTION_DELAY_MS` | `800` | 关键填表、点击动作之间的固定等待，降低页面状态未稳定导致的误点。 |
 | `TELECOM_POST_SUCCESS_WAIT_MS` | `8000` | 办理成功后保留成功页多久再关闭浏览器。 |
-| `TELECOM_CONNECTIVITY_MODE` | `direct` | 网络连接模式。可选 `direct` / `proxy_pool`。 |
+| `TELECOM_CONNECTIVITY_MODE` | `direct` | 网络连接模式。可选 `direct` / `http_proxy` / `ssh_tunnel` / `proxy_pool`。 |
 | `ALLOW_DIRECT_PROXY_FALLBACK` | `false` | 代理不可用时是否允许 runner 直接访问活动页；通常保持关闭。 |
 | `SMS_INBOX_PROVIDER` | `pushplus` | 短信来源。默认 `pushplus` 从 PushPlus 拉取消息；设为 `http` 可使用你自建的 SMS inbox。 |
 | `PUSHPLUS_BASE_URL` | `https://www.pushplus.plus` | PushPlus OpenAPI 地址，通常不用改。 |
@@ -186,6 +233,10 @@ Variables：
 | `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
 | `PUSHPLUS_DEBUG` | `false` | PushPlus 模式临时诊断日志；只打印标题、时间、关键字命中情况，不打印短信正文或验证码。 |
 | `PUSHPLUS_RELAY_INBOX_URL` | 空 | 可选；配置后优先从 `PushPlusSmsToTelegram` 的受保护 `/messages` inbox 拉取被拦截短信。 |
+| `PROXY_SSH_USER` | `root` | `ssh_tunnel` 可选，SSH 用户。 |
+| `PROXY_SSH_PORT` | `22` | `ssh_tunnel` 可选，SSH 端口。 |
+| `PROXY_TUNNEL_LOCAL_PORT` | `13128` | `ssh_tunnel` 可选，runner 本地监听端口。 |
+| `PROXY_HEALTH_URL` | `https://wapbj.189.cn/` | 代理健康检查 URL。 |
 
 脚本会用产品名选中页面套餐，并在二次确认短信里校验手机号、产品名和方案编号。`TELECOM_ACTION_DELAY_MS` 和 `TELECOM_POST_SUCCESS_WAIT_MS` 只是稳定性等待，不用于绕过验证码或风控。
 
