@@ -89,7 +89,7 @@ async function launchBrowser(config) {
     args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
   };
   if (config.openwrtProxy) {
-    const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'home proxy';
+    const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'configured proxy';
     log(`Launching browser through ${label}`, { proxy: maskProxyUrl(config.openwrtProxy) });
     options.proxy = buildProxyOptions(config.openwrtProxy);
   } else {
@@ -1051,8 +1051,8 @@ async function runClaimWithOptionalDirectFallback(config) {
     await runClaim(config);
   } catch (err) {
     if (config.proxyPoolProxy && config.openwrtProxy && config.openwrtProxy !== config.proxyPoolProxy && isTelecomWafRejection(err)) {
-      log('Telecom WAF rejected home proxy path; retrying once through proxy pool', {
-        homeProxy: maskProxyUrl(config.openwrtProxy),
+      log('Telecom WAF rejected configured proxy path; retrying once through proxy pool', {
+        configuredProxy: maskProxyUrl(config.openwrtProxy),
         proxyPool: maskProxyUrl(config.proxyPoolProxy),
         error: err.message,
       });
@@ -1060,7 +1060,7 @@ async function runClaimWithOptionalDirectFallback(config) {
       return;
     }
     if (config.allowDirectProxyFallback && config.openwrtProxy && isProxyPathError(err)) {
-      log('Home proxy path failed; retrying this run without OPENWRT_HTTP_PROXY', {
+      log('Configured proxy path failed; retrying this run without OPENWRT_HTTP_PROXY', {
         proxy: maskProxyUrl(config.openwrtProxy),
         error: err.message,
       });

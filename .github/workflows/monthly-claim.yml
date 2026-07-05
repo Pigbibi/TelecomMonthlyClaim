@@ -15,7 +15,7 @@ on:
         required: false
         default: "false"
       connectivity_mode:
-        description: "Override connectivity mode for this manual run: bwg, direct, or proxy_pool"
+        description: "Override connectivity mode for this manual run: direct or proxy_pool"
         required: false
         default: ""
 
@@ -35,7 +35,7 @@ jobs:
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
-      TELECOM_CONNECTIVITY_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
+      TELECOM_CONNECTIVITY_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'direct' }}
       SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'pushplus' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
@@ -52,12 +52,7 @@ jobs:
       SMS_TIMEOUT_MS: ${{ vars.SMS_TIMEOUT_MS || '' }}
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
       PROXY_POOL_HTTP_PROXY: ${{ secrets.PROXY_POOL_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || '' }}
-      OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || 'http://127.0.0.1:13128' }}
-      BWG_SSH_HOST: ${{ secrets.BWG_SSH_HOST }}
-      BWG_SSH_USER: ${{ secrets.BWG_SSH_USER || 'root' }}
-      BWG_SSH_PORT: ${{ secrets.BWG_SSH_PORT || '22' }}
-      BWG_SSH_PRIVATE_KEY: ${{ secrets.BWG_SSH_PRIVATE_KEY }}
-      BWG_KNOWN_HOSTS: ${{ secrets.BWG_KNOWN_HOSTS }}
+      OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || '' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
@@ -121,9 +116,16 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Validate direct connectivity
-        if: steps.claim_plan.outputs.should_run == 'true' && (env.TELECOM_CONNECTIVITY_MODE == 'direct' || env.TELECOM_CONNECTIVITY_MODE == 'proxy_pool')
+        if: steps.claim_plan.outputs.should_run == 'true'
         run: |
           set -euo pipefail
+          case "${TELECOM_CONNECTIVITY_MODE:-direct}" in
+            direct|proxy_pool) ;;
+            *)
+              echo "::error::Unsupported TELECOM_CONNECTIVITY_MODE: ${TELECOM_CONNECTIVITY_MODE}. Use direct or proxy_pool."
+              exit 1
+              ;;
+          esac
           sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
           if [ "$sms_provider" = "pushplus" ]; then
             if [ -n "${PUSHPLUS_RELAY_INBOX_URL:-}" ]; then
@@ -155,54 +157,12 @@ jobs:
             curl -sSI --proxy "$PROXY_POOL_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
             echo "Proxy pool check passed."
             echo "OPENWRT_HTTP_PROXY=$PROXY_POOL_HTTP_PROXY" >> "$GITHUB_ENV"
-          elif [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ]; then
-            echo "Direct mode: clearing default loopback OPENWRT_HTTP_PROXY."
+          elif [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ] || [ "${OPENWRT_HTTP_PROXY:-}" = "http://localhost:13128" ]; then
+            echo "Default loopback OPENWRT_HTTP_PROXY is not reachable on GitHub-hosted runners; clearing it."
             echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
           elif [ -n "${OPENWRT_HTTP_PROXY:-}" ]; then
             curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
           fi
-
-      - name: Validate BWG SMS provider credentials
-        id: bwg_sms
-        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool'
-        run: |
-          set -euo pipefail
-          sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
-          if [ "$sms_provider" = "pushplus" ]; then
-            if [ -n "${PUSHPLUS_RELAY_INBOX_URL:-}" ]; then
-              : "${PUSHPLUS_RELAY_INBOX_TOKEN:?Missing PUSHPLUS_RELAY_INBOX_TOKEN secret}"
-            else
-              : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
-              : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
-            fi
-            echo "include_sms_tunnel=false" >> "$GITHUB_OUTPUT"
-          else
-            : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
-            echo "include_sms_tunnel=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup BWG home proxy tunnel
-        id: home_proxy
-        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool'
-        uses: ./actions/setup-home-proxy
-        with:
-          mode: bwg
-          health-url: https://wapbj.189.cn/
-          attempts: '3'
-          allow-direct-fallback: ${{ env.ALLOW_DIRECT_PROXY_FALLBACK }}
-          bwg-ssh-host: ${{ env.BWG_SSH_HOST }}
-          bwg-ssh-user: ${{ env.BWG_SSH_USER }}
-          bwg-ssh-port: ${{ env.BWG_SSH_PORT }}
-          bwg-ssh-private-key: ${{ env.BWG_SSH_PRIVATE_KEY }}
-          bwg-known-hosts: ${{ env.BWG_KNOWN_HOSTS }}
-          include-sms-tunnel: ${{ steps.bwg_sms.outputs.include_sms_tunnel }}
-
-      - name: Validate BWG SMS inbox health
-        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool' && steps.bwg_sms.outputs.include_sms_tunnel == 'true'
-        run: |
-          set -euo pipefail
-          curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
-            -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
 
       - name: Run claim through home exit proxy
         id: claim
