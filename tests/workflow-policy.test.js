@@ -42,6 +42,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /PROXY_SSH_PRIVATE_KEY/);
   assert.match(workflowText, /PROXY_TUNNEL_REMOTE_ENDPOINT/);
   assert.match(workflowText, /ssh-keyscan/);
+  assert.match(workflowText, /nc -z 127\.0\.0\.1 "\$\{PROXY_TUNNEL_LOCAL_PORT\}"/);
   assert.match(workflowText, /OPENWRT_HTTP_PROXY=http:\/\/127\.0\.0\.1:\$\{PROXY_TUNNEL_LOCAL_PORT\}/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
 });
