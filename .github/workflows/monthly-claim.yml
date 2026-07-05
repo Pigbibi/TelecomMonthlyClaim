@@ -184,7 +184,7 @@ jobs:
       - name: Setup BWG home proxy tunnel
         id: home_proxy
         if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool'
-        uses: Pigbibi/HomeProxyActions/actions/setup-home-proxy@main
+        uses: ./actions/setup-home-proxy
         with:
           mode: bwg
           health-url: https://wapbj.189.cn/
