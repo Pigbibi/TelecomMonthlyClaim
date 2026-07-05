@@ -14,6 +14,10 @@ on:
         description: "Stop before the final telecom submit button"
         required: false
         default: "false"
+      connectivity_mode:
+        description: "Override connectivity mode for this manual run: bwg, direct, or proxy_pool"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -31,7 +35,7 @@ jobs:
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
-      TELECOM_CONNECTIVITY_MODE: ${{ vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
+      TELECOM_CONNECTIVITY_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'bwg' }}
       SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'pushplus' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
