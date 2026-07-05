@@ -158,12 +158,11 @@ jobs:
             curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
           fi
 
-      - name: Open SSH tunnel to home proxy and optional SMS inbox via BWG
+      - name: Validate BWG SMS provider credentials
+        id: bwg_sms
         if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool'
         run: |
           set -euo pipefail
-          : "${BWG_SSH_HOST:?Missing BWG_SSH_HOST secret}"
-          : "${BWG_SSH_PRIVATE_KEY:?Missing BWG_SSH_PRIVATE_KEY secret}"
           sms_provider="$(printf '%s' "${SMS_INBOX_PROVIDER:-pushplus}" | tr '[:upper:]' '[:lower:]')"
           if [ "$sms_provider" = "pushplus" ]; then
             if [ -n "${PUSHPLUS_RELAY_INBOX_URL:-}" ]; then
@@ -172,95 +171,34 @@ jobs:
               : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
               : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
             fi
+            echo "include_sms_tunnel=false" >> "$GITHUB_OUTPUT"
           else
             : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
-          fi
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$BWG_SSH_PRIVATE_KEY" > ~/.ssh/bwg_key
-          chmod 600 ~/.ssh/bwg_key
-          if [ -n "${BWG_KNOWN_HOSTS:-}" ]; then
-            printf '%s\n' "$BWG_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -p "$BWG_SSH_PORT" -H "$BWG_SSH_HOST" >> ~/.ssh/known_hosts
-          fi
-          ssh_forwards=(-L 127.0.0.1:13128:127.0.0.1:13128)
-          if [ "$sms_provider" != "pushplus" ]; then
-            ssh_forwards=(-L 127.0.0.1:18787:127.0.0.1:18787 "${ssh_forwards[@]}")
+            echo "include_sms_tunnel=true" >> "$GITHUB_OUTPUT"
           fi
 
-          close_tunnel() {
-            pkill -f 'ssh .*127[.]0[.]0[.]1:13128:127[.]0[.]0[.]1:13128' >/dev/null 2>&1 || true
-          }
+      - name: Setup BWG home proxy tunnel
+        id: home_proxy
+        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool'
+        uses: Pigbibi/BwgRouterSelfHeal/actions/setup-home-proxy@main
+        with:
+          mode: bwg
+          health-url: https://wapbj.189.cn/
+          attempts: '3'
+          allow-direct-fallback: ${{ env.ALLOW_DIRECT_PROXY_FALLBACK }}
+          bwg-ssh-host: ${{ env.BWG_SSH_HOST }}
+          bwg-ssh-user: ${{ env.BWG_SSH_USER }}
+          bwg-ssh-port: ${{ env.BWG_SSH_PORT }}
+          bwg-ssh-private-key: ${{ env.BWG_SSH_PRIVATE_KEY }}
+          bwg-known-hosts: ${{ env.BWG_KNOWN_HOSTS }}
+          include-sms-tunnel: ${{ steps.bwg_sms.outputs.include_sms_tunnel }}
 
-          open_tunnel() {
-            close_tunnel
-            ssh -i ~/.ssh/bwg_key \
-              -p "$BWG_SSH_PORT" \
-              -o ExitOnForwardFailure=yes \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=3 \
-              -N -f \
-              "${ssh_forwards[@]}" \
-              "$BWG_SSH_USER@$BWG_SSH_HOST"
-          }
-
-          check_sms_inbox() {
-            if [ "$sms_provider" = "pushplus" ]; then
-              echo "Using PushPlus as SMS inbox provider; no local SMS inbox health check is required."
-              return 0
-            fi
-            curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
-              -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
-          }
-
-          check_home_proxy() {
-            [ -n "${OPENWRT_HTTP_PROXY:-}" ] || return 0
-            curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
-          }
-
-          sms_ok=false
-          proxy_ok=false
-          for attempt in 1 2 3; do
-            echo "Opening BWG tunnel and checking home proxy path (${attempt}/3)..."
-            open_tunnel
-
-            if check_sms_inbox; then
-              sms_ok=true
-              echo "SMS provider check passed."
-            else
-              sms_ok=false
-              echo "SMS inbox health check failed."
-            fi
-
-            if [ "$sms_ok" = "true" ] && check_home_proxy; then
-              proxy_ok=true
-              echo "Home proxy check passed."
-              break
-            fi
-
-            proxy_ok=false
-            echo "Home proxy check failed."
-            if [ "$attempt" != "3" ]; then
-              close_tunnel
-              sleep $((attempt * 5))
-            fi
-          done
-
-          if [ "$sms_ok" != "true" ]; then
-            echo "SMS inbox is required and did not recover."
-            exit 1
-          fi
-
-          if [ "$proxy_ok" != "true" ]; then
-            if [ "${ALLOW_DIRECT_PROXY_FALLBACK:-false}" = "true" ]; then
-              echo "Home proxy did not recover; continuing without OPENWRT_HTTP_PROXY for this run."
-              echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
-            else
-              echo "Home proxy did not recover and direct fallback is disabled."
-              exit 1
-            fi
-          fi
+      - name: Validate BWG SMS inbox health
+        if: steps.claim_plan.outputs.should_run == 'true' && env.TELECOM_CONNECTIVITY_MODE != 'direct' && env.TELECOM_CONNECTIVITY_MODE != 'proxy_pool' && steps.bwg_sms.outputs.include_sms_tunnel == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
+            -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
 
       - name: Run claim through home exit proxy
         id: claim
