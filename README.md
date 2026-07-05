@@ -5,8 +5,8 @@
 默认流程：
 
 1. GitHub Actions 在北京时间每月 1-3 日 08:00 运行。
-2. Hosted runner 先 SSH 到 BWG，建立家里出口代理转发；只有 `SMS_INBOX_PROVIDER=http` 时才需要本地 SMS inbox 转发。
-3. Playwright 以移动 Chrome 环境打开 189 活动页，并通过家里出口访问。
+2. GitHub-hosted runner 使用 `direct` 或你自行配置的可靠代理；本仓库不会创建内网代理隧道。
+3. Playwright 以移动 Chrome 环境打开 189 活动页，并按配置选择直连或代理访问。
 4. 北京电信手机号收到的 `10001` 短信默认进入 PushPlus；如果同时部署 `PushPlusSmsToTelegram`，脚本优先从其受保护 relay inbox 拉取被拦截的验证码，未配置 relay 时回退到 PushPlus OpenAPI；原 OpenWrt / 家里电脑 SMS inbox 方案仍保留为兼容选项。
 5. 脚本读取第一步登录验证码，根据 `TELECOM_TARGET_PACKAGE` 选中目标套餐。
 6. 通过二次确认滑块后读取第二步办理验证码。
@@ -14,50 +14,34 @@
 8. 成功写入 `state/YYYY-MM.json`，后续同月自动跳过。
 9. 1/2 日失败不报警，3 日仍失败时 workflow 失败并创建 GitHub issue。
 
-## 内网穿透架构
+## 网络与代理配置
 
-本仓库支持两种部署方式：
+本仓库是开源业务自动化，不内置 Pigbibi 内网代理、BWG 跳板或路由器隧道实现。运行时只读取你配置好的网络入口：
 
-| 方案 | 适用场景 | runner 如何访问短信和家里出口 | 说明 |
-| --- | --- | --- | --- |
-| 方案一：直连模式 | 本机调试，或你已经有 WireGuard / 内网穿透 / 公网 HTTPS，把家里的 SMS inbox 和代理安全暴露给 runner | `SMS_INBOX_URL`、`SMS_INBOX_HEALTH_URL`、`OPENWRT_HTTP_PROXY` 直接填可访问地址 | 配置少，但需要你自己保证网络和鉴权安全。不建议把家里代理直接暴露到公网。 |
-| 方案二：BWG 跳板反向隧道 | 推荐的无人值守部署 | 默认从 PushPlus relay inbox 或 OpenAPI 拉短信；家里 OpenWrt 或家里电脑主动 SSH 到 BWG 建代理反向端口，GitHub hosted runner 再 SSH 到 BWG 建本地转发 | GitHub 不需要直连家里 IP；如切回 `SMS_INBOX_PROVIDER=http`，仍可继续使用 BWG 上只绑定 `127.0.0.1` 的 SMS inbox 上游。 |
+| 模式 | 适用场景 | 配置 |
+| --- | --- | --- |
+| `direct` | 本机运行、GitHub-hosted runner 直连，或你已经准备好可从 runner 访问的短信/代理入口 | 默认模式；可选配置 `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` |
+| `proxy_pool` | 需要使用你自己的可靠代理池出口 | 设置 `TELECOM_CONNECTIVITY_MODE=proxy_pool` 和 `PROXY_POOL_HTTP_PROXY` |
 
-现在实际 workflow 默认用 `SMS_INBOX_PROVIDER=pushplus` 读取短信，同时保留方案二的 BWG 跳板作为家里出口代理。需要回退到原 SMS inbox 时，把 GitHub Variable `SMS_INBOX_PROVIDER` 设为 `http` 并继续使用 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。
+注意：`http://127.0.0.1:13128` 只代表 runner 自己。除非你在同一个 runner 上自行建立了隧道，否则 GitHub-hosted runner 无法访问你家里的 `127.0.0.1`。本 workflow 会清空这个默认 loopback 值，避免误以为已经走了家里出口。
 
-```text
-10001 短信 -> PushPlus -> PushPlusSmsToTelegram webhook -> relay inbox -> GitHub runner 拉取验证码
-GitHub runner -> SSH -L -> BWG:127.0.0.1:13128 -> SSH -R -> OpenWrt 代理端口 或 家里电脑:13128
-OpenWrt/家里网络 -> 189 页面
+如果你是 Pigbibi 私有仓库，需要使用家里出口代理，请在私有仓库里接入 `Pigbibi/InternalHomeProxyActions`；不要把这类内部网络实现放进本开源仓库。
 
-兼容 SMS_INBOX_PROVIDER=http 时：
-短信转发器 App -> OpenWrt:80/cgi-bin/telecom-sms 或 家里电脑:8787/sms
-GitHub runner -> SSH -L -> BWG:127.0.0.1:18787 -> SSH -R -> OpenWrt:80 或 家里电脑:8787
-```
-
-这样 GitHub 不需要直连家里 IP，也不用把代理暴露到公网；BWG 上的代理端口只绑定 `127.0.0.1`，必须 SSH 登录后才能访问。若使用兼容的 HTTP SMS inbox，短信端口也按同样方式只在 SSH 隧道内访问。
-
-### 兼容可选：direct 模式
-
-如果你已经有安全的公网 HTTPS、内网穿透、专线或其他方式，让 GitHub-hosted runner 能直接访问 SMS inbox 和可选的家里出口代理，可以把 GitHub Variables / Secrets 设置为：
+### direct 模式
 
 ```text
 # Variable
 TELECOM_CONNECTIVITY_MODE=direct
 
-# Secrets
+# Secrets，可选
+OPENWRT_HTTP_PROXY=
 SMS_INBOX_URL=https://your-public-inbox.example.com/messages
 SMS_INBOX_HEALTH_URL=https://your-public-inbox.example.com/health
-OPENWRT_HTTP_PROXY=
 ```
 
-`direct` 模式会跳过 BWG SSH 隧道步骤，直接使用你提供的 `SMS_INBOX_URL` 和 `SMS_INBOX_HEALTH_URL`。如果你还提供了 `OPENWRT_HTTP_PROXY`，workflow 会先检查该代理是否能访问 189 页面；如果不提供，就让 runner 直接访问活动页。
+`direct` 模式不会创建任何 SSH/WireGuard/内网穿透。你提供的代理或 SMS inbox 必须已经能被当前 runner 访问；不提供代理时，runner 会直接访问活动页。
 
-本仓库默认不设置 `TELECOM_CONNECTIVITY_MODE=direct`，仍使用方案二的 `bwg` 模式。不要为了省事把未鉴权的短信收件箱或代理端口直接暴露到公网。
-
-### 临时：代理池模式
-
-当家里/OpenWrt 出口被北京电信风控限制时，可以临时切换到代理池，避免继续使用内网出口：
+### proxy_pool 模式
 
 ```text
 # Variable
@@ -68,7 +52,7 @@ SEND_CODE_ATTEMPTS=1
 PROXY_POOL_HTTP_PROXY=http://user:password@proxy-pool.example:port
 ```
 
-`proxy_pool` 模式会跳过 BWG/OpenWrt 隧道，只用 `PROXY_POOL_HTTP_PROXY` 访问 189 页面；如果缺少该 secret，workflow 会在访问电信前失败。常规 `bwg` 模式下，如果家里出口遇到电信滑块空 HTTP 400 且配置了 `PROXY_POOL_HTTP_PROXY`，脚本也会只 fallback 一次到代理池。
+`proxy_pool` 模式只使用 `PROXY_POOL_HTTP_PROXY` 访问 189 页面；如果缺少该 secret，workflow 会在访问电信前失败。
 
 ### 默认：PushPlus 短信源
 
@@ -100,71 +84,55 @@ PUSHPLUS_SECRET_KEY=你的 PushPlus OpenAPI secretKey
 PUSHPLUS_RELAY_INBOX_TOKEN=与 PushPlusSmsToTelegram 的 INBOX_TOKEN 保持一致；仅配置 relay inbox 时需要
 ```
 
-PushPlus 模式不需要 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。如果配置了 `PUSHPLUS_RELAY_INBOX_URL`，本仓库优先使用 relay inbox；未配置时才使用 PushPlus OpenAPI。`TELECOM_CONNECTIVITY_MODE=bwg` 时，BWG 隧道仍可继续用于家里出口代理，只是不再检查本地 SMS inbox。
+PushPlus 模式不需要 `SMS_INBOX_URL` / `SMS_INBOX_HEALTH_URL` / `SMS_INBOX_TOKEN`。如果配置了 `PUSHPLUS_RELAY_INBOX_URL`，本仓库优先使用 relay inbox；未配置时才使用 PushPlus OpenAPI。网络出口由 `TELECOM_CONNECTIVITY_MODE` 和代理相关 secret 决定。
 
 注意：PushPlus OpenAPI 会先用用户 token 和 secretKey 换取短期 `accessKey`。脚本只会读取消息列表和消息详情，不会把验证码写入运行日志；但验证码会短暂停留在 PushPlus 平台，安全性低于直接投递到自己的 SMS inbox。
 
 ## 快速部署
 
-推荐按“PushPlus 收短信 + BWG 家里出口代理”部署，整体顺序如下：
+推荐按“PushPlus 收短信 + direct/proxy_pool 网络配置”部署：
 
-1. Fork 或新建私有仓库，暂时不要公开。
-2. 准备一台 BWG/VPS，并确认 GitHub Actions 可以 SSH 登录。
-3. 在 OpenWrt 或家里电脑上部署家里出口代理和到 BWG 的反向隧道；只有回退到 `SMS_INBOX_PROVIDER=http` 时才需要部署 SMS inbox。
-4. 确认北京电信手机号收到的 `10001` 短信会进入 PushPlus。
-5. 在 GitHub Secrets / Variables 填好 PushPlus、BWG 和电信活动配置。
-6. 先手动触发 `Monthly Beijing Telecom Claim` workflow，`dry_run=true` 跑到最终提交前。
-7. 确认产品名、方案编号、PushPlus 短信读取都正常后，再手动触发一次 `dry_run=false`。
-8. 成功后检查 `state/YYYY-MM.json` 和 `logs` 分支。
+1. Fork 或新建仓库，先在私有仓库里完成配置和 dry-run 验证。
+2. 确认北京电信手机号收到的 `10001` 短信会进入 PushPlus。
+3. 在 GitHub Secrets / Variables 填好 PushPlus、电信活动和可选代理配置。
+4. 先手动触发 `Monthly Beijing Telecom Claim` workflow，`dry_run=true` 跑到最终提交前。
+5. 确认产品名、方案编号、PushPlus 短信读取都正常后，再手动触发一次 `dry_run=false`。
+6. 成功后检查 `state/YYYY-MM.json` 和 `logs` 分支。
 
 最小部署清单：
 
 ```bash
 npm ci
-cp .env.example .env.local
-chmod 600 .env.local
-
-# 家里出口代理二选一；PushPlus 模式不需要安装 SMS inbox
-./scripts/install-openwrt-router.sh        # 推荐：OpenWrt 常驻
-./scripts/install-local-services-macos.sh  # 备选：家里电脑常驻服务脚本
-
-# 只有回退到 HTTP SMS inbox 且手机需要走公网 webhook 投递短信时才需要：
-./scripts/install-bwg-public-webhook.sh
-```
-
-首次验证建议：
-
-```bash
-npm run lint
 npm test
-
-# 本机 dry-run，只走到最终提交前
-FORCE_RUN=true DRY_RUN_BEFORE_FINAL_SUBMIT=true npm run claim
 ```
 
-本机命令不会自动读取 `.env.local`；运行前需要先把里面的值导出为环境变量。`TELECOM_ENTRY_URL` 这类 URL 如果包含 `&`，请加引号，避免 shell 截断。
-
-OpenWrt 的 tinyproxy 不应限制 CONNECT 端口：
+然后在 GitHub 仓库配置：
 
 ```text
-# 不配置 ConnectPort，允许所有 CONNECT 端口
+# Variables
+TELECOM_CONNECTIVITY_MODE=direct
+SMS_INBOX_PROVIDER=pushplus
+TELECOM_TARGET_PACKAGE=voice200
+
+# Secrets
+TELECOM_PHONE=北京电信手机号
+TELECOM_ENTRY_URL=活动入口 URL
+PUSHPLUS_TOKEN=你的 PushPlus 用户 token
+PUSHPLUS_SECRET_KEY=你的 PushPlus OpenAPI secretKey
 ```
 
-北京电信行为风控会访问 `bigdata-behaviordata.189.cn:9002` 和随机高端口域名；限制 CONNECT 端口时，登录滑块可能只显示“获取验证码失败，请重试”，并返回空 HTTP 400。本仓库的 OpenWrt 代理只监听 `127.0.0.1`，并通过 BWG SSH 本地端口访问，不对公网开放。
-
-GitHub Actions 手动运行时，建议第一轮设置：
+如果你需要代理出口，二选一：
 
 ```text
-force_run=true
-dry_run=true
+# direct 模式下使用一个 runner 可访问的代理
+OPENWRT_HTTP_PROXY=http://user:password@proxy.example:port
+
+# 或使用代理池模式
+TELECOM_CONNECTIVITY_MODE=proxy_pool
+PROXY_POOL_HTTP_PROXY=http://user:password@proxy-pool.example:port
 ```
 
-确认没问题后第二轮再设置：
-
-```text
-force_run=true
-dry_run=false
-```
+不要把私钥、手机号、短信 token、PushPlus token 或 secretKey 写进仓库文件。
 
 ## 运行日志
 
@@ -189,21 +157,16 @@ git show origin/logs:latest.json
 | `TELECOM_ENTRY_URL` | 189 活动入口 URL |
 | `PUSHPLUS_TOKEN` | PushPlus 用户 token，不能用消息 token；默认 PushPlus 模式未配置 relay inbox 时需要 |
 | `PUSHPLUS_SECRET_KEY` | PushPlus OpenAPI secretKey；默认 PushPlus 模式未配置 relay inbox 时需要 |
-| `BWG_SSH_HOST` | BWG/VPS IP 或域名 |
-| `BWG_SSH_PRIVATE_KEY` | GitHub runner 登录 BWG 用的私钥 |
 
-推荐 secrets：
+可选 secrets：
 
 | Secret | 默认值 | 说明 |
 | --- | --- | --- |
-| `BWG_SSH_USER` | `root` | BWG 登录用户 |
-| `BWG_SSH_PORT` | `22` | BWG SSH 端口 |
-| `BWG_KNOWN_HOSTS` | 自动 `ssh-keyscan` | BWG host key，推荐固定下来 |
-| `OPENWRT_HTTP_PROXY` | `http://127.0.0.1:13128` | runner 经 SSH 转发后的家里出口代理 |
-| `PROXY_POOL_HTTP_PROXY` | 空 | 临时代理池出口；`TELECOM_CONNECTIVITY_MODE=proxy_pool` 时必填，也可作为家里出口被风控时的一次 fallback。 |
-| `SMS_INBOX_TOKEN` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时需要，手机转发器、GitHub runner、SMS inbox 共享的 Bearer token |
-| `SMS_INBOX_URL` | `http://127.0.0.1:18787/messages` | 仅 `SMS_INBOX_PROVIDER=http` 时使用，runner 经 SSH 转发后的 inbox 查询地址；OpenWrt 用 `/cgi-bin/telecom-messages` |
-| `SMS_INBOX_HEALTH_URL` | `http://127.0.0.1:18787/health` | 仅 `SMS_INBOX_PROVIDER=http` 时使用，inbox 健康检查地址；OpenWrt 用 `/cgi-bin/telecom-sms-health` |
+| `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` | 空 | `direct` 模式下的代理地址；必须能从 runner 访问。不要填只存在于你家里网络的 loopback 地址。 |
+| `PROXY_POOL_HTTP_PROXY` | 空 | `TELECOM_CONNECTIVITY_MODE=proxy_pool` 时必填。 |
+| `SMS_INBOX_TOKEN` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时需要，手机转发器、runner、SMS inbox 共享的 Bearer token。 |
+| `SMS_INBOX_URL` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时使用，必须能从 runner 访问。 |
+| `SMS_INBOX_HEALTH_URL` | 空 | 仅 `SMS_INBOX_PROVIDER=http` 时使用，必须能从 runner 访问。 |
 | `PUSHPLUS_RELAY_INBOX_TOKEN` | 空 | 仅配置 `PUSHPLUS_RELAY_INBOX_URL` 时需要；与 `PushPlusSmsToTelegram` 仓库的 `INBOX_TOKEN` 保持一致。 |
 
 Variables：
@@ -215,170 +178,46 @@ Variables：
 | `TELECOM_EXPECTED_PLAN_ID` | 空 | 可选覆盖项。为空时由 `TELECOM_TARGET_PACKAGE` 对应 preset 自动填充。 |
 | `TELECOM_ACTION_DELAY_MS` | `800` | 关键填表、点击动作之间的固定等待，降低页面状态未稳定导致的误点。 |
 | `TELECOM_POST_SUCCESS_WAIT_MS` | `8000` | 办理成功后保留成功页多久再关闭浏览器。 |
-| `TELECOM_CONNECTIVITY_MODE` | `bwg` | 网络连接模式。默认 `bwg`；兼容可选 `direct` / `proxy_pool`。 |
-| `ALLOW_DIRECT_PROXY_FALLBACK` | `false` | 家里代理不可用时是否允许 runner 直接访问活动页；默认关闭，避免绕过 OpenWrt 家里出口。 |
-| `SMS_INBOX_PROVIDER` | `pushplus` | 短信来源。默认 `pushplus` 从 PushPlus 拉取消息；设为 `http` 可回退到原 SMS inbox。 |
+| `TELECOM_CONNECTIVITY_MODE` | `direct` | 网络连接模式。可选 `direct` / `proxy_pool`。 |
+| `ALLOW_DIRECT_PROXY_FALLBACK` | `false` | 代理不可用时是否允许 runner 直接访问活动页；通常保持关闭。 |
+| `SMS_INBOX_PROVIDER` | `pushplus` | 短信来源。默认 `pushplus` 从 PushPlus 拉取消息；设为 `http` 可使用你自建的 SMS inbox。 |
 | `PUSHPLUS_BASE_URL` | `https://www.pushplus.plus` | PushPlus OpenAPI 地址，通常不用改。 |
 | `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
 | `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
 | `PUSHPLUS_DEBUG` | `false` | PushPlus 模式临时诊断日志；只打印标题、时间、关键字命中情况，不打印短信正文或验证码。 |
 | `PUSHPLUS_RELAY_INBOX_URL` | 空 | 可选；配置后优先从 `PushPlusSmsToTelegram` 的受保护 `/messages` inbox 拉取被拦截短信。 |
-| `SEND_CODE_ATTEMPTS` | `3` | 验证码发送重试次数；临时排障时可设为 `1`，减少重复发码。 |
-| `SMS_TIMEOUT_MS` | `90000` | 每次等待短信的超时时间。 |
-| `SMS_POLL_MS` | `5000` | 短信轮询间隔。 |
-
-内置 preset：
-
-| `TELECOM_TARGET_PACKAGE` | 产品名 | 方案编号 |
-| --- | --- | --- |
-| `voice200` | `互联网卡网龄享200分钟国内语音` | `24BJ102053` |
-| `5g` | `互联网卡网龄享5GB国内通用流量` | `24BJ100433` |
-
-常用选择：
-
-```text
-# 领取 200 分钟国内语音
-TELECOM_TARGET_PACKAGE=voice200
-TELECOM_PRODUCT_NAME=
-TELECOM_EXPECTED_PLAN_ID=
-
-# 领取 5GB 国内通用流量
-TELECOM_TARGET_PACKAGE=5g
-TELECOM_PRODUCT_NAME=
-TELECOM_EXPECTED_PLAN_ID=
-```
-
-如果活动页或短信文案变了，可以不改代码，直接在 GitHub Variables 里覆盖。使用 `custom` 时必须填写 `TELECOM_PRODUCT_NAME`，`TELECOM_EXPECTED_PLAN_ID` 建议填写：
-
-```text
-TELECOM_TARGET_PACKAGE=custom
-TELECOM_PRODUCT_NAME=短信和确认页里出现的完整产品名
-TELECOM_EXPECTED_PLAN_ID=短信里的方案编号
-```
 
 脚本会用产品名选中页面套餐，并在二次确认短信里校验手机号、产品名和方案编号。`TELECOM_ACTION_DELAY_MS` 和 `TELECOM_POST_SUCCESS_WAIT_MS` 只是稳定性等待，不用于绕过验证码或风控。
 
 不要把私钥、手机号、短信 token、PushPlus token 或 secretKey 写进仓库文件。
 
-## 兼容：OpenWrt 路由器收件箱与常驻服务
+## 兼容：自建 HTTP SMS inbox
 
-默认 PushPlus 模式只需要家里出口代理和 BWG 反向隧道；本节的短信收件箱用于回退到 `SMS_INBOX_PROVIDER=http`。如果路由器 SSH 可用，把代理、可选短信收件箱和反向隧道放到 OpenWrt 上，可以避免家里电脑关机或休眠影响每月任务。
+默认 PushPlus 模式不需要自建 SMS inbox。只有当你把 `SMS_INBOX_PROVIDER=http` 时，才需要提供 runner 可访问的 `SMS_INBOX_URL`、`SMS_INBOX_HEALTH_URL` 和 `SMS_INBOX_TOKEN`。
 
-先在 `.env.local` 填好这些值：
-
-```bash
-ROUTER_SSH_TARGET=root@192.168.5.1
-ROUTER_SSH_KEY=/Users/you/.ssh/openwrt_router_key   # 如果用密码登录可不填
-ROUTER_PROXY_PORT=8888                              # tinyproxy；如要复用 OpenClash/Passwall 可改 7893/7897
-ROUTER_UHTTPD_PORT=80
-BWG_SSH_HOST=your-bwg-host
-BWG_SSH_KEY=/Users/you/.ssh/bwg_20260501
-SMS_INBOX_TOKEN=change-me                         # 仅 SMS_INBOX_PROVIDER=http 时需要
-```
-
-安装到 OpenWrt：
-
-```bash
-./scripts/install-openwrt-router.sh
-```
-
-安装脚本会做这些事：
-
-- 生成一把专用 `telecom_openwrt_bwg` key，并加入 BWG `authorized_keys`；
-- 在 OpenWrt 安装 CGI 短信 inbox：
-  - `POST /cgi-bin/telecom-sms`
-  - `GET /cgi-bin/telecom-messages`
-  - `GET /cgi-bin/telecom-sms-health`
-- 安装 `/etc/init.d/telecom-bwg-tunnel`，让 OpenWrt 开机后自动连 BWG，并反向转发短信 inbox 与路由器代理端口；
-- 安装 `/usr/bin/telecom-bwg-tunnel-watchdog`，通过 cron 定期检查 BWG 反向端口和 home proxy，不通时重启隧道。
-
-如果回退到 `SMS_INBOX_PROVIDER=http`，OpenWrt 模式下 GitHub secrets 需要这样设置：
+本仓库保留 HTTP SMS inbox 的客户端协议和本地调试服务，但不负责部署你的内网穿透、路由器代理或公网入口。你可以用自己的 WireGuard、Zero Trust、反向代理、VPS 转发或其他可靠方式暴露以下接口：
 
 ```text
-SMS_INBOX_URL=http://127.0.0.1:18787/cgi-bin/telecom-messages
-SMS_INBOX_HEALTH_URL=http://127.0.0.1:18787/cgi-bin/telecom-sms-health
-OPENWRT_HTTP_PROXY=http://127.0.0.1:13128
-ALLOW_DIRECT_PROXY_FALLBACK=false
+POST /sms?token=<SMS_INBOX_TOKEN>
+GET  /messages?sender=10001
+GET  /health
 ```
 
-如果路由器 tinyproxy 配了 BasicAuth，`OPENWRT_HTTP_PROXY` 需要写成 `http://user:password@127.0.0.1:13128`，脚本会自动拆出代理用户名密码给 Playwright。
+本机临时调试可以运行：
 
-`SMS_INBOX_PROVIDER=http` 时，短信转发器 App 如果只在家里 Wi-Fi 使用，目标可以是：
+```bash
+SMS_INBOX_TOKEN=change-me npm run sms-server
+```
+
+然后配置：
 
 ```text
-POST http://192.168.5.1/cgi-bin/telecom-sms?token=<SMS_INBOX_TOKEN>
+SMS_INBOX_PROVIDER=http
+SMS_INBOX_URL=http://127.0.0.1:8787/messages
+SMS_INBOX_HEALTH_URL=http://127.0.0.1:8787/health
 ```
 
-如果手机不一定连家里 Wi-Fi，改用 BWG 公网入口：
-
-```text
-POST http://<BWG_PUBLIC_IP>:18789/telecom-sms?token=<SMS_INBOX_TOKEN>
-```
-
-BWG 公网入口由 `scripts/install-bwg-public-webhook.sh` 安装，systemd 服务名是 `telecom-public-webhook`。它只把下面三个路径转发到反向隧道，不暴露路由器代理端口：
-
-| 公网路径 | OpenWrt 上游路径 | 说明 |
-| --- | --- | --- |
-| `/telecom-sms` | `/cgi-bin/telecom-sms` | 接收短信转发器 POST |
-| `/telecom-messages` | `/cgi-bin/telecom-messages` | GitHub runner 查询短信 |
-| `/telecom-sms-health` | `/cgi-bin/telecom-sms-health` | 健康检查 |
-
-验证命令：
-
-```bash
-curl "http://<BWG_PUBLIC_IP>:18789/telecom-sms-health?token=<SMS_INBOX_TOKEN>"
-curl "http://<BWG_PUBLIC_IP>:18789/telecom-messages?token=<SMS_INBOX_TOKEN>&sender=10001"
-```
-
-## 兼容：家里电脑收件箱与常驻服务
-
-默认 PushPlus 模式不需要本机 SMS inbox；本节用于回退到 `SMS_INBOX_PROVIDER=http`，或复用家里电脑提供 HTTP CONNECT 代理。
-
-先准备 `.env.local`，至少包含：
-
-```bash
-cp .env.example .env.local
-# 填好 TELECOM_*、PushPlus 或 SMS_INBOX_*、BWG_SSH_HOST、BWG_SSH_KEY 等
-chmod 600 .env.local
-```
-
-安装并启动本机常驻服务：
-
-```bash
-npm ci
-./scripts/install-local-services-macos.sh
-```
-
-这个脚本用于支持 launchd 的家里电脑环境；如果你的家里电脑不是这类环境，可以直接参考 `scripts/run-local-service.sh` 自行接入 systemd、supervisor 或其他常驻方式。
-
-会启动三个用户级服务：
-
-| launchd label | 作用 |
-| --- | --- |
-| `com.lisiyi.telecom-sms-inbox` | 本机 SMS inbox，默认端口 `8787` |
-| `com.lisiyi.telecom-home-proxy` | 本机 HTTP CONNECT 代理，默认只监听 `127.0.0.1:13128` |
-| `com.lisiyi.telecom-bwg-tunnel` | 到 BWG 的反向 SSH 隧道 |
-
-日志在：
-
-```text
-~/Library/Logs/TelecomMonthlyClaim/
-```
-
-快速检查：
-
-```bash
-curl -H "Authorization: Bearer $SMS_INBOX_TOKEN" http://127.0.0.1:8787/health
-curl -I --proxy http://127.0.0.1:13128 https://wapbj.189.cn/
-```
-
-本机收件箱支持两组路径，方便和 OpenWrt/BWG webhook 共用配置：
-
-| 作用 | 标准路径 | 兼容路径 |
-| --- | --- | --- |
-| 接收短信 | `POST /sms` | `POST /cgi-bin/telecom-sms`、`POST /telecom-sms` |
-| 查询短信 | `GET /messages` | `GET /cgi-bin/telecom-messages`、`GET /telecom-messages` |
-| 健康检查 | `GET /health` | `GET /cgi-bin/telecom-sms-health`、`GET /telecom-sms-health` |
+如果是在 GitHub-hosted runner 上运行，`127.0.0.1` 指的是 GitHub runner，不是你的家里电脑或路由器。
 
 ## 手机短信转发器 App 配置
 
@@ -447,12 +286,7 @@ TELECOM_LOGIN_CODE=123456 TELECOM_CONFIRM_CODE=654321 npm run claim
 
 ## 备用方案
 
-仓库保留了 WireGuard 脚本：
-
-- `scripts/setup-wireguard.sh`
-- `scripts/run-with-wireguard.sh`
-
-如果以后改成 GitHub runner 直接 WireGuard 回家，可以再设置 `WG_CONFIG_BASE64` 和内网 `OPENWRT_HTTP_PROXY`。当前默认不走这条路。
+如果你需要固定出口 IP，可以自行准备 WireGuard、Zero Trust、私有 runner 或可靠代理池，然后把 runner 可访问的代理地址填入 `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY`，或使用 `TELECOM_CONNECTIVITY_MODE=proxy_pool`。本仓库不提供内网穿透实现。
 
 ## 验证码匹配规则
 
