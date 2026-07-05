@@ -15,7 +15,7 @@ on:
         required: false
         default: "false"
       connectivity_mode:
-        description: "Override connectivity mode for this manual run: direct or proxy_pool"
+        description: "Override connectivity mode for this manual run: direct, http_proxy, ssh_tunnel, or proxy_pool"
         required: false
         default: ""
 
@@ -53,6 +53,14 @@ jobs:
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
       PROXY_POOL_HTTP_PROXY: ${{ secrets.PROXY_POOL_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || '' }}
       OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || '' }}
+      PROXY_SSH_HOST: ${{ secrets.PROXY_SSH_HOST }}
+      PROXY_SSH_USER: ${{ secrets.PROXY_SSH_USER || vars.PROXY_SSH_USER || 'root' }}
+      PROXY_SSH_PORT: ${{ secrets.PROXY_SSH_PORT || vars.PROXY_SSH_PORT || '22' }}
+      PROXY_SSH_PRIVATE_KEY: ${{ secrets.PROXY_SSH_PRIVATE_KEY }}
+      PROXY_SSH_KNOWN_HOSTS: ${{ secrets.PROXY_SSH_KNOWN_HOSTS }}
+      PROXY_TUNNEL_LOCAL_PORT: ${{ vars.PROXY_TUNNEL_LOCAL_PORT || '13128' }}
+      PROXY_TUNNEL_REMOTE_ENDPOINT: ${{ secrets.PROXY_TUNNEL_REMOTE_ENDPOINT || vars.PROXY_TUNNEL_REMOTE_ENDPOINT || '127.0.0.1:13128' }}
+      PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
@@ -115,14 +123,14 @@ jobs:
       - if: steps.claim_plan.outputs.should_run == 'true'
         run: npx playwright install --with-deps chromium
 
-      - name: Validate direct connectivity
+      - name: Validate connectivity
         if: steps.claim_plan.outputs.should_run == 'true'
         run: |
           set -euo pipefail
           case "${TELECOM_CONNECTIVITY_MODE:-direct}" in
-            direct|proxy_pool) ;;
+            direct|http_proxy|ssh_tunnel|proxy_pool) ;;
             *)
-              echo "::error::Unsupported TELECOM_CONNECTIVITY_MODE: ${TELECOM_CONNECTIVITY_MODE}. Use direct or proxy_pool."
+              echo "::error::Unsupported TELECOM_CONNECTIVITY_MODE: ${TELECOM_CONNECTIVITY_MODE}. Use direct, http_proxy, ssh_tunnel, or proxy_pool."
               exit 1
               ;;
           esac
@@ -134,40 +142,93 @@ jobs:
               : "${PUSHPLUS_TOKEN:?Missing PUSHPLUS_TOKEN secret}"
               : "${PUSHPLUS_SECRET_KEY:?Missing PUSHPLUS_SECRET_KEY secret}"
             fi
-            echo "Direct mode will read SMS from PushPlus; skipping SMS inbox health check."
+            echo "Workflow will read SMS from PushPlus; skipping SMS inbox health check."
           else
             : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
             case "$SMS_INBOX_URL" in
               http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
-                echo "Direct mode requires SMS_INBOX_URL reachable from the GitHub-hosted runner, not the default loopback URL."
+                echo "SMS_INBOX_URL must be reachable from the GitHub-hosted runner, not the default loopback URL."
                 exit 1
                 ;;
             esac
             case "$SMS_INBOX_HEALTH_URL" in
               http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
-                echo "Direct mode requires SMS_INBOX_HEALTH_URL reachable from the GitHub-hosted runner, not the default loopback URL."
+                echo "SMS_INBOX_HEALTH_URL must be reachable from the GitHub-hosted runner, not the default loopback URL."
                 exit 1
                 ;;
             esac
             curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
               -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
           fi
-          if [ "${TELECOM_CONNECTIVITY_MODE:-}" = "proxy_pool" ]; then
-            : "${PROXY_POOL_HTTP_PROXY:?Missing PROXY_POOL_HTTP_PROXY secret for proxy_pool mode}"
-            curl -sSI --proxy "$PROXY_POOL_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
-            echo "Proxy pool check passed."
-            echo "OPENWRT_HTTP_PROXY=$PROXY_POOL_HTTP_PROXY" >> "$GITHUB_ENV"
-          elif [ "${OPENWRT_HTTP_PROXY:-}" = "http://127.0.0.1:13128" ] || [ "${OPENWRT_HTTP_PROXY:-}" = "http://localhost:13128" ]; then
-            echo "Default loopback OPENWRT_HTTP_PROXY is not reachable on GitHub-hosted runners; clearing it."
-            echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
-          elif [ -n "${OPENWRT_HTTP_PROXY:-}" ]; then
-            curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 https://wapbj.189.cn/ >/dev/null
-          fi
+          case "${TELECOM_CONNECTIVITY_MODE:-direct}" in
+            direct)
+              echo "OPENWRT_HTTP_PROXY=" >> "$GITHUB_ENV"
+              ;;
+            http_proxy)
+              : "${OPENWRT_HTTP_PROXY:?Missing OPENWRT_HTTP_PROXY, HOME_HTTP_PROXY, PUBLIC_HTTP_PROXY, SCHWAB_PROXY_URL, or BROWSER_PROXY_SERVER secret for http_proxy mode}"
+              case "$OPENWRT_HTTP_PROXY" in
+                http://127.0.0.1:*|http://localhost:*)
+                  echo "http_proxy mode requires a proxy reachable from the runner, not a loopback URL. Use ssh_tunnel mode for SSH forwarding."
+                  exit 1
+                  ;;
+              esac
+              curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 "$PROXY_HEALTH_URL" >/dev/null
+              ;;
+            ssh_tunnel)
+              : "${PROXY_SSH_HOST:?Missing PROXY_SSH_HOST secret for ssh_tunnel mode}"
+              : "${PROXY_SSH_PRIVATE_KEY:?Missing PROXY_SSH_PRIVATE_KEY secret for ssh_tunnel mode}"
+              : "${PROXY_TUNNEL_LOCAL_PORT:?Missing PROXY_TUNNEL_LOCAL_PORT variable for ssh_tunnel mode}"
+              : "${PROXY_TUNNEL_REMOTE_ENDPOINT:?Missing PROXY_TUNNEL_REMOTE_ENDPOINT variable or secret for ssh_tunnel mode}"
+              ssh_dir="$RUNNER_TEMP/proxy-ssh"
+              mkdir -p "$ssh_dir"
+              chmod 700 "$ssh_dir"
+              key_file="$ssh_dir/key"
+              known_hosts_file="$ssh_dir/known_hosts"
+              printf '%s\n' "$PROXY_SSH_PRIVATE_KEY" > "$key_file"
+              chmod 600 "$key_file"
+              if [ -n "${PROXY_SSH_KNOWN_HOSTS:-}" ]; then
+                printf '%s\n' "$PROXY_SSH_KNOWN_HOSTS" > "$known_hosts_file"
+              else
+                ssh-keyscan -p "${PROXY_SSH_PORT:-22}" "$PROXY_SSH_HOST" > "$known_hosts_file" 2>/dev/null
+              fi
+              chmod 600 "$known_hosts_file"
+              ssh -i "$key_file" \
+                -p "${PROXY_SSH_PORT:-22}" \
+                -o BatchMode=yes \
+                -o ExitOnForwardFailure=yes \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$known_hosts_file" \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=3 \
+                -N -L "127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}:${PROXY_TUNNEL_REMOTE_ENDPOINT}" \
+                "${PROXY_SSH_USER:-root}@${PROXY_SSH_HOST}" &
+              tunnel_pid="$!"
+              echo "PROXY_TUNNEL_PID=$tunnel_pid" >> "$GITHUB_ENV"
+              echo "OPENWRT_HTTP_PROXY=http://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}" >> "$GITHUB_ENV"
+              sleep 2
+              curl -sSI --proxy "http://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}" --connect-timeout 8 --max-time 20 "$PROXY_HEALTH_URL" >/dev/null
+              echo "SSH tunnel proxy check passed."
+              ;;
+            proxy_pool)
+              : "${PROXY_POOL_HTTP_PROXY:?Missing PROXY_POOL_HTTP_PROXY secret for proxy_pool mode}"
+              curl -sSI --proxy "$PROXY_POOL_HTTP_PROXY" --connect-timeout 8 --max-time 20 "$PROXY_HEALTH_URL" >/dev/null
+              echo "Proxy pool check passed."
+              echo "OPENWRT_HTTP_PROXY=$PROXY_POOL_HTTP_PROXY" >> "$GITHUB_ENV"
+              ;;
+          esac
 
-      - name: Run claim through home exit proxy
+      - name: Run claim
         id: claim
         if: steps.claim_plan.outputs.should_run == 'true'
         run: xvfb-run -a node scripts/telecom-monthly-claim.js
+
+      - name: Cleanup SSH proxy tunnel
+        if: always()
+        run: |
+          set +e
+          if [ -n "${PROXY_TUNNEL_PID:-}" ]; then
+            kill "$PROXY_TUNNEL_PID" 2>/dev/null || true
+          fi
 
       - name: Commit monthly state
         if: always() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
