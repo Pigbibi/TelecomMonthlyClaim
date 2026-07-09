@@ -550,10 +550,10 @@ async function fillInputField(locator, value) {
 async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
-  await fillInputField(phoneField.locator, config.phone);
   if (!await waitForTelecomApiReady(page, config)) {
     throw new Error('Telecom preActiveMeta warmup failed before login SMS send');
   }
+  await fillInputField(phoneField.locator, config.phone);
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
@@ -707,35 +707,40 @@ function latestTelecomApiResponse(page, pattern) {
     .pop();
 }
 
-async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/], timeoutMs = 35000) {
+async function isBlankWafPage(page) {
+  const htmlLength = await page.evaluate(() => document.documentElement?.outerHTML?.length || 0).catch(() => 0);
+  return htmlLength < 100;
+}
+
+async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/], timeoutMs = 12000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (hasProxyTunnelFailures(page)) {
       throw new Error('Proxy tunnel failed during telecom API warmup');
     }
+    if (await isBlankWafPage(page)) {
+      log('Telecom login page is blank during API warmup');
+      return false;
+    }
     const results = patterns.map(pattern => latestTelecomApiResponse(page, pattern));
-    if (results.every(hit => hit && hit.status < 400)) return true;
     if (results.some(hit => hit && hit.status >= 400)) {
-      log('Telecom API warmup rejected; reloading login entry', {
+      log('Telecom API warmup rejected', {
         apis: results.map(hit => ({ url: hit?.url, status: hit?.status })),
       });
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-      await sleep(Math.max(config?.actionDelayMs || 0, 3000));
-      continue;
+      return false;
     }
+    if (results.every(hit => hit && hit.status < 400)) return true;
     await sleep(500);
   }
   if (hasProxyTunnelFailures(page)) {
     throw new Error('Proxy tunnel failed during telecom API warmup');
   }
-  const results = patterns.map(pattern => latestTelecomApiResponse(page, pattern));
-  if (results.every(hit => hit && hit.status < 400)) return true;
-  if (!results.some(hit => hit)) {
-    log('Telecom API warmup timed out without API responses; continuing cautiously');
-    return true;
+  if (await isBlankWafPage(page)) {
+    log('Telecom login page is blank after API warmup wait');
+    return false;
   }
-  return false;
+  log('Telecom API warmup timed out without API responses; continuing cautiously');
+  return true;
 }
 
 async function dragSlider(page, sx, sy, moveX) {
@@ -786,7 +791,9 @@ async function loginWithRetry(browser, page, smsInbox, config) {
       log('Login SMS send failed before code wait', { error: err.message, summary });
       await captureDebugScreenshot(activePage, `login-send-failed-attempt-${attempt}`);
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
-        const waitMs = /Proxy tunnel failed|preActiveMeta warmup failed|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message) ? 15000 : 60000;
+        const waitMs = /Proxy tunnel failed|preActiveMeta warmup failed|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message)
+          ? 15000 + (attempt - 1) * 10000
+          : 60000;
         await sleep(waitMs);
         await activePage.context().close().catch(() => {});
         ({ page: activePage } = await newMobilePage(browser));
@@ -1288,4 +1295,5 @@ module.exports = {
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  waitForTelecomApiReady,
 };

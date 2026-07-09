@@ -130,3 +130,17 @@ test('classifies blank telecom slider challenge as WAF rejection', () => {
     true,
   );
 });
+
+test('preActiveMeta HTTP 400 fails fast without reloading', async () => {
+  const { waitForTelecomApiReady } = require('../scripts/telecom-monthly-claim');
+  const page = {
+    __telecomDiagnostics: [{
+      type: 'response',
+      url: 'https://wapbj.189.cn/wap2017/re/wapFree/preDepositNew/preActiveMeta?token=abc',
+      status: 400,
+    }],
+    evaluate: async () => 5000,
+  };
+  const ready = await waitForTelecomApiReady(page, { actionDelayMs: 0 }, [/preActiveMeta/], 2000);
+  assert.equal(ready, false);
+});
