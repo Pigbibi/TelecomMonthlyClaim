@@ -592,7 +592,7 @@ function isRetryableLoginSendError(err) {
   const message = err?.message || '';
   if (/Proxy tunnel failed during slider challenge/i.test(message)) return true;
   if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return false;
-  if (/Login phone field not found|#phoneNumber|element is not visible/.test(message)) return true;
+  if (/Login phone field not found|Login entry phone field not visible|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
   return /Slider verification (failed|service busy)/.test(message);
 }
