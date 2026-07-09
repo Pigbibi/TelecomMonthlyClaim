@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium: playwrightChromium } = require('playwright');
+const { getStealthChromium, chromeLaunchArgs, mobileContextOptions } = require('../src/browser-stealth');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient, sleep } = require('../src/sms-inbox-client');
 const { stateMonth, isFinalRetryDay, beijingParts } = require('../src/retry-date');
@@ -83,10 +84,6 @@ async function actionDelay(config) {
   if (delayMs > 0) await sleep(delayMs);
 }
 
-function androidUserAgent() {
-  return 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36';
-}
-
 function rememberPageDiagnostic(page, entry) {
   page.__telecomDiagnostics = page.__telecomDiagnostics || [];
   page.__telecomDiagnostics.push({ at: new Date().toISOString(), ...entry });
@@ -113,9 +110,10 @@ function isBlankSliderChallengeRejection(info, page) {
 }
 
 async function launchBrowser(config) {
+  const chromium = config.stealthMode ? getStealthChromium(true) : playwrightChromium;
   const options = {
     headless: config.headless,
-    args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
+    args: chromeLaunchArgs(),
   };
   if (config.openwrtProxy) {
     const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'configured proxy';
@@ -128,14 +126,18 @@ async function launchBrowser(config) {
   if (config.browserChannel && config.browserChannel !== 'bundled') options.channel = config.browserChannel;
   try {
     const browser = await chromium.launch(options);
-    log('Browser launched', { version: browser.version(), channel: options.channel || 'bundled' });
+    log('Browser launched', {
+      version: browser.version(),
+      channel: options.channel || 'bundled',
+      stealth: config.stealthMode,
+    });
     return browser;
   } catch (err) {
     if (!options.channel) throw err;
     log(`Browser channel ${options.channel} unavailable, falling back to bundled chromium`);
     delete options.channel;
     const browser = await chromium.launch(options);
-    log('Browser launched', { version: browser.version(), channel: 'bundled' });
+    log('Browser launched', { version: browser.version(), channel: 'bundled', stealth: config.stealthMode });
     return browser;
   }
 }
@@ -168,26 +170,18 @@ async function verifyProxyPath(proxyUrl, healthUrl = 'https://wapbj.189.cn/') {
   if (ok < 3) throw new Error(`Proxy preflight failed (${ok}/5 probes succeeded)`);
 }
 
-async function newMobilePage(browser) {
-  const context = await browser.newContext({
-    viewport: { width: 393, height: 873 },
-    deviceScaleFactor: 2.75,
-    isMobile: true,
-    hasTouch: true,
-    locale: 'zh-CN',
-    timezoneId: 'Asia/Shanghai',
-    userAgent: androidUserAgent(browser),
-    ignoreHTTPSErrors: true,
-    serviceWorkers: 'block',
-  });
+async function newMobilePage(browser, config = {}) {
+  const context = await browser.newContext(mobileContextOptions(browser.version()));
   const page = await context.newPage();
-  await page.route('**/*', route => {
-    const type = route.request().resourceType();
-    const url = route.request().url();
-    if (['image', 'media', 'font'].includes(type)) return route.abort();
-    if (/dcs_new\.gif|selfwapimage\/|\.(?:png|jpe?g|gif|webp|svg)(?:\?|$)/i.test(url)) return route.abort();
-    return route.continue();
-  });
+  if (config.blockHeavyAssets) {
+    await page.route('**/*', route => {
+      const type = route.request().resourceType();
+      const url = route.request().url();
+      if (['image', 'media', 'font'].includes(type)) return route.abort();
+      if (/dcs_new\.gif|selfwapimage\/|\.(?:png|jpe?g|gif|webp|svg)(?:\?|$)/i.test(url)) return route.abort();
+      return route.continue();
+    });
+  }
   page.on('console', msg => {
     if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
   });
@@ -744,7 +738,6 @@ async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/]
 }
 
 async function dragSlider(page, sx, sy, moveX) {
-  const client = await page.context().newCDPSession(page).catch(() => null);
   const points = [];
   const steps = 62;
   for (let i = 0; i <= steps; i += 1) {
@@ -757,16 +750,7 @@ async function dragSlider(page, sx, sy, moveX) {
       wait: 35 + (i % 7) * 9,
     });
   }
-  if (client) {
-    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy, radiusX: 5, radiusY: 5, force: 0.6 }] });
-    for (const point of points.slice(1)) {
-      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x, y: point.y, radiusX: 5, radiusY: 5, force: 0.6 }] });
-      await sleep(point.wait);
-    }
-    await sleep(260);
-    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    return;
-  }
+  // Mobile context maps mouse events to touch; avoid CDP Input.dispatchTouchEvent (WAF detects it).
   await page.mouse.move(sx, sy);
   await sleep(650);
   await page.mouse.down();
@@ -796,7 +780,7 @@ async function loginWithRetry(browser, page, smsInbox, config) {
           : 60000;
         await sleep(waitMs);
         await activePage.context().close().catch(() => {});
-        ({ page: activePage } = await newMobilePage(browser));
+        ({ page: activePage } = await newMobilePage(browser, config));
         continue;
       }
       throw err;
@@ -1213,7 +1197,7 @@ async function runClaim(config) {
   const browser = await launchBrowser(config);
   let activePage = null;
   try {
-    const { page } = await newMobilePage(browser);
+    const { page } = await newMobilePage(browser, config);
     activePage = page;
     activePage = await loginWithRetry(browser, page, smsInbox, config);
     await choosePackage(activePage, config);

@@ -48,5 +48,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /proxy stress check passed/);
   assert.match(workflowText, /Upload claim debug screenshots/);
   assert.match(workflowText, /artifacts\/claim-debug/);
+  assert.match(workflowText, /TELECOM_STEALTH_MODE/);
+  assert.match(workflowText, /BROWSER_CHANNEL: chrome/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
 });

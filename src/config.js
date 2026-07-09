@@ -61,6 +61,8 @@ function loadConfig() {
     proxyPoolProxy: process.env.PROXY_POOL_HTTP_PROXY || '',
     headless: process.env.HEADLESS !== 'false',
     browserChannel: process.env.BROWSER_CHANNEL || 'chrome',
+    stealthMode: process.env.TELECOM_STEALTH_MODE !== 'false',
+    blockHeavyAssets: process.env.TELECOM_BLOCK_HEAVY_ASSETS === 'true',
     finalRetryDay: numberEnv('FINAL_RETRY_DAY', 3),
     failOnlyFinalDay: process.env.FAIL_ONLY_FINAL_DAY !== 'false',
     forceRun: process.env.FORCE_RUN === 'true',

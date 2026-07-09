@@ -6,9 +6,10 @@
     "lint": "node --check scripts/telecom-monthly-claim.js && node --check scripts/sms-inbox-server.js && node --check scripts/create-failure-issue.js && node --check scripts/resolve-run-log-outcome.js && bash -n scripts/write-run-log-branch.sh && node --check src/*.js"
   },
   "dependencies": {
-    "playwright": "^1.52.0"
+    "playwright": "^1.52.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
-  "devDependencies": {},
   "engines": {
     "node": ">=20"
   },
