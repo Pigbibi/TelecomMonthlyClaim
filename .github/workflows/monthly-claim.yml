@@ -252,6 +252,14 @@ jobs:
         if: steps.claim_plan.outputs.should_run == 'true'
         run: xvfb-run -a node scripts/telecom-monthly-claim.js
 
+      - name: Upload claim debug screenshots
+        if: always() && steps.claim_plan.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-debug-${{ github.run_id }}
+          path: artifacts/claim-debug/
+          if-no-files-found: ignore
+
       - name: Cleanup SSH proxy tunnel
         if: always()
         run: |

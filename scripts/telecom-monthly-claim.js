@@ -19,6 +19,31 @@ function log(message, data) {
   else console.log(`${message} ${mask(JSON.stringify(data))}`);
 }
 
+function screenshotDir() {
+  return process.env.CLAIM_SCREENSHOT_DIR || 'artifacts/claim-debug';
+}
+
+function ensureScreenshotDir() {
+  const dir = screenshotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+async function captureDebugScreenshot(page, label) {
+  if (!page) return null;
+  try {
+    const dir = ensureScreenshotDir();
+    const safe = String(label).replace(/[^a-z0-9_-]+/gi, '-').replace(/-+/g, '-').slice(0, 80);
+    const file = path.join(dir, `${Date.now()}-${safe}.png`);
+    await page.screenshot({ path: file, fullPage: true });
+    log('Saved failure screenshot', { path: file });
+    return file;
+  } catch (err) {
+    log('Failed to save screenshot', { label, error: err.message });
+    return null;
+  }
+}
+
 function maskProxyUrl(proxyUrl) {
   if (!proxyUrl) return '';
   try {
@@ -759,6 +784,7 @@ async function loginWithRetry(browser, page, smsInbox, config) {
     } catch (err) {
       const summary = await getPageSummary(activePage).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
+      await captureDebugScreenshot(activePage, `login-send-failed-attempt-${attempt}`);
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
         const waitMs = /Proxy tunnel failed|preActiveMeta warmup failed|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message) ? 15000 : 60000;
         await sleep(waitMs);
@@ -772,6 +798,7 @@ async function loginWithRetry(browser, page, smsInbox, config) {
     if (!sms) {
       const summary = await getPageSummary(activePage).catch(err => ({ error: err.message }));
       log('Login SMS not received before timeout', summary);
+      await captureDebugScreenshot(activePage, `login-sms-timeout-attempt-${attempt}`);
       continue;
     }
     const ok = await submitLoginCode(activePage, sms.code, config);
@@ -1024,8 +1051,10 @@ async function solvePuzzle(page, config, options = {}) {
           }
         }
         if (hasProxyTunnelFailures(page)) {
+          await captureDebugScreenshot(page, `slider-proxy-tunnel-attempt-${attempt}`);
           throw new Error(`Proxy tunnel failed during slider challenge${sliderFailureHint(page)}`);
         }
+        await captureDebugScreenshot(page, `slider-telecom-400-attempt-${attempt}`);
         throw new Error(`Telecom slider challenge rejected with blank HTTP 400${sliderFailureHint(page)}`);
       }
       await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
@@ -1175,14 +1204,16 @@ async function runClaim(config) {
   }
   const smsInbox = new SmsInboxClient(config);
   const browser = await launchBrowser(config);
+  let activePage = null;
   try {
     const { page } = await newMobilePage(browser);
-    const loggedInPage = await loginWithRetry(browser, page, smsInbox, config);
-    await choosePackage(loggedInPage, config);
-    const result = await confirmWithRetry(loggedInPage, smsInbox, config);
+    activePage = page;
+    activePage = await loginWithRetry(browser, page, smsInbox, config);
+    await choosePackage(activePage, config);
+    const result = await confirmWithRetry(activePage, smsInbox, config);
     if (result === 'dry-run') return;
-    if (!await waitForSuccess(loggedInPage, 5000, config)) throw new Error('No success page after final submit');
-    const summary = await getPageSummary(loggedInPage);
+    if (!await waitForSuccess(activePage, 5000, config)) throw new Error('No success page after final submit');
+    const summary = await getPageSummary(activePage);
     log('Claim succeeded', summary);
     writeState('success', {
       targetPackage: config.targetPackage,
@@ -1193,6 +1224,9 @@ async function runClaim(config) {
       log('Keeping success page open before closing browser', { waitMs: config.postSuccessWaitMs });
       await sleep(config.postSuccessWaitMs);
     }
+  } catch (err) {
+    await captureDebugScreenshot(activePage, 'claim-failed');
+    throw err;
   } finally {
     await browser.close().catch(() => {});
   }
