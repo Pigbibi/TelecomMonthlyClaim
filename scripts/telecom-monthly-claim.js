@@ -100,7 +100,7 @@ async function launchBrowser(config) {
   } else {
     log('Launching browser without OPENWRT_HTTP_PROXY');
   }
-  if (config.browserChannel) options.channel = config.browserChannel;
+  if (config.browserChannel && config.browserChannel !== 'bundled') options.channel = config.browserChannel;
   try {
     const browser = await chromium.launch(options);
     log('Browser launched', { version: browser.version(), channel: options.channel || 'bundled' });
@@ -155,13 +155,6 @@ async function newMobilePage(browser) {
     ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
-  await page.route('**/*', route => {
-    const url = route.request().url();
-    if (/pv\.sohu\.com|res\.wx\.qq\.com/i.test(url)) {
-      return route.abort();
-    }
-    return route.continue();
-  });
   page.on('console', msg => {
     if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
   });
@@ -525,6 +518,9 @@ async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
   await fillInputField(phoneField.locator, config.phone);
+  if (!await waitForTelecomApiReady(page, config)) {
+    throw new Error('Telecom preActiveMeta warmup failed before login SMS send');
+  }
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
@@ -647,6 +643,7 @@ function isRetryableLoginSendError(err) {
   const message = err?.message || '';
   if (/Proxy tunnel failed during slider challenge/i.test(message)) return true;
   if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return true;
+  if (/preActiveMeta warmup failed/i.test(message)) return true;
   if (/Login phone field not found|Login entry phone field not visible|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
   return /Slider verification (failed|service busy)/.test(message);
@@ -669,6 +666,31 @@ async function waitForSliderChallengeLoad(page, timeoutMs = 12000) {
     await sleep(300);
   }
   return { ok: false, reason: 'timeout' };
+}
+
+function latestTelecomApiResponse(page, pattern) {
+  return (page.__telecomDiagnostics || [])
+    .filter(d => d.type === 'response' && pattern.test(d.url || ''))
+    .pop();
+}
+
+async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/], timeoutMs = 35000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const results = patterns.map(pattern => latestTelecomApiResponse(page, pattern));
+    if (results.every(hit => hit && hit.status < 400)) return true;
+    if (results.some(hit => hit && hit.status >= 400)) {
+      log('Telecom API warmup rejected; reloading login entry', {
+        apis: results.map(hit => ({ url: hit?.url, status: hit?.status })),
+      });
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await sleep(Math.max(config?.actionDelayMs || 0, 3000));
+      continue;
+    }
+    await sleep(500);
+  }
+  return false;
 }
 
 async function dragSlider(page, sx, sy, moveX) {
@@ -706,36 +728,38 @@ async function dragSlider(page, sx, sy, moveX) {
   await page.mouse.up();
 }
 
-async function loginWithRetry(page, smsInbox, config) {
+async function loginWithRetry(browser, page, smsInbox, config) {
+  let activePage = page;
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending login SMS attempt ${attempt}/${config.sendCodeAttempts}`);
     const since = Date.now() - 10000;
     try {
-      await gotoLoginEntryPage(page, config, `attempt-${attempt}`);
-      await sendLoginCode(page, config);
+      await gotoLoginEntryPage(activePage, config, `attempt-${attempt}`);
+      await sendLoginCode(activePage, config);
     } catch (err) {
-      const summary = await getPageSummary(page).catch(summaryErr => ({ error: summaryErr.message }));
+      const summary = await getPageSummary(activePage).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
-        const waitMs = /Proxy tunnel failed during slider challenge|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message) ? 15000 : 60000;
+        const waitMs = /Proxy tunnel failed during slider challenge|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400|preActiveMeta warmup failed/i.test(err.message) ? 15000 : 60000;
         await sleep(waitMs);
-        await resetLoginEntryPage(page);
+        await activePage.context().close().catch(() => {});
+        ({ page: activePage } = await newMobilePage(browser));
         continue;
       }
       throw err;
     }
     const sms = await smsInbox.waitForCode({ stage: 'login', since, timeoutMs: config.smsTimeoutMs, pollMs: config.smsPollMs });
     if (!sms) {
-      const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+      const summary = await getPageSummary(activePage).catch(err => ({ error: err.message }));
       log('Login SMS not received before timeout', summary);
       continue;
     }
-    const ok = await submitLoginCode(page, sms.code, config);
-    if (ok) return;
-    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    const ok = await submitLoginCode(activePage, sms.code, config);
+    if (ok) return activePage;
+    const summary = await getPageSummary(activePage).catch(err => ({ error: err.message }));
     log('Login code rejected, retrying', summary);
     if (attempt < config.sendCodeAttempts) {
-      await resetLoginEntryPage(page);
+      await resetLoginEntryPage(activePage);
       await sleep(60000);
     }
   }
@@ -1133,12 +1157,12 @@ async function runClaim(config) {
   const browser = await launchBrowser(config);
   try {
     const { page } = await newMobilePage(browser);
-    await loginWithRetry(page, smsInbox, config);
-    await choosePackage(page, config);
-    const result = await confirmWithRetry(page, smsInbox, config);
+    const loggedInPage = await loginWithRetry(browser, page, smsInbox, config);
+    await choosePackage(loggedInPage, config);
+    const result = await confirmWithRetry(loggedInPage, smsInbox, config);
     if (result === 'dry-run') return;
-    if (!await waitForSuccess(page, 5000, config)) throw new Error('No success page after final submit');
-    const summary = await getPageSummary(page);
+    if (!await waitForSuccess(loggedInPage, 5000, config)) throw new Error('No success page after final submit');
+    const summary = await getPageSummary(loggedInPage);
     log('Claim succeeded', summary);
     writeState('success', {
       targetPackage: config.targetPackage,

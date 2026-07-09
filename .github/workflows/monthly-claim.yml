@@ -62,7 +62,7 @@ jobs:
       PROXY_TUNNEL_REMOTE_ENDPOINT: ${{ secrets.PROXY_TUNNEL_REMOTE_ENDPOINT || vars.PROXY_TUNNEL_REMOTE_ENDPOINT || '127.0.0.1:13128' }}
       PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
-      BROWSER_CHANNEL: chrome
+      BROWSER_CHANNEL: bundled
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
       FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
       FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
