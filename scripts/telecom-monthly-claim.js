@@ -155,6 +155,13 @@ async function newMobilePage(browser) {
     ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
+  await page.route('**/*', route => {
+    const url = route.request().url();
+    if (/pv\.sohu\.com|res\.wx\.qq\.com|js\.cdn\.aliyun\.dcloud\.net\.cn/i.test(url)) {
+      return route.abort();
+    }
+    return route.continue();
+  });
   page.on('console', msg => {
     if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
   });
@@ -521,7 +528,7 @@ async function sendLoginCode(page, config) {
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
-    await solvePuzzle(page);
+    await solvePuzzle(page, config);
   }
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
@@ -898,7 +905,10 @@ async function transparentPuzzleInfo(page) {
   });
 }
 
-async function solvePuzzle(page) {
+async function solvePuzzle(page, config) {
+  if (config?.openwrtProxy) {
+    await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
+  }
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     await page.waitForFunction(() => {
       const visible = e => {
@@ -1001,7 +1011,7 @@ async function confirmWithRetry(page, smsInbox, config) {
     await closeDialogs(page);
     await actionDelay(config);
     await page.locator('#SecondConfirmationSms').click({ force: true });
-    await solvePuzzle(page);
+    await solvePuzzle(page, config);
     await closeDialogs(page);
     const sms = await smsInbox.waitForCode({ stage: 'confirm', since, timeoutMs: config.smsTimeoutMs, pollMs: config.smsPollMs });
     if (!sms) {

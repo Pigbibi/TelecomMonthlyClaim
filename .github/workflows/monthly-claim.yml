@@ -192,6 +192,7 @@ jobs:
                 ssh-keyscan -p "${PROXY_SSH_PORT:-22}" "$PROXY_SSH_HOST" > "$known_hosts_file" 2>/dev/null
               fi
               chmod 600 "$known_hosts_file"
+              control_path="$ssh_dir/control-%C"
               ssh -i "$key_file" \
                 -p "${PROXY_SSH_PORT:-22}" \
                 -o BatchMode=yes \
@@ -203,6 +204,9 @@ jobs:
                 -o TCPKeepAlive=yes \
                 -o IPQoS=none \
                 -o Compression=no \
+                -o ControlMaster=auto \
+                -o ControlPath="$control_path" \
+                -o ControlPersist=300 \
                 -N -L "127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}:${PROXY_TUNNEL_REMOTE_ENDPOINT}" \
                 "${PROXY_SSH_USER:-root}@${PROXY_SSH_HOST}" &
               tunnel_pid="$!"
