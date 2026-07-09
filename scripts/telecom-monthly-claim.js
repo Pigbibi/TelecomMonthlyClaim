@@ -95,6 +95,7 @@ async function launchBrowser(config) {
   if (config.openwrtProxy) {
     const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'configured proxy';
     log(`Launching browser through ${label}`, { proxy: maskProxyUrl(config.openwrtProxy) });
+    await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
     options.proxy = buildProxyOptions(config.openwrtProxy);
   } else {
     log('Launching browser without OPENWRT_HTTP_PROXY');
@@ -120,6 +121,26 @@ function buildProxyOptions(proxyUrl) {
   if (parsed.username) proxy.username = decodeURIComponent(parsed.username);
   if (parsed.password) proxy.password = decodeURIComponent(parsed.password);
   return proxy;
+}
+
+async function verifyProxyPath(proxyUrl, healthUrl = 'https://wapbj.189.cn/') {
+  const { execFile } = require('node:child_process');
+  const { promisify } = require('node:util');
+  const execFileAsync = promisify(execFile);
+  const probes = await Promise.all(Array.from({ length: 5 }, async () => {
+    try {
+      const { stdout } = await execFileAsync('curl', [
+        '-sS', '--connect-timeout', '8', '--max-time', '20',
+        '--proxy', proxyUrl, '-o', '/dev/null', '-w', '%{http_code}', healthUrl,
+      ]);
+      return stdout.trim();
+    } catch {
+      return 'fail';
+    }
+  }));
+  const ok = probes.filter(code => code && code !== 'fail' && code !== '000').length;
+  log('Proxy preflight probes', { ok, total: probes.length, codes: probes });
+  if (ok < 3) throw new Error(`Proxy preflight failed (${ok}/5 probes succeeded)`);
 }
 
 async function newMobilePage(browser) {

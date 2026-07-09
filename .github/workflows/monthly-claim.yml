@@ -198,8 +198,11 @@ jobs:
                 -o ExitOnForwardFailure=yes \
                 -o StrictHostKeyChecking=yes \
                 -o UserKnownHostsFile="$known_hosts_file" \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=3 \
+                -o ServerAliveInterval=15 \
+                -o ServerAliveCountMax=10 \
+                -o TCPKeepAlive=yes \
+                -o IPQoS=none \
+                -o Compression=no \
                 -N -L "127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}:${PROXY_TUNNEL_REMOTE_ENDPOINT}" \
                 "${PROXY_SSH_USER:-root}@${PROXY_SSH_HOST}" &
               tunnel_pid="$!"
@@ -219,8 +222,18 @@ jobs:
                 fi
                 sleep 1
               done
-              curl -sSI --proxy "http://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}" --connect-timeout 8 --max-time 20 "$PROXY_HEALTH_URL" >/dev/null
-              echo "SSH tunnel proxy check passed."
+              proxy_url="http://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}"
+              proxy_probe_ok=0
+              for probe in $(seq 1 5); do
+                if curl -sS --connect-timeout 8 --max-time 20 --proxy "$proxy_url" "$PROXY_HEALTH_URL" -o /dev/null; then
+                  proxy_probe_ok=$((proxy_probe_ok + 1))
+                fi
+              done
+              if [ "$proxy_probe_ok" -lt 3 ]; then
+                echo "SSH tunnel proxy stress check failed (${proxy_probe_ok}/5 probes succeeded)."
+                exit 1
+              fi
+              echo "SSH tunnel proxy stress check passed (${proxy_probe_ok}/5 probes)."
               ;;
             proxy_pool)
               : "${PROXY_POOL_HTTP_PROXY:?Missing PROXY_POOL_HTTP_PROXY secret for proxy_pool mode}"
