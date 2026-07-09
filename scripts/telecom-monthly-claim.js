@@ -153,8 +153,16 @@ async function newMobilePage(browser) {
     timezoneId: 'Asia/Shanghai',
     userAgent: androidUserAgent(browser),
     ignoreHTTPSErrors: true,
+    serviceWorkers: 'block',
   });
   const page = await context.newPage();
+  await page.route('**/*', route => {
+    const type = route.request().resourceType();
+    const url = route.request().url();
+    if (['image', 'media', 'font'].includes(type)) return route.abort();
+    if (/dcs_new\.gif|selfwapimage\/|\.(?:png|jpe?g|gif|webp|svg)(?:\?|$)/i.test(url)) return route.abort();
+    return route.continue();
+  });
   page.on('console', msg => {
     if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
   });
@@ -643,7 +651,7 @@ function isRetryableLoginSendError(err) {
   const message = err?.message || '';
   if (/Proxy tunnel failed during slider challenge/i.test(message)) return true;
   if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return true;
-  if (/preActiveMeta warmup failed/i.test(message)) return true;
+  if (/preActiveMeta warmup failed|Proxy tunnel failed during telecom API warmup/i.test(message)) return true;
   if (/Login phone field not found|Login entry phone field not visible|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
   return /Slider verification (failed|service busy)/.test(message);
@@ -677,6 +685,9 @@ function latestTelecomApiResponse(page, pattern) {
 async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/], timeoutMs = 35000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (hasProxyTunnelFailures(page)) {
+      throw new Error('Proxy tunnel failed during telecom API warmup');
+    }
     const results = patterns.map(pattern => latestTelecomApiResponse(page, pattern));
     if (results.every(hit => hit && hit.status < 400)) return true;
     if (results.some(hit => hit && hit.status >= 400)) {
@@ -689,6 +700,15 @@ async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/]
       continue;
     }
     await sleep(500);
+  }
+  if (hasProxyTunnelFailures(page)) {
+    throw new Error('Proxy tunnel failed during telecom API warmup');
+  }
+  const results = patterns.map(pattern => latestTelecomApiResponse(page, pattern));
+  if (results.every(hit => hit && hit.status < 400)) return true;
+  if (!results.some(hit => hit)) {
+    log('Telecom API warmup timed out without API responses; continuing cautiously');
+    return true;
   }
   return false;
 }
@@ -740,7 +760,7 @@ async function loginWithRetry(browser, page, smsInbox, config) {
       const summary = await getPageSummary(activePage).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
-        const waitMs = /Proxy tunnel failed during slider challenge|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400|preActiveMeta warmup failed/i.test(err.message) ? 15000 : 60000;
+        const waitMs = /Proxy tunnel failed|preActiveMeta warmup failed|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message) ? 15000 : 60000;
         await sleep(waitMs);
         await activePage.context().close().catch(() => {});
         ({ page: activePage } = await newMobilePage(browser));
