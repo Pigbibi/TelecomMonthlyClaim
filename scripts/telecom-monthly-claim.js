@@ -157,7 +157,7 @@ async function newMobilePage(browser) {
   const page = await context.newPage();
   await page.route('**/*', route => {
     const url = route.request().url();
-    if (/pv\.sohu\.com|res\.wx\.qq\.com|js\.cdn\.aliyun\.dcloud\.net\.cn/i.test(url)) {
+    if (/pv\.sohu\.com|res\.wx\.qq\.com/i.test(url)) {
       return route.abort();
     }
     return route.continue();
@@ -528,7 +528,19 @@ async function sendLoginCode(page, config) {
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
-    await solvePuzzle(page, config);
+    const challenge = await waitForSliderChallengeLoad(page);
+    if (!challenge.ok) log('Slider challenge prefetch not ready', challenge);
+    await solvePuzzle(page, config, {
+      async onChallengeRejected() {
+        await dismissSliderPopup(page);
+        await sleep(5000);
+        if (config.openwrtProxy) {
+          await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
+        }
+        await clickLoginSmsButton(page, config);
+        return waitForSliderVerification(page, 10000);
+      },
+    });
   }
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
@@ -589,13 +601,14 @@ async function gotoLoginEntryPage(page, config, reason) {
     { label: 'entry-cache-bust', url: withCacheBuster(config.entryUrl) },
   ];
   for (const candidate of candidates) {
+    let entryTimeoutMs = hasProxyTunnelFailures(page) ? 8000 : 25000;
     await page.goto('about:blank', { waitUntil: 'domcontentloaded' }).catch(() => {});
     const response = await page.goto(candidate.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(err => {
       rememberPageDiagnostic(page, { type: 'goto-error', url: candidate.url, error: err.message });
       return null;
     });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    if (await waitForLoginEntry(page)) {
+    if (await waitForLoginEntry(page, entryTimeoutMs)) {
       log('Login entry ready', { reason, strategy: candidate.label, status: response?.status?.() || null, url: page.url() });
       return;
     }
@@ -605,7 +618,8 @@ async function gotoLoginEntryPage(page, config, reason) {
       rememberPageDiagnostic(page, { type: 'reload-error', url: page.url(), error: err.message });
     });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    if (await waitForLoginEntry(page)) {
+    entryTimeoutMs = hasProxyTunnelFailures(page) ? 8000 : 25000;
+    if (await waitForLoginEntry(page, entryTimeoutMs)) {
       log('Login entry ready after reload', { reason, strategy: candidate.label, url: page.url() });
       return;
     }
@@ -632,10 +646,29 @@ async function resetLoginEntryPage(page) {
 function isRetryableLoginSendError(err) {
   const message = err?.message || '';
   if (/Proxy tunnel failed during slider challenge/i.test(message)) return true;
-  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return false;
+  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return true;
   if (/Login phone field not found|Login entry phone field not visible|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
   return /Slider verification (failed|service busy)/.test(message);
+}
+
+async function dismissSliderPopup(page) {
+  await page.locator('.puzzle-close,.slider-check-close,#secondPop_puzzle_check .close').first().click({ force: true }).catch(() => {});
+  await sleep(800);
+}
+
+async function waitForSliderChallengeLoad(page, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const challenge = (page.__telecomDiagnostics || []).filter(d => /getSliderChallenge/i.test(d.url || '')).pop();
+    if (challenge) {
+      return challenge.status < 400
+        ? { ok: true, status: challenge.status }
+        : { ok: false, status: challenge.status, body: challenge.body || '' };
+    }
+    await sleep(300);
+  }
+  return { ok: false, reason: 'timeout' };
 }
 
 async function dragSlider(page, sx, sy, moveX) {
@@ -684,7 +717,7 @@ async function loginWithRetry(page, smsInbox, config) {
       const summary = await getPageSummary(page).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
-        const waitMs = /Proxy tunnel failed during slider challenge|Login phone field not found/i.test(err.message) ? 15000 : 60000;
+        const waitMs = /Proxy tunnel failed during slider challenge|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message) ? 15000 : 60000;
         await sleep(waitMs);
         await resetLoginEntryPage(page);
         continue;
@@ -905,7 +938,7 @@ async function transparentPuzzleInfo(page) {
   });
 }
 
-async function solvePuzzle(page, config) {
+async function solvePuzzle(page, config, options = {}) {
   if (config?.openwrtProxy) {
     await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
   }
@@ -938,6 +971,14 @@ async function solvePuzzle(page, config) {
     if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget && !hasTrackFallback)) {
       log('Slider puzzle info incomplete', { attempt, info });
       if (isBlankSliderChallengeRejection(info, page)) {
+        if (options.onChallengeRejected && attempt < 3) {
+          log('Slider challenge rejected; retriggering SMS send', { attempt });
+          const ready = await options.onChallengeRejected();
+          if (ready) {
+            await waitForSliderChallengeLoad(page);
+            continue;
+          }
+        }
         if (hasProxyTunnelFailures(page)) {
           throw new Error(`Proxy tunnel failed during slider challenge${sliderFailureHint(page)}`);
         }
