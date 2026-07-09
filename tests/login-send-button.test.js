@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   clickLoginSmsButton,
   firstVisibleLocator,
+  hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
 } = require('../scripts/telecom-monthly-claim');
@@ -94,6 +95,24 @@ test('does not trust Playwright visibility when DOM rect says input is hidden', 
 test('does not retry blank telecom slider challenge rejections', () => {
   assert.equal(
     isRetryableLoginSendError(new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400')),
+    false,
+  );
+});
+
+test('retries login phone field failures even when proxy tunnel errors are present', () => {
+  assert.equal(
+    isRetryableLoginSendError(new Error('Login phone field not found after opening SMS login form; page summary: {"diagnostics":[{"error":"net::ERR_TUNNEL_CONNECTION_FAILED"}]}')),
+    true,
+  );
+});
+
+test('detects proxy tunnel failures from page diagnostics', () => {
+  assert.equal(
+    hasProxyTunnelFailures({ __telecomDiagnostics: [{ error: 'net::ERR_TUNNEL_CONNECTION_FAILED' }] }),
+    true,
+  );
+  assert.equal(
+    hasProxyTunnelFailures({ __telecomDiagnostics: [{ status: 412 }] }),
     false,
   );
 });

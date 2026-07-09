@@ -77,6 +77,10 @@ function sliderFailureHint(page) {
   return signals.length ? `; ${signals.join(', ')}` : '';
 }
 
+function hasProxyTunnelFailures(page) {
+  return /ERR_TUNNEL_CONNECTION_FAILED|ERR_PROXY_CONNECTION_FAILED/i.test(JSON.stringify(page.__telecomDiagnostics || []));
+}
+
 function isBlankSliderChallengeRejection(info, page) {
   return /获取验证码失败，请重试/.test(info?.message || '')
     && /getSliderChallenge/i.test(JSON.stringify(page.__telecomDiagnostics || []))
@@ -341,21 +345,33 @@ async function waitForLoginEntry(page, timeoutMs = 25000) {
 }
 
 async function ensureSmsLoginForm(page, config) {
-  let phoneField = await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS);
-  if (phoneField) return phoneField;
-  const smsLogin = page.getByText('短信验证码登录', { exact: true });
-  if (await smsLogin.isVisible().catch(() => false)) {
-    await actionDelay(config);
-    await smsLogin.click({ force: true });
-    log('Clicked SMS login tab', { strategy: 'text' });
-    phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, 5000);
+  const smsFormWaitMs = Math.max(Number(config?.actionDelayMs || 0) * 2, 12000);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    let phoneField = await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS);
     if (phoneField) return phoneField;
-    const domTarget = await activateSmsLoginByDom(page).catch(() => null);
-    if (domTarget) log('Clicked SMS login tab', { strategy: 'dom', target: domTarget });
-    await sleep(500);
+
+    const smsLogin = page.getByText('短信验证码登录', { exact: true });
+    if (await smsLogin.isVisible().catch(() => false)) {
+      await actionDelay(config);
+      await smsLogin.click({ force: true });
+      log('Clicked SMS login tab', { strategy: 'text', attempt });
+      phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, smsFormWaitMs);
+      if (phoneField) return phoneField;
+      const domTarget = await activateSmsLoginByDom(page).catch(() => null);
+      if (domTarget) log('Clicked SMS login tab', { strategy: 'dom', attempt, target: domTarget });
+      await sleep(800);
+    }
+
+    phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, smsFormWaitMs);
+    if (phoneField) return phoneField;
+
+    if (hasProxyTunnelFailures(page) && attempt < 3) {
+      log('SMS login form not ready after proxy tunnel failures; reloading login entry', { attempt });
+      await gotoLoginEntryPage(page, config, `sms-form-proxy-retry-${attempt}`);
+      continue;
+    }
   }
-  phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, 5000);
-  if (phoneField) return phoneField;
+
   const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
   throw new Error(`Login phone field not found after opening SMS login form; page summary: ${mask(JSON.stringify(summary))}`);
 }
@@ -573,9 +589,11 @@ async function resetLoginEntryPage(page) {
 }
 
 function isRetryableLoginSendError(err) {
-  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(err?.message || '')) return false;
+  const message = err?.message || '';
+  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return false;
+  if (/Login phone field not found|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
-  return /Slider verification (failed|service busy)|#phoneNumber|Login phone field not found|element is not visible/.test(err?.message || '');
+  return /Slider verification (failed|service busy)/.test(message);
 }
 
 async function dragSlider(page, sx, sy, moveX) {
@@ -1099,6 +1117,7 @@ module.exports = {
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
   firstVisibleLocator,
+  hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
 };
