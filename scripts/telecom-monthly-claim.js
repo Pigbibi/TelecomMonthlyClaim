@@ -480,10 +480,23 @@ async function waitForSliderVerification(page, timeoutMs = 7000) {
 }
 
 
+async function fillInputField(locator, value) {
+  try {
+    await locator.fill(value, { timeout: 8000 });
+  } catch (err) {
+    if (!/not visible|Timeout/i.test(err?.message || '')) throw err;
+    await locator.evaluate((el, nextValue) => {
+      el.value = nextValue;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, value);
+  }
+}
+
 async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await actionDelay(config);
-  await phoneField.locator.fill(config.phone);
+  await fillInputField(phoneField.locator, config.phone);
   await clickLoginSmsButton(page, config);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
