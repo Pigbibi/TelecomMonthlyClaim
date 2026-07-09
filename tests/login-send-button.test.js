@@ -99,6 +99,13 @@ test('does not retry blank telecom slider challenge rejections', () => {
   );
 });
 
+test('retries proxy tunnel slider failures', () => {
+  assert.equal(
+    isRetryableLoginSendError(new Error('Proxy tunnel failed during slider challenge; ERR_TUNNEL_CONNECTION_FAILED, getSliderChallenge HTTP 400')),
+    true,
+  );
+});
+
 test('retries login phone field failures even when proxy tunnel errors are present', () => {
   assert.equal(
     isRetryableLoginSendError(new Error('Login phone field not found after opening SMS login form; page summary: {"diagnostics":[{"error":"net::ERR_TUNNEL_CONNECTION_FAILED"}]}')),

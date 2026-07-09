@@ -590,6 +590,7 @@ async function resetLoginEntryPage(page) {
 
 function isRetryableLoginSendError(err) {
   const message = err?.message || '';
+  if (/Proxy tunnel failed during slider challenge/i.test(message)) return true;
   if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return false;
   if (/Login phone field not found|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
@@ -642,7 +643,8 @@ async function loginWithRetry(page, smsInbox, config) {
       const summary = await getPageSummary(page).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
-        await sleep(60000);
+        const waitMs = /Proxy tunnel failed during slider challenge|Login phone field not found/i.test(err.message) ? 15000 : 60000;
+        await sleep(waitMs);
         await resetLoginEntryPage(page);
         continue;
       }
@@ -892,6 +894,9 @@ async function solvePuzzle(page) {
     if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget && !hasTrackFallback)) {
       log('Slider puzzle info incomplete', { attempt, info });
       if (isBlankSliderChallengeRejection(info, page)) {
+        if (hasProxyTunnelFailures(page)) {
+          throw new Error(`Proxy tunnel failed during slider challenge${sliderFailureHint(page)}`);
+        }
         throw new Error(`Telecom slider challenge rejected with blank HTTP 400${sliderFailureHint(page)}`);
       }
       await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
