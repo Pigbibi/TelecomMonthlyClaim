@@ -10,7 +10,6 @@ const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 
 const root = path.resolve(__dirname, '..');
-const cdpPort = Number(process.env.TELECOM_CDP_PORT || 9222);
 const entryUrl = process.env.TELECOM_ENTRY_URL;
 const phone = process.env.TELECOM_PHONE;
 const timeoutMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_TIMEOUT_MS || 90000);
@@ -27,6 +26,19 @@ function resolveChromeBinary() {
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForDevToolsActivePort(profileDir, timeout = 30000) {
+  const activePortFile = path.join(profileDir, 'DevToolsActivePort');
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      const port = Number(fs.readFileSync(activePortFile, 'utf8').split(/\r?\n/, 1)[0]);
+      if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
+    } catch {}
+    await wait(200);
+  }
+  throw new Error('Fresh Chrome did not publish its DevTools port');
 }
 
 async function waitForCdp(url, timeout = 30000) {
@@ -64,6 +76,10 @@ function runChild(command, args, options) {
 async function main() {
   const chromeBin = resolveChromeBinary();
   if (!fs.existsSync(chromeBin)) throw new Error(`Chrome for Testing binary not found: ${chromeBin}`);
+  const requestedCdpPort = Number(process.env.TELECOM_CDP_PORT || 0);
+  if (!Number.isInteger(requestedCdpPort) || requestedCdpPort < 0 || requestedCdpPort > 65535) {
+    throw new Error('TELECOM_CDP_PORT must be an integer between 0 and 65535');
+  }
   const token = crypto.randomBytes(24).toString('hex');
   let status = { stage: 'starting' };
   let loginCode = '';
@@ -118,17 +134,24 @@ async function main() {
   fs.writeFileSync(path.join(extensionDir, 'background.js'), background);
 
   const chrome = spawn(chromeBin, [
-    `--remote-debugging-port=${cdpPort}`,
+    `--remote-debugging-port=${requestedCdpPort}`,
     '--remote-allow-origins=*',
     `--user-data-dir=${profileDir}`,
     `--disable-extensions-except=${extensionDir}`,
     `--load-extension=${extensionDir}`,
     '--no-first-run',
     '--no-default-browser-check',
-  ], { stdio: ['ignore', 'ignore', 'ignore'] });
+    '--disable-background-mode',
+  ], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
 
   const cleanup = async () => {
-    if (chrome.exitCode == null) chrome.kill('SIGTERM');
+    if (chrome.exitCode == null) {
+      try {
+        process.kill(-chrome.pid, 'SIGTERM');
+      } catch {
+        chrome.kill('SIGTERM');
+      }
+    }
     await wait(500);
     fs.rmSync(extensionDir, { recursive: true, force: true });
     fs.rmSync(profileDir, { recursive: true, force: true });
@@ -136,8 +159,10 @@ async function main() {
   };
 
   try {
+    const cdpPort = requestedCdpPort || await waitForDevToolsActivePort(profileDir);
     const cdpUrl = `http://127.0.0.1:${cdpPort}`;
     await waitForCdp(cdpUrl);
+    console.log(`Fresh headed Chrome session ready on an isolated CDP port (${cdpPort})`);
     await waitForTelecomPage(cdpUrl, timeoutMs);
     const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 60000);
     const deadline = Date.now() + settleMs;
