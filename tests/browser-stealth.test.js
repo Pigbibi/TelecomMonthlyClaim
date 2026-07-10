@@ -35,4 +35,8 @@ test('cdp browser profile applies mobile emulation overrides', async () => {
   assert.equal(commands[3][0], 'Emulation.setUserAgentOverride');
   assert.match(commands[3][1].userAgent, /Android 13; Pixel 7/);
   assert.match(commands[3][1].userAgent, /Chrome\/150\.0\.7871\.46 Mobile/);
+  assert.equal(commands[3][1].userAgentMetadata.mobile, true);
+  assert.equal(commands[3][1].userAgentMetadata.platform, 'Android');
+  assert.equal(commands[3][1].userAgentMetadata.platformVersion, '13.0.0');
+  assert.equal(commands[3][1].userAgentMetadata.model, 'Pixel 7');
 });

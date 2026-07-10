@@ -29,6 +29,10 @@ function playwrightLaunchExtras() {
   return { ignoreDefaultArgs: ['--enable-automation'] };
 }
 
+function chromeVersion(browserVersion = '', fallback = '131.0.0.0') {
+  return /Chrome(?:\/|\s)([\d.]+)/.exec(browserVersion)?.[1] || fallback;
+}
+
 function browserProfileContextOptions(profile = 'wechat') {
   if (profile === 'desktop') {
     return {
@@ -67,6 +71,7 @@ async function applyBrowserProfileEmulation(page, profile = 'wechat') {
 async function applyCdpBrowserProfile(page, browserVersion = '', profile = 'wechat') {
   if (!page) return;
   const desktop = profile === 'desktop';
+  const chrome = chromeVersion(browserVersion, desktop ? '149.0.0.0' : '131.0.0.0');
   const viewport = desktop
     ? { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }
     : { width: 393, height: 873, deviceScaleFactor: 2.75, mobile: true };
@@ -88,16 +93,56 @@ async function applyCdpBrowserProfile(page, browserVersion = '', profile = 'wech
   }).catch(() => {});
   await cdp.send('Emulation.setUserAgentOverride', {
     userAgent: desktop
-      ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${(/Chrome(?:\/|\s)([\d.]+)/.exec(browserVersion)?.[1] || '149.0.0.0')} Safari/537.36`
+      ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`
       : mobileUserAgent(browserVersion),
     acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
     platform: desktop ? 'macOS' : 'Android',
+    userAgentMetadata: desktop
+      ? {
+          brands: [
+            { brand: 'Not/A)Brand', version: '8' },
+            { brand: 'Chromium', version: chrome.split('.')[0] || '149' },
+            { brand: 'Google Chrome', version: chrome.split('.')[0] || '149' },
+          ],
+          fullVersionList: [
+            { brand: 'Not/A)Brand', version: '8.0.0.0' },
+            { brand: 'Chromium', version: chrome },
+            { brand: 'Google Chrome', version: chrome },
+          ],
+          platform: 'macOS',
+          platformVersion: '10.15.7',
+          architecture: 'x86',
+          model: '',
+          mobile: false,
+          bitness: '64',
+          wow64: false,
+          formFactors: ['Desktop'],
+        }
+      : {
+          brands: [
+            { brand: 'Not/A)Brand', version: '8' },
+            { brand: 'Chromium', version: chrome.split('.')[0] || '131' },
+            { brand: 'Google Chrome', version: chrome.split('.')[0] || '131' },
+          ],
+          fullVersionList: [
+            { brand: 'Not/A)Brand', version: '8.0.0.0' },
+            { brand: 'Chromium', version: chrome },
+            { brand: 'Google Chrome', version: chrome },
+          ],
+          platform: 'Android',
+          platformVersion: '13.0.0',
+          architecture: 'arm',
+          model: 'Pixel 7',
+          mobile: true,
+          bitness: '64',
+          wow64: false,
+          formFactors: ['Mobile'],
+        },
   }).catch(() => {});
 }
 
 function mobileUserAgent(browserVersion = '') {
-  const match = /Chrome(?:\/|\s)([\d.]+)/.exec(browserVersion);
-  const chrome = match ? match[1] : '131.0.0.0';
+  const chrome = chromeVersion(browserVersion);
   return `Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Mobile Safari/537.36`;
 }
 

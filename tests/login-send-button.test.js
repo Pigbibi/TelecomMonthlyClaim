@@ -232,6 +232,12 @@ test('summarizes selected request headers for diagnostics', () => {
     Referer: 'https://wapbj.189.cn/path?wxopenid=abcdef1234567890',
     Cookie: 'a=1; csrftoken=abc',
     'User-Agent': 'Mozilla/5.0 test',
+    'Sec-CH-UA': '"Chromium";v="131"',
+    'Sec-CH-UA-Mobile': '?1',
+    'Sec-CH-UA-Platform': '"Android"',
+    'Sec-CH-UA-Platform-Version': '"13.0.0"',
+    'Sec-CH-UA-Model': '"Pixel 7"',
+    'Sec-CH-UA-Full-Version-List': '"Chromium";v="131.0.0.0"',
     'Sec-Fetch-Site': 'same-origin',
   });
 
@@ -240,6 +246,12 @@ test('summarizes selected request headers for diagnostics', () => {
   assert.equal(summary.cookieCount, 2);
   assert.deepEqual(summary.cookieNames, ['a', 'csrftoken']);
   assert.equal(summary.userAgent, 'Mozilla/5.0 test');
+  assert.equal(summary.secChUa, '"Chromium";v="131"');
+  assert.equal(summary.secChUaMobile, '?1');
+  assert.equal(summary.secChUaPlatform, '"Android"');
+  assert.equal(summary.secChUaPlatformVersion, '"13.0.0"');
+  assert.equal(summary.secChUaModel, '"Pixel 7"');
+  assert.equal(summary.secChUaFullVersionList, '"Chromium";v="131.0.0.0"');
   assert.equal(summary.secFetchSite, 'same-origin');
 });
 
