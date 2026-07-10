@@ -17,6 +17,7 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
 test('monthly workflow documents generic proxy modes instead of BWG-only execution', () => {
   assert.match(workflowText, /connectivity_mode:/);
   assert.match(workflowText, /runner_target:/);
+  assert.match(workflowText, /default:\s+"local_selfhosted"/);
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE:/);
   assert.doesNotMatch(workflowText, /BWG_SSH_PRIVATE_KEY/);
   assert.match(workflowText, /Unsupported TELECOM_CONNECTIVITY_MODE/);
@@ -55,13 +56,13 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
   assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
   assert.match(workflowText, /TELECOM_SLIDER_MODE: "api"/);
+  assert.match(workflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
   assert.match(workflowText, /local_selfhosted/);
+  assert.match(workflowText, /github\.event_name == 'schedule'/);
+  assert.match(workflowText, /runner_target != 'github_hosted'/);
   assert.match(workflowText, /telecom-claim-local/);
-  assert.match(workflowText, /start-chrome-cdp-linux\.sh/);
-  assert.match(workflowText, /start-chrome-cdp\.sh/);
+  assert.match(workflowText, /run-real-chrome-claim\.sh/);
   assert.doesNotMatch(workflowText, /xvfb-run -a bash scripts\/start-chrome-cdp-linux\.sh/);
-  assert.match(workflowText, /Validate real entry page/);
-  assert.match(workflowText, /validate-entry-page\.js/);
   assert.match(workflowText, /Install Google Chrome for real-browser CDP/);
   assert.match(workflowText, /Verify local Google Chrome for real-browser CDP/);
   assert.match(workflowText, /runner\.os == 'macOS'/);
@@ -78,11 +79,10 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
 test('local self-hosted workflow targets mac runner and does not mutate repo state', () => {
   assert.match(localWorkflowText, /name:\s+Local Self-Hosted Telecom Claim/);
   assert.match(localWorkflowText, /runs-on:\s+\[self-hosted, macOS, X64, telecom-claim-local\]/);
-  assert.match(localWorkflowText, /Start real Chrome CDP/);
-  assert.match(localWorkflowText, /bash scripts\/start-chrome-cdp\.sh/);
+  assert.match(localWorkflowText, /Run claim via real Chrome CDP/);
+  assert.match(localWorkflowText, /bash scripts\/run-real-chrome-claim\.sh/);
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
   assert.match(localWorkflowText, /PUSHPLUS_RELAY_INBOX_TOKEN/);
-  assert.match(localWorkflowText, /Validate real entry page/);
   assert.match(localWorkflowText, /Upload claim debug screenshots/);
   assert.doesNotMatch(localWorkflowText, /git push origin HEAD:main/);
   assert.doesNotMatch(localWorkflowText, /Create issue on final failure/);

@@ -17,7 +17,7 @@ on:
       runner_target:
         description: "Manual run target: github_hosted or local_selfhosted"
         required: false
-        default: "github_hosted"
+        default: "local_selfhosted"
       connectivity_mode:
         description: "Override connectivity mode for this manual run: direct, http_proxy, ssh_tunnel, or proxy_pool"
         required: false
@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   claim:
-    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.runner_target == 'local_selfhosted' && '["self-hosted","macOS","X64","telecom-claim-local"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.runner_target != 'github_hosted')) && '["self-hosted","macOS","X64","telecom-claim-local"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 35
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
@@ -80,6 +80,7 @@ jobs:
       TELECOM_REQUIRE_REAL_CHROME: "true"
       TELECOM_CHROME_PROFILE: "/tmp/telecom-claim-cdp"
       TELECOM_SLIDER_MODE: "api"
+      TELECOM_USE_DEFAULT_CHROME: "1"
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
       FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
       FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
@@ -290,30 +291,10 @@ jobs:
               ;;
           esac
 
-      - name: Start real Chrome CDP on Linux
-        if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          bash scripts/start-chrome-cdp-linux.sh
-          curl -sf "$BROWSER_CDP_URL/json/version"
-
-      - name: Start real Chrome CDP on macOS
-        if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'macOS'
-        env:
-          TELECOM_USE_DEFAULT_CHROME: "1"
-        run: |
-          set -euo pipefail
-          bash scripts/start-chrome-cdp.sh
-          curl -sf "$BROWSER_CDP_URL/json/version"
-
-      - name: Validate real entry page
-        if: steps.claim_plan.outputs.should_run == 'true'
-        run: node scripts/validate-entry-page.js
-
-      - name: Run claim
+      - name: Run claim via real Chrome CDP
         id: claim
         if: steps.claim_plan.outputs.should_run == 'true'
-        run: node scripts/telecom-monthly-claim.js
+        run: bash scripts/run-real-chrome-claim.sh
 
       - name: Upload claim debug screenshots
         if: always() && steps.claim_plan.outputs.should_run == 'true'

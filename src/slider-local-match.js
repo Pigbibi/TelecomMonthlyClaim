@@ -65,7 +65,10 @@ function computeSliderImageMatchInPage(options = {}) {
     sceneSamples += 1;
   }
   sceneGreen /= Math.max(1, sceneSamples);
-  const preferMinGreen = sceneGreen > 20;
+  // The telecom cutout is a pale, low-chroma mask even on sunset / beach scenes.
+  // A sceneGreen switch makes those challenges chase bright foliage / highlights
+  // instead of the real hole, so keep cream-edge as the primary scorer.
+  const preferMinGreen = true;
 
   const interiorPoints = [];
   const boundaryPoints = [];

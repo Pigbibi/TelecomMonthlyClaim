@@ -196,17 +196,8 @@ jobs:
           test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
 
-      - name: Start real Chrome CDP
-        run: |
-          set -euo pipefail
-          bash scripts/start-chrome-cdp.sh
-          curl -sf "$BROWSER_CDP_URL/json/version"
-
-      - name: Validate real entry page
-        run: node scripts/validate-entry-page.js
-
-      - name: Run claim
-        run: node scripts/telecom-monthly-claim.js
+      - name: Run claim via real Chrome CDP
+        run: bash scripts/run-real-chrome-claim.sh
 
       - name: Upload claim debug screenshots
         if: always()

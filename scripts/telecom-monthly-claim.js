@@ -109,6 +109,66 @@ function hasProxyTunnelFailures(page) {
   return /ERR_TUNNEL_CONNECTION_FAILED|ERR_PROXY_CONNECTION_FAILED/i.test(JSON.stringify(page.__telecomDiagnostics || []));
 }
 
+function chooseSliderDistanceCandidate({
+  localNaturalX = null,
+  localMethod = '',
+  localMatchStrong = false,
+  localHoleScore = 0,
+  localEdgeScore = 0,
+  localSceneGreen = null,
+  vision = null,
+  inRangeNatural = () => true,
+  forceVision = false,
+}) {
+  const localInRange = Number.isFinite(localNaturalX) && inRangeNatural(localNaturalX);
+  const visionInRange = !!(vision?.ok && Number.isFinite(vision?.naturalX) && inRangeNatural(vision.naturalX));
+  const diffPx = localInRange && visionInRange ? Math.abs(localNaturalX - vision.naturalX) : null;
+  const localSource = localMethod || 'local';
+  const localStrength = /cream-edge/i.test(localMethod)
+    ? Number(localHoleScore || 0)
+    : Number(localEdgeScore || localHoleScore || 0);
+  const localVeryStrong = /cream-edge/i.test(localMethod) && localStrength >= 220;
+
+  if (forceVision && visionInRange) {
+    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'forced-vision', diffPx };
+  }
+  if (!localInRange && visionInRange) {
+    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'local-out-of-range', diffPx };
+  }
+  if (!visionInRange) {
+    return { naturalX: localNaturalX, matchSource: localSource, reason: 'vision-unavailable', diffPx };
+  }
+  if (!localInRange) {
+    return { naturalX: localNaturalX, matchSource: localSource, reason: 'no-usable-candidate', diffPx };
+  }
+  if (!localMatchStrong) {
+    if (diffPx != null && diffPx <= 6) {
+      return {
+        naturalX: Math.round((localNaturalX + vision.naturalX) / 2),
+        matchSource: `${localSource}+vision`,
+        reason: 'weak-local-close-to-vision',
+        diffPx,
+      };
+    }
+    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'weak-local-overridden', diffPx };
+  }
+  if (diffPx != null && diffPx <= 6) {
+    return {
+      naturalX: Math.round((localNaturalX + vision.naturalX) / 2),
+      matchSource: `${localSource}+vision`,
+      reason: 'strong-local-confirmed-by-vision',
+      diffPx,
+    };
+  }
+  if (localVeryStrong) {
+    return { naturalX: localNaturalX, matchSource: localSource, reason: 'very-strong-local-kept', diffPx };
+  }
+  if (localSceneGreen != null && localSceneGreen < 18) {
+    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'low-green-scene-prefers-vision', diffPx };
+  }
+  return { naturalX: localNaturalX, matchSource: localSource, reason: 'strong-local-kept', diffPx };
+}
+
 function isBlankSliderChallengeRejection(info, page) {
   return /获取验证码失败，请重试/.test(info?.message || '')
     && /getSliderChallenge/i.test(JSON.stringify(page.__telecomDiagnostics || []))
@@ -130,7 +190,8 @@ async function launchBrowser(config) {
   if (config.requireRealChrome) {
     throw new Error(
       'TELECOM_REQUIRE_REAL_CHROME is set but BROWSER_CDP_URL is empty. '
-      + 'Start real Chrome first: bash scripts/start-chrome-cdp.sh (Mac) '
+      + 'Run bash scripts/run-real-chrome-claim.sh / npm run claim:cdp, '
+      + 'or start real Chrome first: bash scripts/start-chrome-cdp.sh (Mac) '
       + 'or bash scripts/start-chrome-cdp-linux.sh (Linux/CI), then export BROWSER_CDP_URL=http://127.0.0.1:9222',
     );
   }
@@ -1695,24 +1756,18 @@ async function solvePuzzle(page, config, options = {}) {
       naturalX = Math.round(info.container.w - info.slider.w - 4);
     }
 
-    // Optional vision AI backup when local CV is weak / missing and TELECOM_VISION_URL is set.
-    // Important: local hole methods are named "cream-edge" / "green-cream-edge";
-    // they are primary signals, not weak fallbacks. Only plain "edge" / "texture" /
-    // "fallback" should trigger vision backup by default.
+    // Optional vision AI second opinion on the same challenge when TELECOM_VISION_URL is set.
+    // We do not refresh the puzzle before asking vision; repeated challenge pulls are more
+    // likely to burn WAF sessions than to improve accuracy.
     const localMethod = String(info.imageMatch?.method || '');
     const holeStrong = !!info.imageMatch?.hole?.ok;
     const edgeStrong = localMethod === 'edge'
       && Number(info.imageMatch?.edge?.score || 0) >= 80
       && Number(info.imageMatch?.edge?.points || 0) >= 20;
     const localMatchStrong = holeStrong || edgeStrong;
-    const holeWeak = !localMatchStrong
-      && (
-        !info.imageMatch?.naturalX
-        || /fallback|texture/i.test(localMethod)
-        || localMethod === 'edge'
-      );
     const forceVision = process.env.TELECOM_FORCE_VISION === 'true';
-    if ((forceVision || holeWeak || !inRangeNatural(naturalX)) && process.env.TELECOM_VISION_URL) {
+    let vision = null;
+    if (process.env.TELECOM_VISION_URL) {
       const pngs = await page.evaluate(() => {
         const bg = document.querySelector('#slider_bg_image');
         const block = document.querySelector('#slider_block_image');
@@ -1726,28 +1781,75 @@ async function solvePuzzle(page, config, options = {}) {
         return { bg: c1.toDataURL('image/png'), block: c2.toDataURL('image/png') };
       }).catch(() => null);
       if (pngs?.bg) {
-        const vision = await estimateSliderDistanceWithVision({
+        vision = await estimateSliderDistanceWithVision({
           bgPngBase64: pngs.bg,
           blockPngBase64: pngs.block,
           imageWidth: info.imageMatch?.bg?.width || 280,
           correctY: page.__sliderChallenge?.correctY ?? info.imageMatch?.hole?.y ?? null,
         });
         log('Vision slider estimate', vision);
-        if (vision.ok && inRangeNatural(vision.naturalX)) {
-          if (forceVision || !localMatchStrong || !inRangeNatural(naturalX)) {
-            naturalX = vision.naturalX;
-            matchSource = 'vision';
-          } else {
-            log('Keeping strong local slider match; vision stored as fallback only', {
-              localMethod,
-              localNaturalX: naturalX,
-              visionNaturalX: vision.naturalX,
-              holeOk: holeStrong,
-              edgeScore: info.imageMatch?.edge?.score,
-            });
-          }
-        }
       }
+    }
+
+    if (vision?.ok && inRangeNatural(vision.naturalX)) {
+      const decision = chooseSliderDistanceCandidate({
+        localNaturalX: naturalX,
+        localMethod,
+        localMatchStrong,
+        localHoleScore: info.imageMatch?.hole?.score,
+        localEdgeScore: info.imageMatch?.edge?.score,
+        localSceneGreen: info.imageMatch?.hole?.sceneGreen ?? null,
+        vision,
+        inRangeNatural,
+        forceVision,
+      });
+      naturalX = decision.naturalX;
+      matchSource = decision.matchSource;
+      log('Slider distance fusion decision', {
+        reason: decision.reason,
+        diffPx: decision.diffPx,
+        localMethod,
+        localNaturalX: info.imageMatch?.naturalX ?? null,
+        localHoleScore: info.imageMatch?.hole?.score ?? null,
+        localEdgeScore: info.imageMatch?.edge?.score ?? null,
+        visionNaturalX: vision.naturalX,
+        chosenNaturalX: naturalX,
+        chosenSource: matchSource,
+      });
+    } else if (process.env.TELECOM_VISION_URL) {
+      log('Vision slider estimate unavailable; keeping local candidate', {
+        localMethod,
+        localNaturalX: naturalX,
+        visionReason: vision?.reason || null,
+        visionOk: vision?.ok || false,
+      });
+    } else if (forceVision) {
+      log('TELECOM_FORCE_VISION ignored because TELECOM_VISION_URL is unset');
+    }
+
+    if (matchSource === 'vision' && localMatchStrong && inRangeNatural(info.imageMatch?.naturalX)) {
+      log('Vision overrode strong local candidate', {
+        localMethod,
+        localNaturalX: info.imageMatch?.naturalX,
+        visionNaturalX: vision?.naturalX ?? null,
+        holeOk: holeStrong,
+        edgeScore: info.imageMatch?.edge?.score ?? null,
+      });
+    } else if (/vision/.test(matchSource) && localMatchStrong) {
+      log('Vision confirmed strong local candidate', {
+        localMethod,
+        localNaturalX: info.imageMatch?.naturalX,
+        chosenNaturalX: naturalX,
+        visionNaturalX: vision?.naturalX ?? null,
+      });
+    } else if (vision?.ok && inRangeNatural(vision.naturalX) && matchSource === localMethod) {
+      log('Keeping local slider match after vision check', {
+        localMethod,
+        localNaturalX: naturalX,
+        visionNaturalX: vision.naturalX,
+        holeOk: holeStrong,
+        edgeScore: info.imageMatch?.edge?.score ?? null,
+      });
     }
 
     if (!inRangeNatural(naturalX)) {
@@ -2014,5 +2116,6 @@ module.exports = {
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  chooseSliderDistanceCandidate,
   waitForTelecomApiReady,
 };

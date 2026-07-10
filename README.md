@@ -5,8 +5,8 @@
 默认流程：
 
 1. GitHub Actions 在北京时间每月 1-3 日 08:00 运行。
-2. GitHub-hosted runner 使用 `direct` 或你自行配置的可靠代理；本仓库不会创建内网代理隧道。
-3. Playwright 以移动 Chrome 环境打开 189 活动页，并按配置选择直连或代理访问。
+2. 默认每月 schedule 走本地 self-hosted macOS runner；手动 `workflow_dispatch` 仍可切到 `github_hosted` 作为兜底。
+3. 脚本优先通过真实 Google Chrome CDP 打开 189 活动页，并按配置选择直连或代理访问。
 4. 北京电信手机号收到的 `10001` 短信默认进入 PushPlus；如果同时部署 `PushPlusSmsToTelegram`，脚本优先从其受保护 relay inbox 拉取被拦截的验证码，未配置 relay 时回退到 PushPlus OpenAPI；原 OpenWrt / 家里电脑 SMS inbox 方案仍保留为兼容选项。
 5. 脚本读取第一步登录验证码，根据 `TELECOM_TARGET_PACKAGE` 选中目标套餐。
 6. 通过二次确认滑块后读取第二步办理验证码。
@@ -148,7 +148,7 @@ npm run debug:pushplus
 1. Fork 或新建仓库，先在私有仓库里完成配置和 dry-run 验证。
 2. 确认北京电信手机号收到的 `10001` 短信会进入 PushPlus。
 3. 在 GitHub Secrets / Variables 填好 PushPlus、电信活动和可选代理配置。
-4. 先手动触发 `Monthly Beijing Telecom Claim` workflow，`dry_run=true` 跑到最终提交前。
+4. 先手动触发 `Monthly Beijing Telecom Claim` workflow，保持默认 `runner_target=local_selfhosted`，并用 `dry_run=true` 跑到最终提交前。
 5. 确认产品名、方案编号、PushPlus 短信读取都正常后，再手动触发一次 `dry_run=false`。
 6. 成功后检查 `state/YYYY-MM.json` 和 `logs` 分支。
 
@@ -216,7 +216,7 @@ git show origin/logs:latest.json
 | `TELECOM_ENTRY_URL` | 189 活动入口 URL，例如 `http://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85` |
 | `PUSHPLUS_TOKEN` | PushPlus 用户 token，不能用消息 token；默认 PushPlus 模式未配置 relay inbox 时需要 |
 | `PUSHPLUS_SECRET_KEY` | PushPlus OpenAPI secretKey；默认 PushPlus 模式未配置 relay inbox 时需要 |
-| `GEMINI_API_KEY` | 可选；默认流程优先走本地滑块识别 + 页面原生 `submitVerify`，只有本地识别弱时才用 Gemini 视觉 fallback |
+| `GEMINI_API_KEY` | 可选；用于当前滑块 challenge 的 Gemini 视觉二次判定 / 融合，不会先 refresh challenge |
 
 可选 secrets：
 
@@ -252,7 +252,7 @@ Variables：
 | `PUSHPLUS_TITLE_KEYWORD` | 空 | PushPlus 模式可选标题过滤词；硬件推送标题固定时可填写，减少无关消息详情请求。 |
 | `PUSHPLUS_DEBUG` | `false` | PushPlus 模式临时诊断日志；只打印标题、时间、关键字命中情况，不打印短信正文或验证码。 |
 | `PUSHPLUS_RELAY_INBOX_URL` | 空 | 可选；配置后优先从 `PushPlusSmsToTelegram` 的受保护 `/messages` inbox 拉取被拦截短信。 |
-| `TELECOM_VISION_URL` | `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent` | 可选；Gemini / OpenAI 视觉接口，滑块本地识别失败时才会调用。 |
+| `TELECOM_VISION_URL` | `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent` | 可选；Gemini / OpenAI 视觉接口。配置后会在**当前**滑块 challenge 上做二次判定 / 融合，不会先 refresh challenge。 |
 | `TELECOM_VISION_MODE` | `gemini` | 可选；`gemini` / `openai` / `anthropic`。 |
 | `TELECOM_VISION_MODEL` | `gemini-3.5-flash` | 可选；视觉接口模型名。 |
 | `PROXY_SSH_USER` | `root` | `ssh_tunnel` 可选，SSH 用户。 |
@@ -350,6 +350,27 @@ PUSHPLUS_SECRET_KEY='secret' \
 HEADLESS=false \
 npm run claim
 ```
+
+本机 real Chrome CDP dry-run：
+
+```bash
+TELECOM_PHONE=18500000000 \
+TELECOM_ENTRY_URL='http://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85' \
+TELECOM_TARGET_PACKAGE=voice200 \
+SMS_INBOX_PROVIDER=pushplus \
+PUSHPLUS_TOKEN='token' \
+PUSHPLUS_SECRET_KEY='secret' \
+GEMINI_API_KEY='gemini-key' \
+npm run claim:cdp
+```
+
+这个入口会自动：
+
+- macOS 下复制本机默认 Chrome profile 后以 CDP 模式启动真实 Chrome；
+- Linux / CI 下启动真实 Chrome + CDP；
+- 默认开启 `TELECOM_MINIMAL_LOGIN=true`、`TELECOM_SKIP_ORIGIN_WARMUP=true`、`TELECOM_REQUIRE_REAL_CHROME=true`、`TELECOM_SLIDER_MODE=api`；
+- 先校验 entry page，再进入完整领取流程；
+- 默认 `DRY_RUN_BEFORE_FINAL_SUBMIT=true`，停在最后提交前。
 
 临时手动验证码调试：
 
