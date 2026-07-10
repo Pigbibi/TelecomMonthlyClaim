@@ -166,16 +166,21 @@ function computeSliderImageMatchInPage(options = {}) {
     }
   }
   const textureOk = inRange(textureX);
-  const edgeOk = edgePoints.length >= 20 && inRange(edgeX) && edgeX <= maxX - 20;
+  const edgeOk = edgePoints.length >= 20 && inRange(edgeX);
+  const edgeStrong = edgeOk && edgeScore >= 80;
 
   let bestX;
   let method;
   let score;
-  if (holeOk) {
+  if (edgeStrong) {
+    bestX = edgeX;
+    method = 'edge';
+    score = edgeScore;
+  } else if (holeOk) {
     bestX = holeX;
     method = holeMethod;
     score = holeScore;
-  } else if (edgeOk && (!textureOk || edgeX <= maxX * 0.75)) {
+  } else if (edgeOk) {
     bestX = edgeX;
     method = 'edge';
     score = edgeScore;

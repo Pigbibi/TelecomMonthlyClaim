@@ -195,6 +195,14 @@ async function solveSliderChallenge(client) {
   if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
     throw new Error(`Native Chrome slider match failed: ${match?.reason || 'invalid-result'}`);
   }
+  console.log('Native Chrome slider match', {
+    method: match.method,
+    naturalX: match.naturalX,
+    holeX: match.hole?.naturalX,
+    textureX: match.texture?.naturalX,
+    edgeX: match.edge?.naturalX,
+    edgeScore: match.edge?.score,
+  });
   const startX = match.btn.cx;
   const startY = match.btn.cy;
   await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
