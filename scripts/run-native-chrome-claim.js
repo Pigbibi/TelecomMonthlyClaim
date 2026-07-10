@@ -4,6 +4,9 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
+const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
+const { loadConfig } = require('../src/config');
+const { SmsInboxClient } = require('../src/sms-inbox-client');
 
 const root = path.resolve(__dirname, '..');
 const entryUrl = process.env.TELECOM_ENTRY_URL;
@@ -187,6 +190,129 @@ async function openSliderChallenge(client, phone) {
   throw new Error('Native Chrome slider challenge did not become ready before Playwright attachment');
 }
 
+async function solveSliderChallenge(client) {
+  const match = await client.evaluate(`(${computeSliderImageMatchInPage.toString()})({})`, 30000);
+  if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
+    throw new Error(`Native Chrome slider match failed: ${match?.reason || 'invalid-result'}`);
+  }
+  const startX = match.btn.cx;
+  const startY = match.btn.cy;
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
+  await wait(250);
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
+  for (let step = 1; step <= 50; step += 1) {
+    const t = step / 50;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    await client.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: startX + match.moveX * ease,
+      y: startY + Math.sin(t * Math.PI * 3) * 2,
+      button: 'left',
+    });
+    await wait(24 + (step % 5) * 8);
+  }
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: startX + match.moveX,
+    y: startY,
+    button: 'left',
+    clickCount: 1,
+  });
+
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    const state = await client.evaluate(`(() => {
+      const text = document.body?.innerText || '';
+      const slider = document.querySelector('#slider_check,.slider-check-box');
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      return {
+        sent: /验证码已下发|请注意查收/.test(text),
+        failed: /服务繁忙|验证失败|请稍后再试/.test(text),
+        sliderVisible: visible(slider),
+      };
+    })()`);
+    if (state?.sent || (!state?.sliderVisible && !state?.failed)) return match.naturalX;
+    if (state?.failed) throw new Error('Native Chrome slider validation failed before Playwright attachment');
+    await wait(500);
+  }
+  throw new Error('Native Chrome slider validation timed out before Playwright attachment');
+}
+
+async function clickPageElement(client, selectors, textPattern = '') {
+  const point = await client.evaluate(`(() => {
+    const selectors = ${JSON.stringify(selectors)};
+    const pattern = ${JSON.stringify(textPattern)} ? new RegExp(${JSON.stringify(textPattern)}) : null;
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    let element = selectors.map(selector => document.querySelector(selector)).find(visible);
+    if (!element && pattern) element = [...document.querySelectorAll('button,a,div,span')]
+      .filter(node => visible(node) && pattern.test((node.innerText || '').replace(/\\s+/g, '')))
+      .sort((left, right) => {
+        const a = left.getBoundingClientRect();
+        const b = right.getBoundingClientRect();
+        return a.width * a.height - b.width * b.height;
+      })[0];
+    if (!element) return null;
+    element.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`);
+  if (!point) return false;
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await wait(100);
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  return true;
+}
+
+async function submitLoginCode(client, code) {
+  await clickPageElement(client, [], '^(我知道了|知道了|确定)$').catch(() => false);
+  await wait(500);
+  const focused = await client.evaluate(`(() => {
+    const input = document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input');
+    if (!input) return false;
+    input.focus();
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+    if (setter) setter.call(input, ''); else input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  if (!focused) throw new Error('Native Chrome login code input missing');
+  for (const digit of String(code || '')) {
+    await client.send('Input.insertText', { text: digit });
+    await wait(80 + Math.floor(Math.random() * 80));
+  }
+  await client.evaluate(`(() => {
+    const input = document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input');
+    input?.dispatchEvent(new Event('change', { bubbles: true }));
+    input?.blur();
+    return !!input;
+  })()`);
+  await wait(700);
+  if (!await clickPageElement(client, ['.know-box.button'], '^(立即领取|立即办理)$')) {
+    throw new Error('Native Chrome login submit button missing');
+  }
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const state = await client.evaluate(`(() => ({
+      complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
+      failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙/.test(document.body?.innerText || ''),
+    }))()`);
+    if (state?.complete) return;
+    if (state?.failed) throw new Error('Native Chrome login verification failed before Playwright attachment');
+    await wait(500);
+  }
+  throw new Error('Native Chrome login verification timed out before Playwright attachment');
+}
+
 async function captureCdpScreenshot(client) {
   try {
     await client.send('Page.enable');
@@ -229,8 +355,20 @@ async function main() {
     console.log(`Fresh headed system Chrome ready for delayed Playwright attachment (${version.Browser || 'Google Chrome'})`);
     const cdp = await CdpClient.connect(target.webSocketDebuggerUrl);
     try {
+      const smsSince = Date.now() - 10000;
       await openSliderChallenge(cdp, phone);
-      console.log('Native Chrome slider challenge ready before Playwright attachment');
+      const sliderDistance = await solveSliderChallenge(cdp);
+      console.log(`Native Chrome slider verified before Playwright attachment (${sliderDistance}px)`);
+      const config = loadConfig();
+      const sms = await new SmsInboxClient(config).waitForCode({
+        stage: 'login',
+        since: smsSince,
+        timeoutMs: config.smsTimeoutMs,
+        pollMs: config.smsPollMs,
+      });
+      if (!sms?.code) throw new Error('Native Chrome login SMS was not received');
+      await submitLoginCode(cdp, sms.code);
+      console.log('Native Chrome login completed before Playwright attachment');
     } catch (error) {
       await captureCdpScreenshot(cdp);
       throw error;
@@ -248,7 +386,7 @@ async function main() {
         TELECOM_CDP_PROFILE_MODE: 'native',
         TELECOM_CLEAR_BROWSER_DATA: 'false',
         TELECOM_REUSE_VALIDATED_PAGE: 'true',
-        TELECOM_LOGIN_ALREADY_COMPLETE: 'false',
+        TELECOM_LOGIN_ALREADY_COMPLETE: 'true',
       },
     });
     if (result.code !== 0) process.exitCode = result.code || 1;
