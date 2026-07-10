@@ -51,15 +51,6 @@ function browserProfileContextOptions(profile = 'wechat') {
   return mobileContextOptions('');
 }
 
-function nativeBrowserContextOptions() {
-  return {
-    locale: 'zh-CN',
-    timezoneId: 'Asia/Shanghai',
-    ignoreHTTPSErrors: true,
-    viewport: null,
-  };
-}
-
 async function installAntiAutomationScripts(target) {
   if (!target?.addInitScript) return;
   await target.addInitScript(() => {
@@ -207,7 +198,6 @@ module.exports = {
   installAntiAutomationScripts,
   mobileContextOptions,
   mobileUserAgent,
-  nativeBrowserContextOptions,
   playwrightLaunchExtras,
   resolveCdpProfileMode,
 };

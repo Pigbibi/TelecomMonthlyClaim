@@ -4,10 +4,10 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   applyCdpBrowserProfile,
+  browserProfileContextOptions,
   getStealthChromium,
   chromeLaunchArgs,
   mobileContextOptions,
-  nativeBrowserContextOptions,
   playwrightLaunchExtras,
 } = require('../src/browser-stealth');
 const { loadConfig } = require('../src/config');
@@ -358,10 +358,8 @@ async function launchBrowser(config) {
   const nativeHeadedChrome = config.requireRealChrome && config.minimalLogin;
   const options = {
     headless: config.headless,
-    args: nativeHeadedChrome ? [] : chromeLaunchArgs(),
-    ...(nativeHeadedChrome
-      ? { ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'] }
-      : playwrightLaunchExtras()),
+    args: chromeLaunchArgs(),
+    ...playwrightLaunchExtras(),
   };
   if (config.openwrtProxy) {
     const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'configured proxy';
@@ -377,7 +375,7 @@ async function launchBrowser(config) {
       const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-claim-playwright-'));
       const context = await chromium.launchPersistentContext(userDataDir, {
         ...options,
-        ...nativeBrowserContextOptions(),
+        ...browserProfileContextOptions('desktop'),
       });
       const adapter = {
         persistentContext: context,
@@ -682,7 +680,7 @@ async function newMobilePage(browser, config = {}) {
   if (config.browserCdpUrl) return openCdpClaimPage(browser, config);
 
   const context = await browser.newContext(config.requireRealChrome && config.minimalLogin
-    ? nativeBrowserContextOptions()
+    ? browserProfileContextOptions('desktop')
     : mobileContextOptions(browser.version()));
   if (!config.minimalLogin) await installTelecomPagePatches(context);
   const page = browser.persistentContext
