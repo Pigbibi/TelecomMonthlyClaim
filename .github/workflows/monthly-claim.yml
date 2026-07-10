@@ -14,6 +14,10 @@ on:
         description: "Stop before the final telecom submit button"
         required: false
         default: "false"
+      runner_target:
+        description: "Manual run target: github_hosted or local_selfhosted"
+        required: false
+        default: "github_hosted"
       connectivity_mode:
         description: "Override connectivity mode for this manual run: direct, http_proxy, ssh_tunnel, or proxy_pool"
         required: false
@@ -25,7 +29,7 @@ permissions:
 
 jobs:
   claim:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.runner_target == 'local_selfhosted' && '["self-hosted","macOS","X64","telecom-claim-local"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 35
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
@@ -133,7 +137,7 @@ jobs:
           }
           NODE
 
-      - if: steps.claim_plan.outputs.should_run == 'true'
+      - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'Linux'
         name: Install Google Chrome for real-browser CDP
         run: |
           set -euo pipefail
@@ -146,6 +150,13 @@ jobs:
             sudo apt-get install -y /tmp/chrome.deb
           fi
           google-chrome --version || google-chrome-stable --version
+
+      - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'macOS'
+        name: Verify local Google Chrome for real-browser CDP
+        run: |
+          set -euo pipefail
+          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
 
       - name: Validate connectivity
         if: steps.claim_plan.outputs.should_run == 'true'
@@ -271,11 +282,20 @@ jobs:
               ;;
           esac
 
-      - name: Start real Chrome CDP
-        if: steps.claim_plan.outputs.should_run == 'true'
+      - name: Start real Chrome CDP on Linux
+        if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'Linux'
         run: |
           set -euo pipefail
           bash scripts/start-chrome-cdp-linux.sh
+          curl -sf "$BROWSER_CDP_URL/json/version"
+
+      - name: Start real Chrome CDP on macOS
+        if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'macOS'
+        env:
+          TELECOM_USE_DEFAULT_CHROME: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/start-chrome-cdp.sh
           curl -sf "$BROWSER_CDP_URL/json/version"
 
       - name: Validate real entry page

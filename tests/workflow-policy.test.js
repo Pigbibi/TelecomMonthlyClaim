@@ -16,6 +16,7 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
 
 test('monthly workflow documents generic proxy modes instead of BWG-only execution', () => {
   assert.match(workflowText, /connectivity_mode:/);
+  assert.match(workflowText, /runner_target:/);
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE:/);
   assert.doesNotMatch(workflowText, /BWG_SSH_PRIVATE_KEY/);
   assert.match(workflowText, /Unsupported TELECOM_CONNECTIVITY_MODE/);
@@ -54,11 +55,17 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
   assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
   assert.match(workflowText, /TELECOM_SLIDER_MODE: "api"/);
+  assert.match(workflowText, /local_selfhosted/);
+  assert.match(workflowText, /telecom-claim-local/);
   assert.match(workflowText, /start-chrome-cdp-linux\.sh/);
+  assert.match(workflowText, /start-chrome-cdp\.sh/);
   assert.doesNotMatch(workflowText, /xvfb-run -a bash scripts\/start-chrome-cdp-linux\.sh/);
   assert.match(workflowText, /Validate real entry page/);
   assert.match(workflowText, /validate-entry-page\.js/);
   assert.match(workflowText, /Install Google Chrome for real-browser CDP/);
+  assert.match(workflowText, /Verify local Google Chrome for real-browser CDP/);
+  assert.match(workflowText, /runner\.os == 'macOS'/);
+  assert.match(workflowText, /runner\.os == 'Linux'/);
   assert.match(workflowText, /XVFB_PID/);
   assert.doesNotMatch(workflowText, /playwright install/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
