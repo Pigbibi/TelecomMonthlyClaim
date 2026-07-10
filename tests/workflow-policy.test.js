@@ -103,6 +103,11 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.doesNotMatch(localWorkflowText, /Record run log on logs branch/);
 });
 
+test('macOS Chrome profile copy excludes volatile session files', () => {
+  const startScript = fs.readFileSync(path.join(root, 'scripts/start-chrome-cdp.sh'), 'utf8');
+  assert.match(startScript, /--exclude 'Sessions'/);
+});
+
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {
   const { loadConfig } = require('../src/config');
   const originalEnv = { ...process.env };

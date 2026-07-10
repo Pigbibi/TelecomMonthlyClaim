@@ -77,6 +77,7 @@ if [ "$USE_DEFAULT" = "1" ] || [ "$USE_DEFAULT" = "true" ]; then
   if [ -d "$SRC_PROFILE/Default" ]; then
     rsync -a \
       --exclude 'Cache' --exclude 'Code Cache' --exclude 'GPUCache' \
+      --exclude 'Sessions' \
       --exclude 'Service Worker/CacheStorage' --exclude 'ShaderCache' \
       --exclude 'GrShaderCache' --exclude 'Crashpad' --exclude 'BrowserMetrics' \
       "$SRC_PROFILE/Default/" "$REAL_COPY/Default/" >/dev/null
