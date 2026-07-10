@@ -99,6 +99,17 @@ test('retries blank telecom slider challenge rejections', () => {
   );
 });
 
+test('retries slider busy and missing puzzle image failures', () => {
+  assert.equal(
+    isRetryableLoginSendError(new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image')),
+    true,
+  );
+  assert.equal(
+    isRetryableLoginSendError(new Error('Telecom slider puzzle image missing after challenge; getSliderChallenge HTTP 400')),
+    true,
+  );
+});
+
 test('retries proxy tunnel slider failures', () => {
   assert.equal(
     isRetryableLoginSendError(new Error('Proxy tunnel failed during slider challenge; ERR_TUNNEL_CONNECTION_FAILED, getSliderChallenge HTTP 400')),

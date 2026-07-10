@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname, '..');
 const workflowText = fs.readFileSync(path.join(root, '.github/workflows/monthly-claim.yml'), 'utf8');
+const localWorkflowText = fs.readFileSync(path.join(root, '.github/workflows/local-selfhosted-claim.yml'), 'utf8');
 
 test('monthly workflow does not depend on Pigbibi private home proxy actions', () => {
   assert.doesNotMatch(workflowText, /Pigbibi\/HomeProxyActions/);
@@ -48,7 +49,59 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /proxy stress check passed/);
   assert.match(workflowText, /Upload claim debug screenshots/);
   assert.match(workflowText, /artifacts\/claim-debug/);
-  assert.match(workflowText, /TELECOM_STEALTH_MODE/);
+  assert.match(workflowText, /TELECOM_STEALTH_MODE: "false"/);
   assert.match(workflowText, /BROWSER_CHANNEL: chrome/);
+  assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
+  assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
+  assert.match(workflowText, /TELECOM_SLIDER_MODE: "api"/);
+  assert.match(workflowText, /start-chrome-cdp-linux\.sh/);
+  assert.doesNotMatch(workflowText, /xvfb-run -a bash scripts\/start-chrome-cdp-linux\.sh/);
+  assert.match(workflowText, /Validate real entry page/);
+  assert.match(workflowText, /validate-entry-page\.js/);
+  assert.match(workflowText, /Install Google Chrome for real-browser CDP/);
+  assert.match(workflowText, /XVFB_PID/);
+  assert.doesNotMatch(workflowText, /playwright install/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
+  assert.match(workflowText, /preDepositHighPic_check\.html\?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85/);
+});
+
+test('local self-hosted workflow targets mac runner and does not mutate repo state', () => {
+  assert.match(localWorkflowText, /name:\s+Local Self-Hosted Telecom Claim/);
+  assert.match(localWorkflowText, /runs-on:\s+\[self-hosted, macOS, X64, telecom-claim-local\]/);
+  assert.match(localWorkflowText, /Start real Chrome CDP/);
+  assert.match(localWorkflowText, /bash scripts\/start-chrome-cdp\.sh/);
+  assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
+  assert.match(localWorkflowText, /PUSHPLUS_RELAY_INBOX_TOKEN/);
+  assert.match(localWorkflowText, /Validate real entry page/);
+  assert.match(localWorkflowText, /Upload claim debug screenshots/);
+  assert.doesNotMatch(localWorkflowText, /git push origin HEAD:main/);
+  assert.doesNotMatch(localWorkflowText, /Create issue on final failure/);
+  assert.doesNotMatch(localWorkflowText, /Record run log on logs branch/);
+});
+
+test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {
+  const { loadConfig } = require('../src/config');
+  const originalEnv = { ...process.env };
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('TELECOM_') || key === 'BROWSER_CDP_URL' || key === 'BROWSER_CHANNEL' || key === 'HEADLESS') {
+      delete process.env[key];
+    }
+  }
+  try {
+    process.env.TELECOM_PHONE = '18500000000';
+    process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+    assert.equal(loadConfig().requireRealChrome, false);
+
+    process.env.BROWSER_CDP_URL = 'http://127.0.0.1:9222';
+    assert.equal(loadConfig().requireRealChrome, true);
+
+    delete process.env.BROWSER_CDP_URL;
+    process.env.TELECOM_REQUIRE_REAL_CHROME = 'true';
+    assert.equal(loadConfig().requireRealChrome, true);
+  } finally {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, originalEnv);
+  }
 });

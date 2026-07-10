@@ -6,6 +6,8 @@ const {
   htmlToText,
   parsePushPlusUpdateTime,
   summarizePushPlusDetail,
+  extractSenderFromText,
+  matchesKeyword,
 } = require('../src/sms-inbox-client');
 
 test('unwraps JSON payload from SMS forwarding apps', () => {
@@ -36,6 +38,16 @@ test('summarizes PushPlus details without exposing the code', () => {
   assert.equal(summary.hasTelecomSender, true);
   assert.equal(summary.hasCodeHint, true);
   assert.equal(summary.hasBeijingTelecomLoginText, true);
+});
+
+test('extracts sender from PushPlus detail text', () => {
+  assert.equal(extractSenderFromText('验证码：406560。发件号码: 10001'), '10001');
+  assert.equal(extractSenderFromText('发件人：CMCC10086 验证码：123456'), 'CMCC10086');
+});
+
+test('matches keyword against PushPlus title or detail text', () => {
+  assert.equal(matchesKeyword('短信转发\n感谢使用北京电信掌上营业厅', '北京电信'), true);
+  assert.equal(matchesKeyword('短信转发\n感谢使用北京电信掌上营业厅', '办理提醒'), false);
 });
 
 test('parses PushPlus updateTime as China local time', () => {
@@ -111,6 +123,121 @@ test('reads login code from PushPlus messages without logging SMS body', async (
       '/api/open/message/list',
       '/shortMessage/short-1',
     ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('ignores direct PushPlus message when extracted sender mismatches SMS_SENDER', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/api/common/openApi/getAccessKey') {
+      return {
+        ok: true,
+        json: async () => ({ code: 200, msg: '请求成功', data: { accessKey: 'access-key-1', expiresIn: 7200 } }),
+      };
+    }
+    if (parsed.pathname === '/api/open/message/list') {
+      return {
+        ok: true,
+        json: async () => ({
+          code: 200,
+          data: {
+            list: [
+              { title: '短信转发', shortCode: 'short-1', updateTime: '2026-06-01 08:00:10' },
+            ],
+          },
+        }),
+      };
+    }
+    if (parsed.pathname === '/shortMessage/short-1') {
+      return {
+        ok: true,
+        text: async () => '<html><body><div>发件号码: 10086 验证码：123456。尊敬的用户，感谢使用北京电信掌上营业厅。</div></body></html>',
+      };
+    }
+    throw new Error(`unexpected fetch: ${parsed.pathname}`);
+  };
+
+  try {
+    const client = new SmsInboxClient({
+      smsInboxProvider: 'pushplus',
+      smsSender: '10001',
+      pushPlusToken: 'token-1',
+      pushPlusSecretKey: 'secret-1',
+      pushPlusBaseUrl: 'https://www.pushplus.plus',
+      phone: '18500000000',
+      productName: '互联网卡网龄享200分钟国内语音',
+      expectedPlanId: '24BJ102053',
+    });
+
+    const sms = await client.waitForCode({
+      stage: 'login',
+      since: Date.UTC(2026, 5, 1, 0, 0, 0),
+      timeoutMs: 20,
+      pollMs: 1,
+    });
+
+    assert.equal(sms, null);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('filters direct PushPlus messages by generic keyword in detail text', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/api/common/openApi/getAccessKey') {
+      return {
+        ok: true,
+        json: async () => ({ code: 200, msg: '请求成功', data: { accessKey: 'access-key-1', expiresIn: 7200 } }),
+      };
+    }
+    if (parsed.pathname === '/api/open/message/list') {
+      return {
+        ok: true,
+        json: async () => ({
+          code: 200,
+          data: {
+            list: [
+              { title: '短信转发', shortCode: 'short-1', updateTime: '2026-06-01 08:00:10' },
+            ],
+          },
+        }),
+      };
+    }
+    if (parsed.pathname === '/shortMessage/short-1') {
+      return {
+        ok: true,
+        text: async () => '<html><body><div>发件号码: 10001 验证码：123456。尊敬的用户，感谢使用北京电信掌上营业厅。</div></body></html>',
+      };
+    }
+    throw new Error(`unexpected fetch: ${parsed.pathname}`);
+  };
+
+  try {
+    const client = new SmsInboxClient({
+      smsInboxProvider: 'pushplus',
+      smsSender: '10001',
+      pushPlusToken: 'token-1',
+      pushPlusSecretKey: 'secret-1',
+      pushPlusBaseUrl: 'https://www.pushplus.plus',
+      pushPlusKeyword: '北京电信掌上营业厅',
+      phone: '18500000000',
+      productName: '互联网卡网龄享200分钟国内语音',
+      expectedPlanId: '24BJ102053',
+    });
+
+    const sms = await client.waitForCode({
+      stage: 'login',
+      since: Date.UTC(2026, 5, 1, 0, 0, 0),
+      timeoutMs: 100,
+      pollMs: 1,
+    });
+
+    assert.deepEqual(sms, { code: '123456', stage: 'login', source: 'pushplus' });
   } finally {
     global.fetch = originalFetch;
   }

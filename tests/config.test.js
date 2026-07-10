@@ -12,6 +12,9 @@ function withCleanTelecomEnv(fn) {
       || key === 'PROXY_POOL_HTTP_PROXY'
       || key === 'HTTPS_PROXY'
       || key === 'HTTP_PROXY'
+      || key === 'BROWSER_CDP_URL'
+      || key === 'BROWSER_CHANNEL'
+      || key === 'HEADLESS'
       || key.startsWith('PUSHPLUS_')
       || key === 'ALLOW_DIRECT_PROXY_FALLBACK'
     ) {
@@ -104,6 +107,57 @@ test('loads proxy pool proxy from env', () => withCleanTelecomEnv(() => {
   assert.equal(config.proxyPoolProxy, 'http://proxy-pool.example.test:8080');
 }));
 
+test('defaults stealth mode to disabled unless explicitly enabled', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+
+  assert.equal(loadConfig().stealthMode, false);
+
+  process.env.TELECOM_STEALTH_MODE = 'true';
+  assert.equal(loadConfig().stealthMode, true);
+}));
+
+test('defaults to headed Chrome unless HEADLESS=true', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+
+  assert.equal(loadConfig().headless, false);
+  assert.equal(loadConfig().browserChannel, 'chrome');
+
+  process.env.HEADLESS = 'true';
+  assert.equal(loadConfig().headless, true);
+}));
+
+test('enables minimal login by default when BROWSER_CDP_URL is set', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+
+  assert.equal(loadConfig().minimalLogin, false);
+  assert.equal(loadConfig().skipOriginWarmup, false);
+
+  process.env.BROWSER_CDP_URL = 'http://127.0.0.1:9222';
+  assert.equal(loadConfig().minimalLogin, true);
+  assert.equal(loadConfig().skipOriginWarmup, true);
+
+  process.env.TELECOM_MINIMAL_LOGIN = 'false';
+  process.env.TELECOM_SKIP_ORIGIN_WARMUP = 'false';
+  assert.equal(loadConfig().minimalLogin, false);
+  assert.equal(loadConfig().skipOriginWarmup, false);
+}));
+
+test('defaults slider mode to api (native submitVerify)', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+  assert.equal(loadConfig().sliderMode, 'api');
+}));
+
+test('loads slider mode from env', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+  process.env.TELECOM_SLIDER_MODE = 'api';
+  assert.equal(loadConfig().sliderMode, 'api');
+}));
+
 test('loads pacing delays from env', () => withCleanTelecomEnv(() => {
   process.env.TELECOM_PHONE = '18500000000';
   process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
@@ -125,9 +179,11 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   process.env.PUSHPLUS_SECRET_KEY = 'secret-1';
   process.env.PUSHPLUS_PAGE_SIZE = '20';
   process.env.PUSHPLUS_BASE_URL = 'https://pushplus.example.test';
+  process.env.PUSHPLUS_KEYWORD = '北京电信掌上营业厅';
   process.env.PUSHPLUS_TITLE_KEYWORD = '短信转发';
   process.env.PUSHPLUS_RELAY_INBOX_URL = 'https://relay.example.test/messages';
   process.env.PUSHPLUS_RELAY_INBOX_TOKEN = 'relay-token-1';
+  process.env.SMS_SENDER = '10001';
 
   const config = loadConfig();
 
@@ -136,7 +192,9 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   assert.equal(config.pushPlusSecretKey, 'secret-1');
   assert.equal(config.pushPlusPageSize, 20);
   assert.equal(config.pushPlusBaseUrl, 'https://pushplus.example.test');
+  assert.equal(config.pushPlusKeyword, '北京电信掌上营业厅');
   assert.equal(config.pushPlusTitleKeyword, '短信转发');
   assert.equal(config.pushPlusRelayInboxUrl, 'https://relay.example.test/messages');
   assert.equal(config.pushPlusRelayInboxToken, 'relay-token-1');
+  assert.equal(config.smsSender, '10001');
 }));

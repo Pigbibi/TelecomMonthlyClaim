@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium: playwrightChromium } = require('playwright');
-const { getStealthChromium, chromeLaunchArgs, mobileContextOptions } = require('../src/browser-stealth');
+const { getStealthChromium, chromeLaunchArgs, mobileContextOptions, playwrightLaunchExtras } = require('../src/browser-stealth');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient, sleep } = require('../src/sms-inbox-client');
 const { stateMonth, isFinalRetryDay, beijingParts } = require('../src/retry-date');
+const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
+const { evaluateSliderImageMatch } = require('../src/slider-local-match');
+
+function loadChromium() {
+  const { chromium } = require('playwright');
+  return { chromium, driver: 'playwright' };
+}
 
 
 function mask(s) {
@@ -110,18 +116,39 @@ function isBlankSliderChallengeRejection(info, page) {
 }
 
 async function launchBrowser(config) {
-  const chromium = config.stealthMode ? getStealthChromium(true) : playwrightChromium;
+  const { chromium: playwrightChromium, driver } = loadChromium();
+  if (config.browserCdpUrl) {
+    const browser = await playwrightChromium.connectOverCDP(config.browserCdpUrl);
+    log('Browser connected over CDP (real Chrome)', {
+      url: config.browserCdpUrl,
+      contexts: browser.contexts().length,
+      version: browser.version(),
+      driver,
+    });
+    return browser;
+  }
+  if (config.requireRealChrome) {
+    throw new Error(
+      'TELECOM_REQUIRE_REAL_CHROME is set but BROWSER_CDP_URL is empty. '
+      + 'Start real Chrome first: bash scripts/start-chrome-cdp.sh (Mac) '
+      + 'or bash scripts/start-chrome-cdp-linux.sh (Linux/CI), then export BROWSER_CDP_URL=http://127.0.0.1:9222',
+    );
+  }
+  const chromium = config.stealthMode && driver === 'playwright'
+    ? getStealthChromium(true)
+    : playwrightChromium;
   const options = {
     headless: config.headless,
     args: chromeLaunchArgs(),
+    ...playwrightLaunchExtras(),
   };
   if (config.openwrtProxy) {
     const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'configured proxy';
-    log(`Launching browser through ${label}`, { proxy: maskProxyUrl(config.openwrtProxy) });
+    log(`Launching browser through ${label}`, { proxy: maskProxyUrl(config.openwrtProxy), driver });
     await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
     options.proxy = buildProxyOptions(config.openwrtProxy);
   } else {
-    log('Launching browser without OPENWRT_HTTP_PROXY');
+    log('Launching browser without OPENWRT_HTTP_PROXY', { driver });
   }
   if (config.browserChannel && config.browserChannel !== 'bundled') options.channel = config.browserChannel;
   try {
@@ -130,14 +157,15 @@ async function launchBrowser(config) {
       version: browser.version(),
       channel: options.channel || 'bundled',
       stealth: config.stealthMode,
+      driver,
     });
     return browser;
   } catch (err) {
     if (!options.channel) throw err;
-    log(`Browser channel ${options.channel} unavailable, falling back to bundled chromium`);
+    log(`Browser channel ${options.channel} unavailable, falling back to bundled chromium`, { driver });
     delete options.channel;
     const browser = await chromium.launch(options);
-    log('Browser launched', { version: browser.version(), channel: 'bundled', stealth: config.stealthMode });
+    log('Browser launched', { version: browser.version(), channel: 'bundled', stealth: config.stealthMode, driver });
     return browser;
   }
 }
@@ -170,9 +198,162 @@ async function verifyProxyPath(proxyUrl, healthUrl = 'https://wapbj.189.cn/') {
   if (ok < 3) throw new Error(`Proxy preflight failed (${ok}/5 probes succeeded)`);
 }
 
-async function newMobilePage(browser, config = {}) {
-  const context = await browser.newContext(mobileContextOptions(browser.version()));
+async function installTelecomPagePatches(context) {
+  await context.addInitScript(() => {
+    const patchUni = () => {
+      const uni = window.uni || {};
+      const noop = () => {};
+      uni.postMessage = uni.postMessage || noop;
+      uni.navigateTo = uni.navigateTo || noop;
+      uni.redirectTo = uni.redirectTo || noop;
+      uni.getEnv = uni.getEnv || (callback => {
+        if (typeof callback === 'function') callback({ plus: false, h5: true });
+      });
+      uni.webView = uni.webView || { postMessage: noop, navigateTo: noop };
+      window.uni = uni;
+    };
+    patchUni();
+    document.addEventListener('DOMContentLoaded', patchUni);
+    window.addEventListener('load', patchUni);
+  });
+}
+
+function attachBrokenUniRouteGuard(page) {
+  return page.route('**/*', route => {
+    const url = route.request().url();
+    if (/wapbj\.189\.cnundefined|\/undefined(?:\?|$)/i.test(url)) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+}
+
+function attachSliderApiCapture(page) {
+  page.on('response', response => {
+    if (!/getSliderChallenge|validSlider|sendRandByUnlog|sendRandProtocolV3/i.test(response.url())) return;
+    response.text().then(body => {
+      let data = null;
+      try { data = JSON.parse(body); } catch {}
+      if (/getSliderChallenge/i.test(response.url()) && data?.object?.token) {
+        page.__sliderChallenge = {
+          token: data.object.token,
+          imageWidth: data.object.imageWidth,
+          imageHeight: data.object.imageHeight,
+          blockWidth: data.object.blockWidth,
+          blockHeight: data.object.blockHeight,
+          correctY: data.object.correctY,
+          status: response.status(),
+          at: new Date().toISOString(),
+        };
+      }
+      if (/validSlider/i.test(response.url())) {
+        page.__sliderValid = {
+          status: response.status(),
+          retCode: data?.retCode,
+          retMsg: data?.retMsg,
+          at: new Date().toISOString(),
+        };
+      }
+    }).catch(() => {});
+  });
+}
+
+function attachPageDiagnostics(page) {
+  attachSliderApiCapture(page);
+  page.on('console', msg => {
+    if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
+  });
+  page.on('pageerror', err => rememberPageDiagnostic(page, { type: 'pageerror', text: err.message.slice(0, 300) }));
+  page.on('requestfailed', request => {
+    if (/wapbj\.189\.cn/i.test(request.url())) rememberPageDiagnostic(page, { type: 'requestfailed', url: request.url(), error: request.failure()?.errorText || '' });
+  });
+  page.on('response', response => {
+    if (!/wapbj\.189\.cn/i.test(response.url())) return;
+    if (response.status() < 400 && !/preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog/i.test(response.url())) return;
+    const entry = { type: 'response', url: response.url(), status: response.status() };
+    rememberPageDiagnostic(page, entry);
+    if (!/preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog/i.test(response.url())) return;
+    response.text()
+      .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
+      .catch(() => {});
+  });
+}
+
+async function attachSliderSubmitHook(page) {
+  // Patch telecom slider_check.js so we can call the same submitVerify() path as a real
+  // drag-end (ajaxUtil + closed-over challenge/scale), without injecting mouse events.
+  await page.route(/\/apps\/serviceapps\/slider_check\/js\/index\.js/i, async route => {
+    try {
+      const response = await route.fetch();
+      let body = await response.text();
+      if (!body.includes('window.__telecomSubmitSlider') && body.includes('function submitVerify')) {
+        body = body.replace(
+          /window\.sliderVerify\s*=\s*sliderVerify\s*;/,
+          [
+            'window.sliderVerify = sliderVerify;',
+            'window.__telecomSubmitSlider = function (naturalDistance) {',
+            '  if (!challenge) return { ok: false, reason: "no-challenge" };',
+            '  var dist = Math.round(Number(naturalDistance) || 0);',
+            '  if (!(dist > 0)) return { ok: false, reason: "bad-distance" };',
+            '  sliderLeft = Math.max(0, Math.min(maxSliderMove, dist * scale));',
+            '  updateSliderUI();',
+            '  submitVerify();',
+            '  return { ok: true, sliderLeft: sliderLeft, scale: scale, natural: dist };',
+            '};',
+          ].join('\n'),
+        );
+        log('Patched slider_check.js with __telecomSubmitSlider hook');
+      }
+      await route.fulfill({
+        status: response.status(),
+        headers: {
+          ...response.headers(),
+          'content-type': response.headers()['content-type'] || 'application/javascript; charset=utf-8',
+        },
+        body,
+      });
+    } catch (err) {
+      log('slider_check.js patch failed; continuing original', { error: err.message });
+      await route.continue().catch(() => {});
+    }
+  });
+}
+
+async function openCdpClaimPage(browser, config = {}) {
+  const context = browser.contexts()?.[0];
+  if (!context) throw new Error('CDP browser has no default context');
+  // Minimal CDP path: no initScript / uni patches / forced mobile viewport.
+  // Still: capture slider tokens + patch slider_check.js for native submitVerify.
+  if (!config.minimalLogin) {
+    await installTelecomPagePatches(context);
+  }
   const page = await context.newPage();
+  await attachSliderSubmitHook(page);
+  if (!config.minimalLogin) {
+    await page.setViewportSize({ width: 390, height: 844 }).catch(() => {});
+    await attachBrokenUniRouteGuard(page);
+    attachPageDiagnostics(page);
+  } else {
+    attachSliderApiCapture(page);
+  }
+  page.setDefaultTimeout(15000);
+  page.setDefaultNavigationTimeout(45000);
+  log('Opened CDP page on default Chrome context', {
+    contexts: browser.contexts().length,
+    viewport: page.viewportSize(),
+    minimalLogin: !!config.minimalLogin,
+    patches: !config.minimalLogin,
+  });
+  return { context, page };
+}
+
+async function newMobilePage(browser, config = {}) {
+  if (config.browserCdpUrl) return openCdpClaimPage(browser, config);
+
+  const context = await browser.newContext(mobileContextOptions(browser.version()));
+  await installTelecomPagePatches(context);
+  const page = await context.newPage();
+  await attachBrokenUniRouteGuard(page);
   if (config.blockHeavyAssets) {
     await page.route('**/*', route => {
       const type = route.request().resourceType();
@@ -182,22 +363,7 @@ async function newMobilePage(browser, config = {}) {
       return route.continue();
     });
   }
-  page.on('console', msg => {
-    if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
-  });
-  page.on('pageerror', err => rememberPageDiagnostic(page, { type: 'pageerror', text: err.message.slice(0, 300) }));
-  page.on('requestfailed', request => {
-    if (/wapbj\.189\.cn/i.test(request.url())) rememberPageDiagnostic(page, { type: 'requestfailed', url: request.url(), error: request.failure()?.errorText || '' });
-  });
-  page.on('response', response => {
-    if (response.status() < 400 || !/wapbj\.189\.cn/i.test(response.url())) return;
-    const entry = { type: 'response', url: response.url(), status: response.status() };
-    rememberPageDiagnostic(page, entry);
-    if (!/preActiveMeta|getSliderChallenge|sendRandProtocolV3/i.test(response.url())) return;
-    response.text()
-      .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
-      .catch(() => {});
-  });
+  attachPageDiagnostics(page);
   // Avoid CDP emulation and navigator overrides; those made Beijing Telecom's
   // WAF challenge collapse to an empty 400 page in CI.
   page.setDefaultTimeout(15000);
@@ -264,6 +430,9 @@ async function getPageSummary(page) {
 }
 
 const LOGIN_SMS_SEND_SELECTORS = [
+  '.checknum-button.slider-sms-btn',
+  '.checknum-button',
+  '.slider-sms-btn',
   '.content_send_unlog',
   '.content_send_log',
   '.content_send',
@@ -298,9 +467,25 @@ const LOGIN_SMS_SEND_SELECTORS = [
   'div:has-text("点击获取")',
 ];
 
-const LOGIN_PHONE_SELECTORS = ['#phoneNumber', 'input[placeholder*="手机号码"]', 'input[placeholder*="手机号"]'];
-const LOGIN_CODE_SELECTORS = ['#code', 'input[placeholder*="短信验证码"]', 'input[placeholder*="验证码"]'];
-const LOGIN_SUBMIT_SELECTORS = ['.know-box.button', 'button:has-text("立即办理")', 'div:has-text("立即办理")'];
+const LOGIN_PHONE_SELECTORS = [
+  '#phoneNumber',
+  'input.phonenum',
+  'input[placeholder*="手机号码"]',
+  'input[placeholder*="手机号"]',
+];
+const LOGIN_CODE_SELECTORS = [
+  '#code',
+  'input.checknum-input',
+  'input[placeholder*="短信验证码"]',
+  'input[placeholder*="验证码"]',
+];
+const LOGIN_SUBMIT_SELECTORS = [
+  '.know-box.button',
+  'button:has-text("立即领取")',
+  'div:has-text("立即领取")',
+  'button:has-text("立即办理")',
+  'div:has-text("立即办理")',
+];
 
 async function isLocatorActuallyVisible(locator) {
   if (typeof locator.evaluate === 'function') {
@@ -528,9 +713,17 @@ async function waitForSliderVerification(page, timeoutMs = 7000) {
 }
 
 
+async function humanType(locator, value) {
+  await locator.click({ timeout: 8000 }).catch(() => {});
+  await locator.fill('').catch(() => {});
+  for (const ch of String(value)) {
+    await locator.type(ch, { delay: 60 + Math.floor(Math.random() * 90) });
+  }
+}
+
 async function fillInputField(locator, value) {
   try {
-    await locator.fill(value, { timeout: 8000 });
+    await humanType(locator, value);
   } catch (err) {
     if (!/not visible|Timeout/i.test(err?.message || '')) throw err;
     await locator.evaluate((el, nextValue) => {
@@ -541,29 +734,171 @@ async function fillInputField(locator, value) {
   }
 }
 
-async function sendLoginCode(page, config) {
-  const phoneField = await ensureSmsLoginForm(page, config);
-  await actionDelay(config);
-  if (!await waitForTelecomApiReady(page, config)) {
-    throw new Error('Telecom preActiveMeta warmup failed before login SMS send');
+async function humanPause(minMs = 800, maxMs = 1800) {
+  await sleep(minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs)));
+}
+
+function isSliderBusyMessage(info, page) {
+  const text = `${info?.message || ''}\n${JSON.stringify(page.__telecomDiagnostics || [])}`;
+  return /服务繁忙|请稍后再试/i.test(text);
+}
+
+async function waitForSliderPuzzleAssets(page, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await page.evaluate(() => {
+      const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+      const msg = document.querySelector('#slider_check_msg,.slider-check-msg,.puzzle-msg')?.innerText?.trim() || '';
+      const bg = document.querySelector('#slider_bg_image');
+      const block = document.querySelector('#slider_block_image');
+      const canvas = Array.from(document.querySelectorAll('canvas')).find(e => visible(e) && e.width >= 100 && e.height >= 50);
+      const track = document.querySelector('#slider_track_btn,.slider-btn');
+      const hasBg = !!(bg && visible(bg) && bg.complete && (bg.naturalWidth || 0) > 40);
+      const hasBlock = !!(block && visible(block) && block.complete && (block.naturalWidth || 0) > 10);
+      const hasCanvas = !!canvas;
+      const imagesReady = (hasBg && hasBlock) || hasCanvas;
+      // "服务繁忙" on the msg node is also shown after a failed validSlider while images
+      // are still on screen — only treat as challenge-busy when images are missing.
+      const busyText = /服务繁忙|请稍后再试/.test(msg);
+      return {
+        busy: busyText && !imagesReady,
+        message: msg,
+        hasBg,
+        hasBlock,
+        hasCanvas,
+        hasTrack: !!(track && visible(track)),
+        imagesReady,
+        busyText,
+      };
+    }).catch(() => ({ busy: false, hasBg: false, hasBlock: false, hasCanvas: false, hasTrack: false, imagesReady: false }));
+    if (state.busy) return { ready: false, busy: true, ...state };
+    if (state.imagesReady || (state.hasBg && state.hasBlock) || state.hasCanvas) {
+      return { ready: true, busy: false, ...state };
+    }
+    await sleep(400);
   }
+  return { ready: false, busy: false };
+}
+
+async function sendLoginSmsViaBackend(page, config) {
+  const result = await page.evaluate(async phone => {
+    const response = await fetch('/wap2017/re/sms/sendRandByUnlog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ accNo: phone, validType: 'SLIDER' }),
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch {}
+    return { status: response.status, ok: response.ok, data, body: text.slice(0, 300) };
+  }, config.phone);
+  log('Direct login SMS backend response', result);
+  const retCode = String(result.data?.retCode ?? '');
+  const apiResult = String(result.data?.result ?? '');
+  if (result.ok && (apiResult === '0' || retCode === '000000' || retCode === '0001')) return true;
+  return false;
+}
+
+async function warmupTelecomBehavior(page, config) {
+  await page.waitForFunction(() => {
+    const scripts = Array.from(document.scripts || []).map(s => s.src || '');
+    return scripts.some(src => /chinatelecom\.min\.js|autotrack\.js|setview|logget/i.test(src));
+  }, { timeout: 20000 }).catch(() => {});
+  await page.evaluate(() => {
+    window.scrollTo(0, Math.min(240, document.body?.scrollHeight || 240));
+  }).catch(() => {});
+  await humanPause(600, 1200);
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+  await actionDelay(config);
+}
+
+async function warmTelecomOrigin(page, config) {
+  const originWarmUrl = process.env.TELECOM_WARMUP_URL || 'https://wapbj.189.cn/';
+  log('Warming telecom origin before claim entry', { url: originWarmUrl });
+  await page.goto(originWarmUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(err => {
+    log('Telecom origin warmup navigation failed', { error: err.message });
+  });
+  await humanPause(1500, 3000);
+  await page.mouse.move(120 + Math.random() * 80, 180 + Math.random() * 60).catch(() => {});
+  await humanPause(400, 900);
+}
+
+async function sendLoginCode(page, config) {
+  if (config.minimalLogin) {
+    // Bare path proven by scripts/verify-minimal-login-slider.js (getSliderChallenge 200 + images).
+    const phone = page.locator('#phoneNumber, input.phonenum').first();
+    await phone.waitFor({ state: 'visible', timeout: 15000 });
+    await phone.click({ timeout: 8000 }).catch(() => {});
+    await phone.fill(config.phone);
+    await sleep(800);
+    const sendBtn = page.locator('.checknum-button.slider-sms-btn, .checknum-button, .content_send_unlog').first();
+    await sendBtn.click({ force: true });
+    log('Clicked login SMS send button', { selector: 'minimal-login-direct' });
+    if (await waitForSliderVerification(page, 10000)) {
+      log('Login SMS send requires slider verification');
+      const assets = await waitForSliderPuzzleAssets(page, 15000);
+      log('Slider puzzle asset wait', assets);
+      if (assets.busy) {
+        throw new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image');
+      }
+      if (!assets.ready) {
+        throw new Error(`Telecom slider puzzle image missing after challenge${sliderFailureHint(page)}`);
+      }
+      await solvePuzzle(page, config, {
+        async onChallengeRejected() { return false; },
+      });
+    }
+    await sleep(3000);
+    const closedDialogs = await closeDialogs(page);
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    log('Login SMS send page summary', { closedDialogs, summary });
+    return;
+  }
+
+  const phoneField = await ensureSmsLoginForm(page, config);
+  await warmupTelecomBehavior(page, config);
+  await humanPause(1800, 3200);
   await fillInputField(phoneField.locator, config.phone);
+  await humanPause(1500, 2800);
+  await page.mouse.move(200 + Math.random() * 40, 520 + Math.random() * 20).catch(() => {});
+  await humanPause(400, 900);
   await clickLoginSmsButton(page, config);
+  // Do not block on preActiveMeta before the click path has already fired; only observe after.
+  await waitForTelecomApiReady(page, config, [/preActiveMeta/], 15000).catch(() => false);
   if (await waitForSliderVerification(page)) {
     log('Login SMS send requires slider verification');
-    const challenge = await waitForSliderChallengeLoad(page);
+    const challenge = await waitForSliderChallengeLoad(page, 15000);
     if (!challenge.ok) log('Slider challenge prefetch not ready', challenge);
-    await solvePuzzle(page, config, {
-      async onChallengeRejected() {
-        await dismissSliderPopup(page);
-        await sleep(5000);
-        if (config.openwrtProxy) {
-          await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
-        }
-        await clickLoginSmsButton(page, config);
-        return waitForSliderVerification(page, 10000);
-      },
-    });
+    const assets = await waitForSliderPuzzleAssets(page, 20000);
+    log('Slider puzzle asset wait', assets);
+    if (assets.busy) {
+      throw new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image');
+    }
+    if (!assets.ready) {
+      throw new Error(`Telecom slider puzzle image missing after challenge${sliderFailureHint(page)}`);
+    }
+    try {
+      await solvePuzzle(page, config, {
+        // Minimal path: never retrigger send on 400 — that burns rate limits and never yields images.
+        async onChallengeRejected() {
+          await dismissSliderPopup(page);
+          await humanPause(4000, 7000);
+          if (config.openwrtProxy) {
+            await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
+          }
+          await clickLoginSmsButton(page, config);
+          const ready = await waitForSliderVerification(page, 10000);
+          if (!ready) return false;
+          const nextAssets = await waitForSliderPuzzleAssets(page, 15000);
+          log('Slider puzzle asset wait after retrigger', nextAssets);
+          return !!(nextAssets.ready && !nextAssets.busy);
+        },
+      });
+    } catch (err) {
+      if (!/getSliderChallenge HTTP 400|Telecom slider challenge rejected|slider puzzle image missing|slider challenge busy/i.test(err?.message || '')) throw err;
+      log('Slider challenge API failed; trying direct login SMS backend call');
+      if (!await sendLoginSmsViaBackend(page, config)) throw err;
+    }
   }
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
@@ -619,35 +954,70 @@ function withCacheBuster(rawUrl) {
 }
 
 async function gotoLoginEntryPage(page, config, reason) {
-  const candidates = [
-    { label: 'entry', url: config.entryUrl },
-    { label: 'entry-cache-bust', url: withCacheBuster(config.entryUrl) },
-  ];
+  // June baseline: go straight to entry. Origin warmup / cache-bust reloads look more automated
+  // and can burn WAF sessions before the slider challenge is even requested.
+  if (!config.skipOriginWarmup && !config.minimalLogin && (/attempt-1$/i.test(reason) || reason === 'entry')) {
+    await warmTelecomOrigin(page, config);
+  }
+  const candidates = [{ label: 'entry', url: config.entryUrl }];
+  if (!config.minimalLogin && /retry|attempt-[2-9]|cache-bust/i.test(reason)) {
+    candidates.push({ label: 'entry-cache-bust', url: withCacheBuster(config.entryUrl) });
+  }
   for (const candidate of candidates) {
+    if (config.minimalLogin) {
+      // Exact timing from scripts/verify-minimal-login-slider.js (proven getSliderChallenge 200).
+      const response = await page.goto(candidate.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(err => {
+        rememberPageDiagnostic(page, { type: 'goto-error', url: candidate.url, error: err.message });
+        return null;
+      });
+      const status = response?.status?.() || null;
+      // 412 is normal for telecom WAF challenge pages that then rewrite to the form.
+      // Extra settle after 412 avoids clicking send before the challenge session is ready.
+      await sleep(status === 412 ? 12000 : 5000);
+      const form = await page.evaluate(() => {
+        const phone = document.querySelector('#phoneNumber, input.phonenum');
+        const rect = phone?.getBoundingClientRect();
+        return {
+          htmlLength: document.documentElement?.outerHTML?.length || 0,
+          hasPhone: !!(phone && rect && rect.width > 0),
+        };
+      }).catch(() => ({ htmlLength: 0, hasPhone: false }));
+      if (form.hasPhone) {
+        log('Login entry ready', {
+          reason,
+          strategy: candidate.label,
+          status,
+          url: page.url(),
+          minimalLogin: true,
+          htmlLength: form.htmlLength,
+        });
+        return;
+      }
+      continue;
+    }
     let entryTimeoutMs = hasProxyTunnelFailures(page) ? 8000 : 25000;
-    await page.goto('about:blank', { waitUntil: 'domcontentloaded' }).catch(() => {});
     const response = await page.goto(candidate.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(err => {
       rememberPageDiagnostic(page, { type: 'goto-error', url: candidate.url, error: err.message });
       return null;
     });
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    const waf = await waitForWafPageReady(page, 35000);
+    if (!waf.ready) {
+      log('WAF page still blank after initial wait', { reason, strategy: candidate.label, status: response?.status?.() || null, ...waf });
+      await waitForWafPageReady(page, 20000);
+    }
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     if (await waitForLoginEntry(page, entryTimeoutMs)) {
       log('Login entry ready', { reason, strategy: candidate.label, status: response?.status?.() || null, url: page.url() });
       return;
     }
-    let summary = await getPageSummary(page).catch(err => ({ error: err.message }));
-    log('Login entry phone field missing', { reason, strategy: candidate.label, status: response?.status?.() || null, summary });
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(err => {
-      rememberPageDiagnostic(page, { type: 'reload-error', url: page.url(), error: err.message });
-    });
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    entryTimeoutMs = hasProxyTunnelFailures(page) ? 8000 : 25000;
-    if (await waitForLoginEntry(page, entryTimeoutMs)) {
-      log('Login entry ready after reload', { reason, strategy: candidate.label, url: page.url() });
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    log('Login entry phone field missing; waiting without reload', { reason, strategy: candidate.label, status: response?.status?.() || null, summary });
+    await waitForWafPageReady(page, 20000);
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    if (await waitForLoginEntry(page, 20000)) {
+      log('Login entry ready after WAF wait', { reason, strategy: candidate.label, url: page.url() });
       return;
     }
-    summary = await getPageSummary(page).catch(err => ({ error: err.message }));
-    log('Login entry still missing after reload', { reason, strategy: candidate.label, summary });
   }
   const diagnosticsText = JSON.stringify(page.__telecomDiagnostics || []);
   const proxyHint = /ERR_TUNNEL_CONNECTION_FAILED/i.test(diagnosticsText)
@@ -657,19 +1027,13 @@ async function gotoLoginEntryPage(page, config, reason) {
 }
 
 async function resetLoginEntryPage(page) {
-  await page.locator('.slider-check-close').first().click({ force: true }).catch(() => {});
-  await page.context().clearCookies().catch(() => {});
-  await page.evaluate(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-  }).catch(() => {});
-  await page.goto('about:blank', { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.locator('.slider-check-close,.puzzle-close').first().click({ force: true }).catch(() => {});
 }
 
 function isRetryableLoginSendError(err) {
   const message = err?.message || '';
   if (/Proxy tunnel failed during slider challenge/i.test(message)) return true;
-  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected/i.test(message)) return true;
+  if (/getSliderChallenge HTTP 400|Telecom slider challenge rejected|slider puzzle image missing|slider challenge busy/i.test(message)) return true;
   if (/preActiveMeta warmup failed|Proxy tunnel failed during telecom API warmup/i.test(message)) return true;
   if (/Login phone field not found|Login entry phone field not visible|#phoneNumber|element is not visible/.test(message)) return true;
   if (isProxyPathError(err)) return false;
@@ -684,6 +1048,9 @@ async function dismissSliderPopup(page) {
 async function waitForSliderChallengeLoad(page, timeoutMs = 12000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (page.__sliderChallenge?.token) {
+      return { ok: true, status: page.__sliderChallenge.status || 200, challenge: page.__sliderChallenge };
+    }
     const challenge = (page.__telecomDiagnostics || []).filter(d => /getSliderChallenge/i.test(d.url || '')).pop();
     if (challenge) {
       return challenge.status < 400
@@ -695,15 +1062,334 @@ async function waitForSliderChallengeLoad(page, timeoutMs = 12000) {
   return { ok: false, reason: 'timeout' };
 }
 
+async function waitForSliderChallengeToken(page, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (page.__sliderChallenge?.token) return page.__sliderChallenge;
+    await sleep(200);
+  }
+  return null;
+}
+
+/**
+ * Pass slider via the page's own submitVerify path (same as drag-end).
+ * Falls back to ajaxUtil.postJson only if the hook was not installed.
+ * No mouse injection.
+ */
+async function submitSliderViaApi(page, config, sliderDistance) {
+  const challenge = await waitForSliderChallengeToken(page, 5000);
+  const token = challenge?.token;
+  if (!token) {
+    return { ok: false, reason: 'missing-challenge-token' };
+  }
+  const distance = String(Math.round(Number(sliderDistance)));
+  log('Submitting slider via native submitVerify / validSlider', {
+    tokenPrefix: `${token.slice(0, 6)}…`,
+    sliderDistance: distance,
+    imageWidth: challenge.imageWidth,
+    blockWidth: challenge.blockWidth,
+  });
+
+  const validResponsePromise = page.waitForResponse(
+    r => /\/wapFree\/rand\/validSlider/i.test(r.url()),
+    { timeout: 15000 },
+  ).catch(() => null);
+  const smsResponsePromise = page.waitForResponse(
+    r => /\/re\/sms\/sendRand|sendRandByUnlog|sendRandProtocolV3/i.test(r.url()),
+    { timeout: 20000 },
+  ).catch(() => null);
+
+  const hookResult = await page.evaluate(async ({ naturalDistance, phone }) => {
+    const isApiSuccess = res => !!res && (
+      res.retCode === '0' || res.retCode === '000000'
+      || res.result === 0 || res.result === '0'
+    );
+
+    // Preferred: patched slider_check.js hook → same submitVerify as human drag-end.
+    if (typeof window.__telecomSubmitSlider === 'function') {
+      const started = window.__telecomSubmitSlider(naturalDistance);
+      if (!started?.ok) return { transport: 'hook', hook: started, validOk: false };
+
+      const validRes = await new Promise(resolve => {
+        const deadline = Date.now() + 12000;
+        const tick = () => {
+          const msg = document.querySelector('#slider_check_msg,.slider-check-msg')?.innerText?.trim() || '';
+          const sliderEl = document.querySelector('#slider_check,.slider-check-box');
+          const visible = (() => {
+            if (!sliderEl) return false;
+            const s = getComputedStyle(sliderEl);
+            const r = sliderEl.getBoundingClientRect();
+            return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+          })();
+          if (/验证成功/.test(msg) || (!visible && Date.now() > deadline - 10000)) {
+            resolve({ retCode: '000000', retMsg: msg || '验证成功' });
+            return;
+          }
+          if (/验证失败|服务繁忙|请稍后再试|获取验证码失败/.test(msg)) {
+            resolve({ retCode: 'fail', retMsg: msg });
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve({ retCode: 'timeout', retMsg: msg || 'validSlider wait timeout' });
+            return;
+          }
+          setTimeout(tick, 200);
+        };
+        setTimeout(tick, 300);
+      });
+
+      if (!isApiSuccess(validRes) && !/验证成功/.test(validRes?.retMsg || '')) {
+        return { transport: 'hook', hook: started, validOk: false, validRes, smsRes: null };
+      }
+
+      // submitVerify success already schedules sendSmsWithSlider via sliderVerify.show callback.
+      // Wait briefly for SMS API / dialog.
+      const smsRes = await new Promise(resolve => {
+        const deadline = Date.now() + 15000;
+        const tick = () => {
+          const text = document.body?.innerText || '';
+          if (/验证码已下发|请注意查收/.test(text)) {
+            resolve({ ok: true, data: { retMsg: '验证码已下发' } });
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve({ ok: false, timeout: true });
+            return;
+          }
+          setTimeout(tick, 300);
+        };
+        setTimeout(tick, 500);
+      });
+      return { transport: 'hook', hook: started, validOk: true, validRes, smsRes };
+    }
+
+    // Fallback: ajaxUtil directly (may be WAF-sensitive vs native submitVerify).
+    if (typeof window.require !== 'function') {
+      return { transport: 'none', validOk: false, validRes: { retMsg: 'no hook and no require' } };
+    }
+    const ajaxUtil = await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('ajaxutil load timeout')), 10000);
+      try {
+        window.require(['ajaxutil'], u => { clearTimeout(t); resolve(u); }, e => { clearTimeout(t); reject(e); });
+      } catch (err) {
+        clearTimeout(t);
+        reject(err);
+      }
+    });
+    const validRes = await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('validSlider timeout')), 15000);
+      ajaxUtil.postJson('/wap2017/re/wapFree/rand/validSlider', res => {
+        clearTimeout(t);
+        resolve(res);
+      }, { token: window.__sliderTokenUnused, sliderDistance: String(naturalDistance) });
+    }).catch(err => ({ retCode: 'err', retMsg: String(err?.message || err) }));
+
+    // Note: fallback without token from closure is incomplete — hook path is required.
+    return { transport: 'ajaxutil-fallback-incomplete', validOk: false, validRes, phone };
+  }, { naturalDistance: Number(distance), phone: config.phone }).catch(err => ({
+    transport: 'evaluate-error',
+    validOk: false,
+    validRes: { retMsg: err.message },
+  }));
+
+  // If hook missing (script already cached before route), fall back to ajaxUtil with token.
+  let result = hookResult;
+  if (!result?.validOk && result?.transport !== 'hook') {
+    result = await page.evaluate(async ({ token: tok, sliderDistance: dist, phone }) => {
+      const isApiSuccess = res => !!res && (
+        res.retCode === '0' || res.retCode === '000000'
+        || res.result === 0 || res.result === '0'
+      );
+      if (typeof window.require !== 'function') {
+        return { transport: 'none', validOk: false, validRes: { retMsg: 'AMD require unavailable' } };
+      }
+      const ajaxUtil = await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('ajaxutil load timeout')), 10000);
+        window.require(['ajaxutil'], u => { clearTimeout(t); resolve(u); }, e => { clearTimeout(t); reject(e); });
+      });
+      const validRes = await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('validSlider timeout')), 15000);
+        try {
+          ajaxUtil.postJson('/wap2017/re/wapFree/rand/validSlider', res => {
+            clearTimeout(t);
+            resolve(res);
+          }, { token: tok, sliderDistance: dist });
+        } catch (err) {
+          clearTimeout(t);
+          reject(err);
+        }
+      }).catch(err => ({ retCode: 'err', retMsg: String(err?.message || err) }));
+      if (!isApiSuccess(validRes)) return { transport: 'ajaxutil', validOk: false, validRes, smsRes: null };
+      if (typeof window.sliderVerify?.hide === 'function') {
+        try { window.sliderVerify.hide(); } catch {}
+      }
+      const smsRes = await new Promise(resolve => {
+        if (typeof window.sendSmsWithSlider === 'function') {
+          window.sendSmsWithSlider(phone, {
+            onSuccess: data => resolve({ ok: true, data }),
+            onFail: data => resolve({ ok: false, data }),
+          });
+          setTimeout(() => resolve({ ok: false, timeout: true }), 18000);
+          return;
+        }
+        resolve({ ok: false, error: 'sendSmsWithSlider missing' });
+      });
+      return { transport: 'ajaxutil', validOk: true, validRes, smsRes };
+    }, { token, sliderDistance: distance, phone: config.phone });
+  }
+
+  const validResponse = await validResponsePromise;
+  let validNetBody = '';
+  if (validResponse) {
+    const vUrl = validResponse.url();
+    validNetBody = await validResponse.text().catch(() => '');
+    log('validSlider network response', {
+      status: validResponse.status(),
+      hasWafQuery: /[?&]fQbHda09=/i.test(vUrl),
+      urlTail: vUrl.slice(-80),
+      body: validNetBody.slice(0, 160),
+    });
+  } else {
+    log('validSlider network response missing', {
+      transport: result?.transport,
+      hook: result?.hook,
+    });
+  }
+
+  const smsResponse = await smsResponsePromise;
+  let smsBody = '';
+  if (smsResponse) {
+    smsBody = await smsResponse.text().catch(() => '');
+    log('SMS send after validSlider', { status: smsResponse.status(), body: smsBody.slice(0, 160) });
+  }
+
+  // Prefer network truth over DOM polling.
+  let validOk = !!result?.validOk;
+  if (validResponse) {
+    if (validResponse.ok() && /"retCode"\s*:\s*"000000"|验证成功/.test(validNetBody)) validOk = true;
+    if (validResponse.status() >= 400) validOk = false;
+  }
+
+  log('validSlider API result', {
+    validOk,
+    validMsg: result?.validRes?.retMsg,
+    smsOk: result?.smsRes?.ok,
+    transport: result?.transport,
+    hook: result?.hook,
+  });
+
+  if (!validOk) {
+    return {
+      ok: false,
+      reason: result?.transport === 'none' ? 'ajaxutil-unavailable' : 'validSlider-failed',
+      retMsg: result?.validRes?.retMsg || page.__sliderValid?.retMsg || '',
+      result,
+    };
+  }
+
+  const smsOk = !!(
+    result?.smsRes?.ok
+    || (smsResponse?.ok() && /"retCode"\s*:\s*"000000"|"result"\s*:\s*0/.test(smsBody))
+  );
+  return { ok: smsOk || validOk, validOk: true, smsOk, result, smsBody };
+}
+
+async function dragSliderByMouse(page, sliderDistance) {
+  const dragInfo = await page.evaluate((naturalX) => {
+    const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+    const bg = document.querySelector('#slider_bg_image');
+    const block = document.querySelector('#slider_block_image');
+    const btn = document.querySelector('#slider_track_btn, .slider-btn, .slider');
+    if (!bg || !block || !btn || !visible(bg) || !visible(block) || !visible(btn)) return null;
+    const bgRect = bg.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    const scale = bgRect.width / (bg.naturalWidth || bgRect.width);
+    const moveX = Math.max(0, Math.round(Number(naturalX) * scale));
+    return {
+      moveX,
+      sx: btnRect.x + btnRect.width / 2,
+      sy: btnRect.y + btnRect.height / 2,
+      scale,
+    };
+  }, Number(sliderDistance)).catch(() => null);
+  if (!dragInfo || !Number.isFinite(dragInfo.moveX) || dragInfo.moveX <= 0) {
+    return { ok: false, reason: 'drag-info-missing' };
+  }
+
+  log('Dragging slider with mouse fallback', dragInfo);
+  const smsPromise = page.waitForResponse(r => /sendRand/i.test(r.url()), { timeout: 20000 }).catch(() => null);
+  await page.mouse.move(dragInfo.sx, dragInfo.sy).catch(() => {});
+  await page.waitForTimeout(300);
+  await page.mouse.down().catch(() => {});
+  const steps = 50;
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    await page.mouse.move(dragInfo.sx + dragInfo.moveX * ease, dragInfo.sy + Math.sin(t * Math.PI * 3) * 2).catch(() => {});
+    await page.waitForTimeout(24 + (i % 5) * 8).catch(() => {});
+  }
+  await page.mouse.up().catch(() => {});
+  const smsResp = await smsPromise;
+  const smsBody = smsResp ? await smsResp.text().catch(() => '') : '';
+  const body = await visibleText(page).catch(() => '');
+  const ok = !!(smsResp && smsResp.ok() && /000000|验证码已下发|请注意查收/.test(`${smsBody}${body}`));
+  return { ok, smsStatus: smsResp?.status?.() ?? null, smsBody: smsBody.slice(0, 160), body: body.slice(0, 160) };
+}
+
 function latestTelecomApiResponse(page, pattern) {
   return (page.__telecomDiagnostics || [])
     .filter(d => d.type === 'response' && pattern.test(d.url || ''))
     .pop();
 }
 
+async function readPageRenderState(page) {
+  try {
+    return await page.evaluate(() => {
+      const phone = document.querySelector('#phoneNumber, input.phonenum');
+      const code = document.querySelector('#code, input.checknum-input');
+      const sendBtn = document.querySelector('.checknum-button, .slider-sms-btn, .content_send_unlog');
+      const phoneRect = phone?.getBoundingClientRect();
+      const formReady = !!(phone && phoneRect && phoneRect.width > 0 && phoneRect.height > 0);
+      return {
+        htmlLength: document.documentElement?.outerHTML?.length || 0,
+        bodyLength: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
+        title: document.title || '',
+        formReady,
+        hasPhone: !!phone,
+        hasCode: !!code,
+        hasSendBtn: !!sendBtn,
+      };
+    });
+  } catch {
+    return { htmlLength: 0, bodyLength: 0, title: '', formReady: false, navigating: true };
+  }
+}
+
+async function waitForWafPageReady(page, timeoutMs = 35000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = { htmlLength: 0, bodyLength: 0, title: '', formReady: false };
+  while (Date.now() < deadline) {
+    last = await readPageRenderState(page);
+    if (last.navigating) {
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+      await sleep(800);
+      continue;
+    }
+    if (last.formReady || (last.htmlLength > 3000 && last.bodyLength > 20)) {
+      return { ready: true, ...last };
+    }
+    if (last.htmlLength < 500) {
+      await sleep(1500);
+      continue;
+    }
+    await sleep(800);
+  }
+  return { ready: false, ...last };
+}
+
 async function isBlankWafPage(page) {
   const htmlLength = await page.evaluate(() => document.documentElement?.outerHTML?.length || 0).catch(() => 0);
-  return htmlLength < 100;
+  return htmlLength < 500;
 }
 
 async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/], timeoutMs = 12000) {
@@ -734,32 +1420,7 @@ async function waitForTelecomApiReady(page, config, patterns = [/preActiveMeta/]
     return false;
   }
   log('Telecom API warmup timed out without API responses; continuing cautiously');
-  return true;
-}
-
-async function dragSlider(page, sx, sy, moveX) {
-  const points = [];
-  const steps = 62;
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    const ease = 1 - Math.pow(1 - t, 2.35);
-    const overshoot = i > steps - 7 ? (steps - i) * 0.22 : 0;
-    points.push({
-      x: sx + moveX * ease - overshoot,
-      y: sy + Math.sin(t * Math.PI * 3.2) * 2.4 + Math.sin(t * Math.PI * 9.5) * 0.8,
-      wait: 35 + (i % 7) * 9,
-    });
-  }
-  // Mobile context maps mouse events to touch; avoid CDP Input.dispatchTouchEvent (WAF detects it).
-  await page.mouse.move(sx, sy);
-  await sleep(650);
-  await page.mouse.down();
-  for (const point of points.slice(1)) {
-    await page.mouse.move(point.x, point.y);
-    await sleep(point.wait);
-  }
-  await sleep(260);
-  await page.mouse.up();
+  return false;
 }
 
 async function loginWithRetry(browser, page, smsInbox, config) {
@@ -774,12 +1435,21 @@ async function loginWithRetry(browser, page, smsInbox, config) {
       const summary = await getPageSummary(activePage).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });
       await captureDebugScreenshot(activePage, `login-send-failed-attempt-${attempt}`);
+      // Minimal/CDP path: slider 400 means WAF rejected this session — retrying immediately
+      // almost never yields puzzle images and worsens 服务繁忙. Fail fast instead.
+      if (config.minimalLogin && /getSliderChallenge HTTP 400|Telecom slider challenge rejected|slider puzzle image missing|slider challenge busy/i.test(err.message)) {
+        throw err;
+      }
       if (attempt < config.sendCodeAttempts && isRetryableLoginSendError(err)) {
-        const waitMs = /Proxy tunnel failed|preActiveMeta warmup failed|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err.message)
+        const waitMs = /Proxy tunnel failed|preActiveMeta warmup failed|Login phone field not found|Telecom slider challenge rejected|getSliderChallenge HTTP 400|slider puzzle image missing|slider challenge busy/i.test(err.message)
           ? 15000 + (attempt - 1) * 10000
           : 60000;
         await sleep(waitMs);
-        await activePage.context().close().catch(() => {});
+        if (config.browserCdpUrl) {
+          await activePage.close().catch(() => {});
+        } else {
+          await activePage.context().close().catch(() => {});
+        }
         ({ page: activePage } = await newMobilePage(browser, config));
         continue;
       }
@@ -820,7 +1490,9 @@ async function choosePackage(page, config) {
 }
 
 async function transparentPuzzleInfo(page) {
-  return page.evaluate(() => {
+  const imageMatchResult = await evaluateSliderImageMatch(page).catch(() => ({ ok: false, reason: 'image-match-evaluate-failed' }));
+  const imageMatch = imageMatchResult?.ok ? imageMatchResult : null;
+  return page.evaluate((match) => {
     const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
     const describe = e => {
       const rect = e.getBoundingClientRect();
@@ -851,113 +1523,6 @@ async function transparentPuzzleInfo(page) {
       }
       if (count > 500) bbox = { minx, miny, maxx, maxy, count };
     }
-    const imageMatchInfo = () => {
-      const bg = document.querySelector('#slider_bg_image');
-      const block = document.querySelector('#slider_block_image');
-      if (!bg || !block || !visible(bg) || !visible(block) || !bg.complete || !block.complete) return null;
-      const bgRect = bg.getBoundingClientRect();
-      const blockRect = block.getBoundingClientRect();
-      const bgCanvas = document.createElement('canvas');
-      bgCanvas.width = bg.naturalWidth || Math.round(bgRect.width);
-      bgCanvas.height = bg.naturalHeight || Math.round(bgRect.height);
-      const blockCanvas = document.createElement('canvas');
-      blockCanvas.width = block.naturalWidth || Math.round(blockRect.width);
-      blockCanvas.height = block.naturalHeight || Math.round(blockRect.height);
-      const bgCtx = bgCanvas.getContext('2d');
-      const blockCtx = blockCanvas.getContext('2d');
-      bgCtx.drawImage(bg, 0, 0, bgCanvas.width, bgCanvas.height);
-      blockCtx.drawImage(block, 0, 0, blockCanvas.width, blockCanvas.height);
-      const bgData = bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height).data;
-      const blockData = blockCtx.getImageData(0, 0, blockCanvas.width, blockCanvas.height).data;
-      const scaleY = bgCanvas.height / bgRect.height;
-      const scaleX = bgCanvas.width / bgRect.width;
-      const targetY = Math.max(0, Math.min(
-        bgCanvas.height - blockCanvas.height,
-        Math.round((blockRect.y - bgRect.y) * scaleY),
-      ));
-      const gray = data => {
-        const out = new Uint16Array(data.length / 4);
-        for (let i = 0; i < out.length; i += 1) out[i] = Math.round(data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114);
-        return out;
-      };
-      const bgGray = gray(bgData);
-      const edge = (data, width, height) => {
-        const out = new Uint16Array(width * height);
-        for (let y = 1; y < height - 1; y += 1) {
-          for (let x = 1; x < width - 1; x += 1) {
-            const i = y * width + x;
-            out[i] = Math.abs(data[i + 1] - data[i - 1]) + Math.abs(data[i + width] - data[i - width]);
-          }
-        }
-        return out;
-      };
-      const bgEdge = edge(bgGray, bgCanvas.width, bgCanvas.height);
-      const alphaAt = (x, y) => blockData[(y * blockCanvas.width + x) * 4 + 3];
-      const edgePoints = [];
-      const innerPoints = [];
-      for (let by = 1; by < blockCanvas.height - 1; by += 1) {
-        for (let bx = 1; bx < blockCanvas.width - 1; bx += 1) {
-          if (alphaAt(bx, by) < 80) continue;
-          const boundary = alphaAt(bx - 1, by) < 80
-            || alphaAt(bx + 1, by) < 80
-            || alphaAt(bx, by - 1) < 80
-            || alphaAt(bx, by + 1) < 80;
-          if (boundary) edgePoints.push({ x: bx, y: by });
-          else if (bx % 4 === 0 && by % 4 === 0) innerPoints.push({ x: bx, y: by });
-        }
-      }
-      let textureX = 0;
-      let textureScore = Number.POSITIVE_INFINITY;
-      let edgeX = 0;
-      let edgeScore = Number.NEGATIVE_INFINITY;
-      for (let x = 0; x <= bgCanvas.width - blockCanvas.width; x += 1) {
-        let texture = 0;
-        let textureSamples = 0;
-        for (let by = 4; by < blockCanvas.height - 4; by += 2) {
-          for (let bx = 4; bx < blockCanvas.width - 4; bx += 2) {
-            const bi = (by * blockCanvas.width + bx) * 4;
-            const alpha = blockData[bi + 3];
-            if (alpha < 80) continue;
-            const gi = ((targetY + by) * bgCanvas.width + x + bx) * 4;
-            texture += Math.abs(blockData[bi] - bgData[gi])
-              + Math.abs(blockData[bi + 1] - bgData[gi + 1])
-              + Math.abs(blockData[bi + 2] - bgData[gi + 2]);
-            textureSamples += 1;
-          }
-        }
-        if (textureSamples > 0) texture /= textureSamples;
-        if (texture < textureScore) {
-          textureScore = texture;
-          textureX = x;
-        }
-        if (edgePoints.length > 0) {
-          const boundary = edgePoints.reduce((sum, p) => sum + bgEdge[(targetY + p.y) * bgCanvas.width + x + p.x], 0) / edgePoints.length;
-          const inner = innerPoints.length > 0
-            ? innerPoints.reduce((sum, p) => sum + bgEdge[(targetY + p.y) * bgCanvas.width + x + p.x], 0) / innerPoints.length
-            : 0;
-          const score = boundary - inner * 0.35;
-          if (score > edgeScore) {
-            edgeScore = score;
-            edgeX = x;
-          }
-        }
-      }
-      const useEdge = edgePoints.length >= 20
-        && edgeX >= 45 * scaleX
-        && edgeX <= bgCanvas.width - blockCanvas.width + 10 * scaleX;
-      const bestX = useEdge ? edgeX : textureX;
-      return {
-        x: Math.round(bestX / scaleX),
-        y: Math.round(targetY / scaleY),
-        method: useEdge ? 'edge' : 'texture',
-        score: Math.round(useEdge ? edgeScore : textureScore),
-        texture: { x: Math.round(textureX / scaleX), score: Math.round(textureScore) },
-        edge: edgePoints.length > 0 ? { x: Math.round(edgeX / scaleX), score: Math.round(edgeScore), points: edgePoints.length } : null,
-        bg: { width: bgCanvas.width, height: bgCanvas.height },
-        block: { width: blockCanvas.width, height: blockCanvas.height },
-      };
-    };
-    const imageMatch = imageMatchInfo();
     const sliderEl = document.querySelector('#slider_track_btn')
       || document.querySelector('.slider-btn')
       || document.querySelector('.slider')
@@ -976,10 +1541,12 @@ async function transparentPuzzleInfo(page) {
     const slider = sliderEl?.getBoundingClientRect();
     const container = containerEl?.getBoundingClientRect();
     return {
-      visible: visible(document.querySelector('#secondPop_puzzle_check')) || /安全验证|向右滑动滑块|滑动滑块/.test(document.body?.innerText || ''),
+      visible: visible(document.querySelector('#secondPop_puzzle_check'))
+        || visible(document.querySelector('#slider_check,.slider-check-box'))
+        || /安全验证|向右滑动滑块|滑动滑块/.test(document.body?.innerText || ''),
       canvas: canvas ? { width: canvas.width, height: canvas.height } : null,
       bbox,
-      imageMatch,
+      imageMatch: match,
       slider: slider ? { x: slider.x, y: slider.y, w: slider.width, h: slider.height } : null,
       container: container ? { x: container.x, y: container.y, w: container.width, h: container.height } : null,
       message: document.querySelector('#secondPop_msg')?.innerText?.trim()
@@ -997,7 +1564,7 @@ async function transparentPuzzleInfo(page) {
         .slice(0, 30)
         .map(describe),
     };
-  });
+  }, imageMatch);
 }
 
 async function solvePuzzle(page, config, options = {}) {
@@ -1012,10 +1579,12 @@ async function solvePuzzle(page, config, options = {}) {
         const rect = e.getBoundingClientRect();
         return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
       };
-      return /安全验证|向右滑动滑块|滑动滑块/.test(document.body?.innerText || '')
+      return /安全验证|向右滑动滑块|滑动滑块|服务繁忙/.test(document.body?.innerText || '')
         && (
           visible(document.querySelector('#secondPop_puzzle_check'))
+          || visible(document.querySelector('#slider_check'))
           || visible(document.querySelector('.puzzle-verify-popup'))
+          || visible(document.querySelector('.slider-check-box'))
           || visible(document.querySelector('.captcha-wrapper'))
           || visible(document.querySelector('.slider-track'))
           || visible(document.querySelector('.slider-btn'))
@@ -1025,12 +1594,22 @@ async function solvePuzzle(page, config, options = {}) {
           || visible(document.querySelector('[id*="slider" i]'))
         );
     }, { timeout: 15000 });
-    await sleep(2500);
+    const assets = await waitForSliderPuzzleAssets(page, 12000);
+    if (assets.busy || isSliderBusyMessage({ message: assets.message }, page)) {
+      log('Slider challenge returned busy message', { attempt, assets });
+      if (options.onChallengeRejected && attempt < 3) {
+        const ready = await options.onChallengeRejected();
+        if (ready) continue;
+      }
+      throw new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image');
+    }
+    // Give the puzzle DOM a beat to paint before reading pixels.
+    await sleep(config?.minimalLogin ? 2500 : 1200);
     const info = await transparentPuzzleInfo(page);
     const hasCanvasTarget = info.canvas && info.bbox;
     const hasImageTarget = info.imageMatch;
     const hasTrackFallback = info.slider && info.container && info.container.w > info.slider.w + 45;
-    if (!info.visible || !info.slider || (!hasCanvasTarget && !hasImageTarget && !hasTrackFallback)) {
+    if (!info.visible || (!hasCanvasTarget && !hasImageTarget && !hasTrackFallback)) {
       log('Slider puzzle info incomplete', { attempt, info });
       if (isBlankSliderChallengeRejection(info, page)) {
         if (options.onChallengeRejected && attempt < 3) {
@@ -1052,49 +1631,154 @@ async function solvePuzzle(page, config, options = {}) {
       await sleep(2000);
       continue;
     }
-    const moveX = info.imageMatch
-      ? info.imageMatch.x
-      : hasCanvasTarget
-        ? Math.round(info.bbox.minx / ((info.canvas.width - 40 - 20) / (info.canvas.width - 40)))
-        : Math.round(info.container.w - info.slider.w - 4);
-    const maxMoveX = info.imageMatch
+
+    const sliderMode = (config?.sliderMode || process.env.TELECOM_SLIDER_MODE || 'api').toLowerCase();
+    if (!['api', 'mouse'].includes(sliderMode)) {
+      log('Unsupported slider mode; forcing api (native submitVerify)', { sliderMode });
+    }
+
+    const maxNatural = info.imageMatch
       ? (info.imageMatch.bg.width - info.imageMatch.block.width + 10)
       : hasCanvasTarget
         ? info.canvas.width - 35
-        : info.container.w - 4;
-    if (moveX < 45 || moveX > maxMoveX) {
-      log('Slider puzzle target out of range', { attempt, info, moveX });
+        : 240;
+    const inRangeNatural = d => d != null && d >= 45 && d <= maxNatural;
+
+    let naturalX = null;
+    let matchSource = info.imageMatch?.method || (hasCanvasTarget ? 'canvas' : 'track');
+    if (info.imageMatch?.naturalX != null) {
+      naturalX = info.imageMatch.naturalX;
+    } else if (hasCanvasTarget) {
+      naturalX = Math.round(info.bbox.minx);
+    } else if (hasTrackFallback) {
+      naturalX = Math.round(info.container.w - info.slider.w - 4);
+    }
+
+    // Optional vision AI backup when local CV is weak / missing and TELECOM_VISION_URL is set.
+    // Important: local hole methods are named "cream-edge" / "green-cream-edge";
+    // they are primary signals, not weak fallbacks. Only plain "edge" / "texture" /
+    // "fallback" should trigger vision backup by default.
+    const localMethod = String(info.imageMatch?.method || '');
+    const holeStrong = !!info.imageMatch?.hole?.ok;
+    const edgeStrong = localMethod === 'edge'
+      && Number(info.imageMatch?.edge?.score || 0) >= 80
+      && Number(info.imageMatch?.edge?.points || 0) >= 20;
+    const localMatchStrong = holeStrong || edgeStrong;
+    const holeWeak = !localMatchStrong
+      && (
+        !info.imageMatch?.naturalX
+        || /fallback|texture/i.test(localMethod)
+        || localMethod === 'edge'
+      );
+    const forceVision = process.env.TELECOM_FORCE_VISION === 'true';
+    if ((forceVision || holeWeak || !inRangeNatural(naturalX)) && process.env.TELECOM_VISION_URL) {
+      const pngs = await page.evaluate(() => {
+        const bg = document.querySelector('#slider_bg_image');
+        const block = document.querySelector('#slider_block_image');
+        if (!bg?.complete || !block?.complete) return null;
+        const c1 = document.createElement('canvas');
+        c1.width = bg.naturalWidth; c1.height = bg.naturalHeight;
+        c1.getContext('2d').drawImage(bg, 0, 0);
+        const c2 = document.createElement('canvas');
+        c2.width = block.naturalWidth; c2.height = block.naturalHeight;
+        c2.getContext('2d').drawImage(block, 0, 0);
+        return { bg: c1.toDataURL('image/png'), block: c2.toDataURL('image/png') };
+      }).catch(() => null);
+      if (pngs?.bg) {
+        const vision = await estimateSliderDistanceWithVision({
+          bgPngBase64: pngs.bg,
+          blockPngBase64: pngs.block,
+          imageWidth: info.imageMatch?.bg?.width || 280,
+          correctY: page.__sliderChallenge?.correctY ?? info.imageMatch?.hole?.y ?? null,
+        });
+        log('Vision slider estimate', vision);
+        if (vision.ok && inRangeNatural(vision.naturalX)) {
+          if (forceVision || !localMatchStrong || !inRangeNatural(naturalX)) {
+            naturalX = vision.naturalX;
+            matchSource = 'vision';
+          } else {
+            log('Keeping strong local slider match; vision stored as fallback only', {
+              localMethod,
+              localNaturalX: naturalX,
+              visionNaturalX: vision.naturalX,
+              holeOk: holeStrong,
+              edgeScore: info.imageMatch?.edge?.score,
+            });
+          }
+        }
+      }
+    }
+
+    if (!inRangeNatural(naturalX)) {
+      log('Slider puzzle target out of range', { attempt, naturalX, info: { imageMatch: info.imageMatch } });
       await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
       await sleep(2000);
       continue;
     }
 
-    log(`Solving slider attempt ${attempt}/3`, {
-      targetX: info.imageMatch?.x ?? info.bbox.minx,
-      moveX,
+    const sliderAttemptSummary = {
+      naturalX,
+      matchSource,
       match: info.imageMatch ? {
         method: info.imageMatch.method,
         score: info.imageMatch.score,
+        naturalX: info.imageMatch.naturalX,
+        hole: info.imageMatch.hole,
         texture: info.imageMatch.texture,
         edge: info.imageMatch.edge,
-      } : hasCanvasTarget ? null : { method: 'track-end' },
-    });
-    const responsePromise = page.waitForResponse(r => r.url().includes('/re/sms/sendRandProtocolV3'), { timeout: 20000 }).catch(() => null);
-    const sx = info.slider.x + info.slider.w / 2;
-    const sy = info.slider.y + info.slider.h / 2;
-    await dragSlider(page, sx, sy, moveX);
+      } : hasCanvasTarget ? { method: 'canvas-bbox' } : { method: 'track-end' },
+    };
 
-    const response = await responsePromise;
-    if (response) {
-      const text = await response.text().catch(() => '');
-      if (response.ok() && /"retCode"\s*:\s*"000000"/.test(text)) return true;
-      log('Second SMS send response was not successful', { status: response.status(), body: text.slice(0, 120) });
+    if (sliderMode === 'mouse') {
+      log(`Solving slider attempt ${attempt}/3`, { mode: 'mouse', ...sliderAttemptSummary });
+      const mouseResult = await dragSliderByMouse(page, naturalX);
+      if (mouseResult.ok) {
+        log('Slider passed via mouse drag', { naturalX, ...mouseResult });
+        return true;
+      }
+      log('Mouse slider solve failed', { naturalX, ...mouseResult });
+    } else {
+      log(`Solving slider attempt ${attempt}/3`, { mode: 'api', ...sliderAttemptSummary });
+
+      const apiResult = await submitSliderViaApi(page, config, naturalX);
+      if (apiResult.ok) {
+        log('Slider passed via native submitVerify', {
+          naturalX,
+          smsOk: apiResult.smsOk,
+        });
+        return true;
+      }
+      log('validSlider rejected', { ...apiResult, naturalX });
+
+      const mouseResult = await dragSliderByMouse(page, naturalX);
+      if (mouseResult.ok) {
+        log('Slider passed via mouse fallback', { naturalX, ...mouseResult });
+        return true;
+      }
+      log('Mouse slider fallback failed', { naturalX, ...mouseResult });
+
+      const outcome = await page.evaluate(() => {
+        const text = [
+          document.body?.innerText || '',
+          ...Array.from(document.querySelectorAll('#wap-dialog,.wap-dialog,.diaog-popup,#dialog-box,.slider-check-msg'))
+            .map(e => e.innerText || ''),
+        ].join('\n');
+        return {
+          text: text.replace(/\s+/g, ' ').trim().slice(0, 300),
+          smsSent: /验证码已下发|请注意查收/.test(text),
+          busy: /服务繁忙|请稍后再试/.test(text),
+          successMsg: /验证成功/.test(text),
+        };
+      }).catch(() => ({ text: '', smsSent: false, busy: false, successMsg: false }));
+      log('Slider post-submit outcome', outcome);
+      if (outcome.smsSent || outcome.successMsg) return true;
+      if (outcome.busy || /服务繁忙|请稍后再试/.test(String(apiResult?.retMsg || ''))) {
+        throw new Error('Telecom slider challenge busy (服务繁忙) after submit');
+      }
+      page.__sliderChallenge = null;
+      await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
+      await sleep(2000);
     }
-    const body = await visibleText(page);
-    if (/验证码已下发|请注意查收/.test(body)) return true;
-    if (/服务繁忙/.test(body)) throw new Error('Slider verification service busy');
-    await page.locator('.refreshIcon,#slider_refresh_icon,.slider-refresh-icon').first().click({ force: true }).catch(() => {});
-    await sleep(2500);
   }
   throw new Error(`Slider verification failed${sliderFailureHint(page)}`);
 }
@@ -1193,6 +1877,7 @@ async function runClaim(config) {
     log(`State ${stateFile()} already records success; skip. Set FORCE_RUN=true to override.`);
     return;
   }
+  log('Slider mode', { sliderMode: config.sliderMode || 'api' });
   const smsInbox = new SmsInboxClient(config);
   const browser = await launchBrowser(config);
   let activePage = null;
@@ -1219,7 +1904,13 @@ async function runClaim(config) {
     await captureDebugScreenshot(activePage, 'claim-failed');
     throw err;
   } finally {
-    await browser.close().catch(() => {});
+    if (config.browserCdpUrl) {
+      // Keep the real Chrome process alive; only drop the Playwright connection.
+      await activePage?.close().catch(() => {});
+      await browser.close().catch(() => {});
+    } else {
+      await browser.close().catch(() => {});
+    }
   }
 }
 
