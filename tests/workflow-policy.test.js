@@ -127,6 +127,7 @@ test('macOS claim Chrome does not stop the user Chrome session', () => {
 
 test('extension preflight does not persist phone or browser profile data', () => {
   const script = fs.readFileSync(path.join(root, 'scripts/run-extension-preflight-claim.js'), 'utf8');
+  const background = fs.readFileSync(path.join(root, 'chrome-extension/slider-preflight/background.js'), 'utf8');
   const manifest = fs.readFileSync(path.join(root, 'chrome-extension/slider-preflight/manifest.json'), 'utf8');
   assert.match(script, /crypto\.randomBytes/);
   assert.match(script, /fs\.rmSync\(extensionDir/);
@@ -141,6 +142,9 @@ test('extension preflight does not persist phone or browser profile data', () =>
   assert.match(script, /detached:\s*true/);
   assert.doesNotMatch(script, /TELECOM_CDP_PORT \|\| 9222/);
   assert.doesNotMatch(script, /--headless/);
+  assert.match(background, /Network\.enable/);
+  assert.match(background, /Page\.captureScreenshot/);
+  assert.match(script, /extension-preflight-failed/);
 });
 
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {

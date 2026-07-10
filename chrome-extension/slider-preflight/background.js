@@ -25,6 +25,50 @@ async function evaluate(target, expression) {
   return result.result?.value;
 }
 
+function sliderEndpoint(url = '') {
+  if (url.includes('/getSliderChallenge')) return 'getSliderChallenge';
+  if (url.includes('/validSlider')) return 'validSlider';
+  if (url.includes('/sendRandByUnlog')) return 'sendRandByUnlog';
+  return '';
+}
+
+function createNetworkMonitor(tabId) {
+  const requests = new Map();
+  const events = [];
+  const listener = (source, method, params) => {
+    if (source.tabId !== tabId) return;
+    if (method === 'Network.requestWillBeSent') {
+      const endpoint = sliderEndpoint(params.request?.url || '');
+      if (endpoint) requests.set(params.requestId, { endpoint, method: params.request?.method || '' });
+      return;
+    }
+    const request = requests.get(params.requestId);
+    if (!request) return;
+    if (method === 'Network.responseReceived') {
+      events.push({ ...request, status: params.response?.status || 0, mimeType: params.response?.mimeType || '' });
+    } else if (method === 'Network.loadingFailed') {
+      events.push({ ...request, failed: true, error: String(params.errorText || '').slice(0, 80) });
+    }
+  };
+  chrome.debugger.onEvent.addListener(listener);
+  return {
+    snapshot: () => events.slice(-8),
+    stop: () => chrome.debugger.onEvent.removeListener(listener),
+  };
+}
+
+async function captureFailureScreenshot(target) {
+  try {
+    await send(target, 'Page.enable');
+    const screenshot = await send(target, 'Page.captureScreenshot', { format: 'png', fromSurface: true });
+    if (!screenshot?.data) return false;
+    const response = await fetch(`${PREFLIGHT_URL}/screenshot`, { method: 'POST', body: screenshot.data });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function waitForPhoneInput(target, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -73,10 +117,12 @@ async function clickSmsButton(target) {
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
-    const button = selectors.map(selector => document.querySelector(selector)).find(visible);
-    if (!button) return null;
+    const match = selectors.map(selector => ({ selector, button: document.querySelector(selector) }))
+      .find(candidate => visible(candidate.button));
+    if (!match) return null;
+    const button = match.button;
     const rect = button.getBoundingClientRect();
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, selector: match.selector };
   })()`);
   if (!point) return false;
   await send(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
@@ -84,7 +130,7 @@ async function clickSmsButton(target) {
   await send(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
   await sleep(120);
   await send(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-  return true;
+  return point;
 }
 
 async function waitForSlider(target, timeoutMs = 30000) {
@@ -93,9 +139,27 @@ async function waitForSlider(target, timeoutMs = 30000) {
     const state = await evaluate(target, `(() => {
       const bg = document.querySelector('#slider_bg_image');
       const block = document.querySelector('#slider_block_image');
+      const slider = document.querySelector('#slider_check,.slider-check-box');
       const message = document.querySelector('#slider_check_msg,.slider-check-msg,.puzzle-msg')?.innerText?.trim() || '';
       const ready = !!(bg?.complete && bg.naturalWidth > 40 && block?.complete && block.naturalWidth > 10);
-      return { ready, busy: !ready && /服务繁忙|请稍后再试/.test(message), message: message.slice(0, 80) };
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      return {
+        ready,
+        busy: !ready && /服务繁忙|请稍后再试/.test(message),
+        message: message.slice(0, 80),
+        sliderVisible: visible(slider),
+        bgPresent: !!bg,
+        blockPresent: !!block,
+        bgWidth: bg?.naturalWidth || 0,
+        blockWidth: block?.naturalWidth || 0,
+        webdriver: navigator.webdriver === true,
+        htmlLength: document.documentElement?.outerHTML?.length || 0,
+      };
     })()`);
     if (state?.ready || state?.busy) return state;
     await sleep(500);
@@ -265,11 +329,15 @@ async function submitLoginCode(target, code) {
 
 async function run() {
   let target = null;
+  let networkMonitor = null;
+  let smsClick = null;
   try {
     const config = await fetch(`${PREFLIGHT_URL}/config`).then(response => response.json());
     const tab = await chrome.tabs.create({ url: config.entryUrl, active: true });
     target = { tabId: tab.id };
     await chrome.debugger.attach(target, '1.3');
+    await send(target, 'Network.enable');
+    networkMonitor = createNetworkMonitor(tab.id);
     if (!await waitForPhoneInput(target)) throw new Error('phone-input-timeout');
     if (!await focusPhoneInput(target)) throw new Error('phone-input-missing');
     for (const digit of String(config.phone || '')) {
@@ -277,24 +345,46 @@ async function run() {
       await sleep(70 + Math.floor(Math.random() * 90));
     }
     await sleep(900 + Math.floor(Math.random() * 900));
-    if (!await clickSmsButton(target)) throw new Error('sms-button-missing');
+    smsClick = await clickSmsButton(target);
+    if (!smsClick) throw new Error('sms-button-missing');
     const slider = await waitForSlider(target);
     const solved = slider.ready ? await solveSlider(target) : { ok: false, reason: slider.message || 'slider-not-ready' };
     if (!solved.ok) {
+      await captureFailureScreenshot(target);
+      const diagnostic = {
+        clickSelector: smsClick.selector,
+        slider,
+        network: networkMonitor?.snapshot() || [],
+      };
+      networkMonitor?.stop();
+      networkMonitor = null;
       await chrome.debugger.detach(target).catch(() => {});
       target = null;
-      await postStatus({ stage: slider.busy ? 'slider-busy' : 'slider-timeout', message: solved.reason || slider.message });
+      await postStatus({
+        stage: slider.busy ? 'slider-busy' : 'slider-timeout',
+        message: solved.reason || slider.message,
+        diagnostic,
+      });
       return;
     }
     await postStatus({ stage: 'sms-sent' });
     const code = await waitForLoginCode();
     const loggedIn = await submitLoginCode(target, code);
+    networkMonitor?.stop();
+    networkMonitor = null;
     await chrome.debugger.detach(target).catch(() => {});
     target = null;
     await postStatus({ stage: loggedIn ? 'login-complete' : 'login-failed' });
   } catch (error) {
+    const diagnostic = { network: networkMonitor?.snapshot() || [] };
+    if (target) await captureFailureScreenshot(target);
+    networkMonitor?.stop();
     if (target) await chrome.debugger.detach(target).catch(() => {});
-    await postStatus({ stage: 'error', message: String(error?.message || error).slice(0, 120) }).catch(() => {});
+    await postStatus({
+      stage: 'error',
+      message: String(error?.message || error).slice(0, 120),
+      diagnostic,
+    }).catch(() => {});
   }
 }
 

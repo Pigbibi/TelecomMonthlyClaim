@@ -72,6 +72,10 @@ function runChild(command, args, options) {
   });
 }
 
+function diagnosticSuffix(status) {
+  return status?.diagnostic ? ` diagnostics=${JSON.stringify(status.diagnostic)}` : '';
+}
+
 async function main() {
   const chromeBin = resolveChromeBinary();
   if (!fs.existsSync(chromeBin)) throw new Error(`Chrome for Testing binary not found: ${chromeBin}`);
@@ -102,6 +106,20 @@ async function main() {
       request.on('data', chunk => { body += chunk; });
       request.on('end', () => {
         try { status = JSON.parse(body); } catch { status = { stage: 'error', message: 'invalid-status' }; }
+        response.writeHead(204).end();
+      });
+      return;
+    }
+    if (request.method === 'POST' && request.url === `${base}/screenshot`) {
+      let body = '';
+      request.on('data', chunk => {
+        body += chunk;
+        if (body.length > 12 * 1024 * 1024) request.destroy();
+      });
+      request.on('end', () => {
+        const artifactDir = path.join(root, 'artifacts', 'claim-debug');
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(path.join(artifactDir, `${Date.now()}-extension-preflight-failed.png`), Buffer.from(body, 'base64'));
         response.writeHead(204).end();
       });
       return;
@@ -167,7 +185,7 @@ async function main() {
     const deadline = Date.now() + settleMs;
     while (status.stage === 'starting' && Date.now() < deadline) await wait(500);
     if (status.stage !== 'sms-sent') {
-      throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}`);
+      throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}${diagnosticSuffix(status)}`);
     }
     const config = loadConfig();
     const sms = await new SmsInboxClient(config).waitForCode({
@@ -181,7 +199,7 @@ async function main() {
     const loginDeadline = Date.now() + 45000;
     while (status.stage === 'sms-sent' && Date.now() < loginDeadline) await wait(500);
     if (status.stage !== 'login-complete') {
-      throw new Error(`Chrome extension login failed: ${status.stage}${status.message ? ` (${status.message})` : ''}`);
+      throw new Error(`Chrome extension login failed: ${status.stage}${status.message ? ` (${status.message})` : ''}${diagnosticSuffix(status)}`);
     }
     console.log('Chrome extension login completed; handing the package page to the claim runner');
     const result = await runChild(process.execPath, [path.join(root, 'scripts', 'telecom-monthly-claim.js')], {
