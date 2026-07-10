@@ -44,7 +44,7 @@ function browserProfileContextOptions(profile = 'wechat') {
       ignoreHTTPSErrors: true,
       viewport: { width: 1280, height: 900 },
       extraHTTPHeaders: {
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Language': 'zh-CN,zh,en',
       },
     };
   }
@@ -151,7 +151,7 @@ async function applyCdpBrowserProfile(page, browserVersion = '', profile = 'wech
       };
   await cdp.send('Emulation.setUserAgentOverride', {
     userAgent,
-    acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
+    acceptLanguage: 'zh-CN,zh,en',
     platform: desktop ? 'macOS' : 'Android',
     userAgentMetadata,
   }).catch(() => {});
@@ -181,7 +181,7 @@ function mobileContextOptions(browserVersion) {
     ignoreHTTPSErrors: true,
     colorScheme: 'light',
     extraHTTPHeaders: {
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Accept-Language': 'zh-CN,zh,en',
     },
   };
 }

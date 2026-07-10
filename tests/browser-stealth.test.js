@@ -43,6 +43,7 @@ test('cdp browser profile applies mobile emulation overrides', async () => {
   assert.equal(commands[2][0], 'Emulation.setTouchEmulationEnabled');
   assert.equal(commands[2][1].enabled, true);
   assert.equal(commands[3][0], 'Emulation.setUserAgentOverride');
+  assert.equal(commands[3][1].acceptLanguage, 'zh-CN,zh,en');
   assert.match(commands[3][1].userAgent, /Android 13; Pixel 7/);
   assert.match(commands[3][1].userAgent, /Chrome\/150\.0\.7871\.46 Mobile/);
   assert.equal(commands[3][1].userAgentMetadata.mobile, true);
