@@ -15,11 +15,59 @@ function loadChromium() {
   return { chromium, driver: 'playwright' };
 }
 
+function shortenSecret(value, keep = 4) {
+  const text = String(value || '');
+  if (!text) return text;
+  if (text.length <= keep * 2) return '***';
+  return `${text.slice(0, keep)}****${text.slice(-keep)}`;
+}
+
+function maskUrlForLog(value) {
+  let out = String(value || '');
+  const patterns = [
+    /((?:campaignId|wxopenid|apwFree|fQbHda09|token|sign|openid|openId|authToken|accessToken)=)([^&\s"'`]+)/ig,
+    /(("?(?:campaignId|wxopenid|apwFree|fQbHda09|token|sign|openid|openId|authToken|accessToken)"?\s*:\s*"?))([^",\s}]+)/ig,
+  ];
+  for (const pattern of patterns) {
+    out = out.replace(pattern, (_match, prefix, secret) => `${prefix}${shortenSecret(secret)}`);
+  }
+  return out;
+}
+
+function summarizeCookieHeader(cookieHeader) {
+  const names = String(cookieHeader || '')
+    .split(';')
+    .map(part => part.trim().split('=')[0]?.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  return {
+    cookieCount: names.length,
+    cookieNames: names,
+  };
+}
+
+function summarizeHeadersForLog(headers = {}) {
+  const normalized = Object.fromEntries(
+    Object.entries(headers || {}).map(([key, value]) => [String(key || '').toLowerCase(), String(value || '')]),
+  );
+  return {
+    origin: maskUrlForLog(normalized.origin || ''),
+    referer: maskUrlForLog(normalized.referer || ''),
+    contentType: normalized['content-type'] || '',
+    xRequestedWith: normalized['x-requested-with'] || '',
+    secFetchSite: normalized['sec-fetch-site'] || '',
+    secFetchMode: normalized['sec-fetch-mode'] || '',
+    secFetchDest: normalized['sec-fetch-dest'] || '',
+    userAgent: (normalized['user-agent'] || '').slice(0, 140),
+    ...summarizeCookieHeader(normalized.cookie || ''),
+  };
+}
 
 function mask(s) {
   const phone = process.env.TELECOM_PHONE || '';
   let out = String(s || '').replace(/1\d{10}/g, m => `${m.slice(0, 3)}****${m.slice(7)}`);
   if (phone) out = out.replaceAll(phone, `${phone.slice(0, 3)}****${phone.slice(7)}`);
+  out = maskUrlForLog(out);
   return out.replace(/(code|smsCode|randCode|validCode)[:=]\s*\d{4,8}/ig, '$1=***');
 }
 
@@ -323,22 +371,45 @@ function attachSliderApiCapture(page) {
 
 function attachPageDiagnostics(page) {
   attachSliderApiCapture(page);
+  page.on('framenavigated', frame => {
+    if (frame !== page.mainFrame()) return;
+    if (!/wapbj\.189\.cn/i.test(frame.url())) return;
+    rememberPageDiagnostic(page, { type: 'frame', url: maskUrlForLog(frame.url()) });
+  });
   page.on('console', msg => {
     if (['error', 'warning'].includes(msg.type())) rememberPageDiagnostic(page, { type: `console:${msg.type()}`, text: msg.text().slice(0, 300) });
   });
   page.on('pageerror', err => rememberPageDiagnostic(page, { type: 'pageerror', text: err.message.slice(0, 300) }));
   page.on('requestfailed', request => {
-    if (/wapbj\.189\.cn/i.test(request.url())) rememberPageDiagnostic(page, { type: 'requestfailed', url: request.url(), error: request.failure()?.errorText || '' });
+    if (/wapbj\.189\.cn/i.test(request.url())) rememberPageDiagnostic(page, {
+      type: 'requestfailed',
+      url: maskUrlForLog(request.url()),
+      error: request.failure()?.errorText || '',
+    });
   });
   page.on('response', response => {
     if (!/wapbj\.189\.cn/i.test(response.url())) return;
-    if (response.status() < 400 && !/preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog/i.test(response.url())) return;
-    const entry = { type: 'response', url: response.url(), status: response.status() };
-    rememberPageDiagnostic(page, entry);
-    if (!/preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog/i.test(response.url())) return;
-    response.text()
-      .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
-      .catch(() => {});
+    const interesting = /preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog|preDepositHighPic_check|preDepositHigh_login/i.test(response.url());
+    if (response.status() < 400 && !interesting) return;
+    Promise.resolve().then(async () => {
+      const request = response.request();
+      const headers = await request.allHeaders().catch(() => request.headers());
+      const entry = {
+        type: 'response',
+        url: maskUrlForLog(response.url()),
+        status: response.status(),
+        method: request.method(),
+        resourceType: request.resourceType(),
+        frameUrl: maskUrlForLog(request.frame()?.url?.() || response.frame()?.url?.() || ''),
+        postDataLength: (request.postData() || '').length,
+        requestHeaders: summarizeHeadersForLog(headers),
+      };
+      rememberPageDiagnostic(page, entry);
+      if (!/preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog/i.test(response.url())) return;
+      response.text()
+        .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
+        .catch(() => {});
+    }).catch(() => {});
   });
 }
 
@@ -2296,5 +2367,8 @@ module.exports = {
   advanceLoginGoal,
   advanceClaimGoal,
   chooseSliderDistanceCandidate,
+  maskUrlForLog,
+  summarizeCookieHeader,
+  summarizeHeadersForLog,
   waitForTelecomApiReady,
 };

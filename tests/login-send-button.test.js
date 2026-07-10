@@ -9,6 +9,9 @@ const {
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  maskUrlForLog,
+  summarizeCookieHeader,
+  summarizeHeadersForLog,
 } = require('../scripts/telecom-monthly-claim');
 
 function fakePage(visibleSelectors) {
@@ -202,6 +205,42 @@ test('classifies blank telecom slider challenge as WAF rejection', () => {
     isTelecomWafRejection(new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400')),
     true,
   );
+});
+
+test('masks sensitive telecom query parameters in logged urls', () => {
+  const masked = maskUrlForLog('https://wapbj.189.cn/path?campaignId=16239231179147085&wxopenid=abcdef1234567890&apwFree=17144433318773256&fQbHda09=tokenvalue123456');
+
+  assert.match(masked, /campaignId=1623\*\*\*\*7085/);
+  assert.match(masked, /wxopenid=abcd\*\*\*\*7890/);
+  assert.match(masked, /apwFree=1714\*\*\*\*3256/);
+  assert.match(masked, /fQbHda09=toke\*\*\*\*3456/);
+});
+
+test('summarizes cookie header without exposing cookie values', () => {
+  assert.deepEqual(
+    summarizeCookieHeader('a=1; csrftoken=abc; telecom_session=xyz'),
+    {
+      cookieCount: 3,
+      cookieNames: ['a', 'csrftoken', 'telecom_session'],
+    },
+  );
+});
+
+test('summarizes selected request headers for diagnostics', () => {
+  const summary = summarizeHeadersForLog({
+    Origin: 'https://wapbj.189.cn',
+    Referer: 'https://wapbj.189.cn/path?wxopenid=abcdef1234567890',
+    Cookie: 'a=1; csrftoken=abc',
+    'User-Agent': 'Mozilla/5.0 test',
+    'Sec-Fetch-Site': 'same-origin',
+  });
+
+  assert.equal(summary.origin, 'https://wapbj.189.cn');
+  assert.match(summary.referer, /wxopenid=abcd\*\*\*\*7890/);
+  assert.equal(summary.cookieCount, 2);
+  assert.deepEqual(summary.cookieNames, ['a', 'csrftoken']);
+  assert.equal(summary.userAgent, 'Mozilla/5.0 test');
+  assert.equal(summary.secFetchSite, 'same-origin');
 });
 
 test('preActiveMeta HTTP 400 fails fast without reloading', async () => {
