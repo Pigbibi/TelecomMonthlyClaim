@@ -4,7 +4,7 @@
     "claim": "node scripts/telecom-monthly-claim.js",
     "debug:pushplus": "node scripts/debug-pushplus-inbox.js",
     "sms-server": "node scripts/sms-inbox-server.js",
-    "lint": "node --check scripts/telecom-monthly-claim.js && node --check scripts/audit-slider-distance.js && node --check scripts/debug-pushplus-inbox.js && node --check scripts/sms-inbox-server.js && node --check scripts/create-failure-issue.js && node --check scripts/resolve-run-log-outcome.js && node --check src/*.js && bash -n scripts/write-run-log-branch.sh && bash -n scripts/start-chrome-cdp.sh && bash -n scripts/start-chrome-cdp-linux.sh && bash -n scripts/run-real-chrome-claim.sh",
+    "lint": "node --check scripts/telecom-monthly-claim.js && node --check scripts/run-extension-preflight-claim.js && node --check chrome-extension/slider-preflight/background.js && node --check scripts/audit-slider-distance.js && node --check scripts/debug-pushplus-inbox.js && node --check scripts/sms-inbox-server.js && node --check scripts/create-failure-issue.js && node --check scripts/resolve-run-log-outcome.js && node --check src/*.js && bash -n scripts/write-run-log-branch.sh && bash -n scripts/start-chrome-cdp.sh && bash -n scripts/start-chrome-cdp-linux.sh && bash -n scripts/run-real-chrome-claim.sh",
     "chrome:cdp": "bash scripts/start-chrome-cdp.sh",
     "chrome:cdp:linux": "bash scripts/start-chrome-cdp-linux.sh",
     "claim:cdp": "DRY_RUN_BEFORE_FINAL_SUBMIT=true bash scripts/run-real-chrome-claim.sh",

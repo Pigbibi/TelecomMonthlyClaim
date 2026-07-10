@@ -10,7 +10,7 @@ TRANSPORT="${TELECOM_BROWSER_TRANSPORT:-auto}"
 
 if [ "$TRANSPORT" = "auto" ]; then
   if [ "$OS_NAME" = "Darwin" ]; then
-    TRANSPORT=playwright
+    TRANSPORT=extension
   else
     TRANSPORT=cdp
   fi
@@ -30,6 +30,17 @@ PROBE_ONLY="${TELECOM_PROBE_ONLY:-false}"
 
 if [ "${TELECOM_MINIMAL_LOGIN}" = "true" ] && [ "${TELECOM_ALLOW_MULTI_SEND_RETRY:-false}" != "true" ]; then
   export SEND_CODE_ATTEMPTS=1
+fi
+
+if [ "$TRANSPORT" = "extension" ]; then
+  unset BROWSER_CDP_URL
+  if [ "$PROBE_ONLY" = "true" ]; then
+    node "$ROOT_DIR/scripts/validate-entry-page.js"
+    echo "Entry probe completed; skipping SMS send and claim."
+    exit 0
+  fi
+  node "$ROOT_DIR/scripts/run-extension-preflight-claim.js"
+  exit $?
 fi
 
 if [ "$TRANSPORT" = "playwright" ]; then

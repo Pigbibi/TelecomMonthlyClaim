@@ -95,7 +95,7 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /Run claim via real Chrome CDP/);
   assert.match(localWorkflowText, /bash scripts\/run-real-chrome-claim\.sh/);
   assert.match(localWorkflowText, /TELECOM_CDP_PROFILE_MODE: "native"/);
-  assert.match(localWorkflowText, /TELECOM_BROWSER_TRANSPORT: "playwright"/);
+  assert.match(localWorkflowText, /TELECOM_BROWSER_TRANSPORT: "extension"/);
   assert.match(localWorkflowText, /TELECOM_BROWSER_PROFILE: "desktop"/);
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "0"/);
   assert.match(localWorkflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "true"/);
@@ -123,6 +123,15 @@ test('macOS claim Chrome does not stop the user Chrome session', () => {
   assert.doesNotMatch(startScript, /tell application "Google Chrome" to quit/);
   assert.doesNotMatch(startScript, /pkill -x "Google Chrome"/);
   assert.match(startScript, /\.telecom-claim-chrome/);
+});
+
+test('extension preflight does not persist phone or browser profile data', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts/run-extension-preflight-claim.js'), 'utf8');
+  const manifest = fs.readFileSync(path.join(root, 'chrome-extension/slider-preflight/manifest.json'), 'utf8');
+  assert.match(script, /crypto\.randomBytes/);
+  assert.match(script, /fs\.rmSync\(extensionDir/);
+  assert.match(script, /fs\.rmSync\(profileDir/);
+  assert.doesNotMatch(manifest, /TELECOM_PHONE|185\d{8}/);
 });
 
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {

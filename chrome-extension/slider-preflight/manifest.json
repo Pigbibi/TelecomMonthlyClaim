@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Telecom Slider Preflight",
+  "version": "1.0.0",
+  "permissions": ["debugger", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://wapbj.189.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
