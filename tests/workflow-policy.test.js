@@ -66,6 +66,9 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /Verify local Google Chrome for real-browser CDP/);
   assert.match(workflowText, /runner\.os == 'macOS'/);
   assert.match(workflowText, /runner\.os == 'Linux'/);
+  assert.match(workflowText, /Cleanup stale self-hosted git refs/);
+  assert.match(workflowText, /runner\.environment == 'self-hosted'/);
+  assert.match(workflowText, /find "\$GITHUB_WORKSPACE\/\.git\/refs" -type f -name '\* \*' -print -delete/);
   assert.match(workflowText, /XVFB_PID/);
   assert.doesNotMatch(workflowText, /playwright install/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);

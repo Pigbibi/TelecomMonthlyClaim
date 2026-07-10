@@ -86,6 +86,14 @@ jobs:
       DRY_RUN_BEFORE_FINAL_SUBMIT: ${{ github.event.inputs.dry_run || 'false' }}
 
     steps:
+      - name: Cleanup stale self-hosted git refs
+        if: runner.environment == 'self-hosted'
+        run: |
+          set -euo pipefail
+          if [ -d "$GITHUB_WORKSPACE/.git/refs" ]; then
+            find "$GITHUB_WORKSPACE/.git/refs" -type f -name '* *' -print -delete || true
+          fi
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
