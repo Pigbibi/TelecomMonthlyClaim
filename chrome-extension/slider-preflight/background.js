@@ -353,7 +353,7 @@ async function run() {
     if (!smsClick) throw new Error('sms-button-missing');
     await postStatus({ stage: 'sms-clicked' });
     const slider = await waitForSlider(target);
-    if (slider.ready) await postStatus({ stage: 'slider-ready' });
+    if (slider.ready) await postStatus({ stage: 'slider-ready', diagnostic: { slider } });
     const solved = slider.ready
       ? await solveSlider(target)
       : { ok: false, reason: slider.message || 'slider-not-ready' };

@@ -130,6 +130,7 @@ async function main() {
       request.on('end', () => {
         try { status = JSON.parse(body); } catch { status = { stage: 'error', message: 'invalid-status' }; }
         statusUpdatedAt = Date.now();
+        console.log(`Chrome extension stage: ${status.stage}${diagnosticSuffix(status)}`);
         response.writeHead(204).end();
       });
       return;
