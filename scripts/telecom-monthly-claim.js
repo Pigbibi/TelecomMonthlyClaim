@@ -657,7 +657,7 @@ async function ensureSmsLoginForm(page, config) {
     phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, smsFormWaitMs);
     if (phoneField) return phoneField;
 
-    if (hasProxyTunnelFailures(page) && attempt < 3) {
+    if (!config?.minimalLogin && hasProxyTunnelFailures(page) && attempt < 3) {
       log('SMS login form not ready after proxy tunnel failures; reloading login entry', { attempt });
       await gotoLoginEntryPage(page, config, `sms-form-proxy-retry-${attempt}`);
       continue;
