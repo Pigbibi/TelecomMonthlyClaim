@@ -59,8 +59,12 @@ function summarizeHeadersForLog(headers = {}) {
   return {
     origin: maskUrlForLog(normalized.origin || ''),
     referer: maskUrlForLog(normalized.referer || ''),
+    accept: (normalized.accept || '').slice(0, 160),
+    acceptLanguage: (normalized['accept-language'] || '').slice(0, 120),
     contentType: normalized['content-type'] || '',
     xRequestedWith: normalized['x-requested-with'] || '',
+    dnt: normalized.dnt || '',
+    fqbhda09: shortenSecret(normalized.fqbhda09 || ''),
     secChUa: (normalized['sec-ch-ua'] || '').slice(0, 160),
     secChUaMobile: normalized['sec-ch-ua-mobile'] || '',
     secChUaPlatform: normalized['sec-ch-ua-platform'] || '',
@@ -562,6 +566,34 @@ async function attachSliderSubmitHook(page) {
   });
 }
 
+function normalizePageUrlForReuse(value) {
+  try {
+    const url = new URL(String(value || ''));
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return String(value || '');
+  }
+}
+
+function pageMatchesEntryUrl(pageUrl, entryUrl) {
+  const left = normalizePageUrlForReuse(pageUrl);
+  const right = normalizePageUrlForReuse(entryUrl);
+  return !!left && !!right && left === right;
+}
+
+function findReusableCdpEntryPage(context, entryUrl) {
+  if (!context || !entryUrl) return null;
+  const pages = typeof context.pages === 'function' ? context.pages() : [];
+  return [...pages]
+    .reverse()
+    .find(page => {
+      if (!page || typeof page.url !== 'function') return false;
+      if (typeof page.isClosed === 'function' && page.isClosed()) return false;
+      return pageMatchesEntryUrl(page.url(), entryUrl);
+    }) || null;
+}
+
 async function openCdpClaimPage(browser, config = {}) {
   const context = browser.contexts()?.[0];
   if (!context) throw new Error('CDP browser has no default context');
@@ -570,7 +602,10 @@ async function openCdpClaimPage(browser, config = {}) {
   if (!config.minimalLogin) {
     await installTelecomPagePatches(context);
   }
-  const page = await context.newPage();
+  const reusedPage = process.env.TELECOM_REUSE_VALIDATED_PAGE !== 'false'
+    ? findReusableCdpEntryPage(context, config.entryUrl)
+    : null;
+  const page = reusedPage || await context.newPage();
   const cdpProfile = await applyCdpBrowserProfile(page, browser.version(), config.browserProfile || 'wechat', {
     mode: config.cdpProfileMode || 'auto',
     minimalLogin: !!config.minimalLogin,
@@ -587,6 +622,8 @@ async function openCdpClaimPage(browser, config = {}) {
   page.setDefaultNavigationTimeout(45000);
   log('Opened CDP page on default Chrome context', {
     contexts: browser.contexts().length,
+    reusedValidatedPage: !!reusedPage,
+    pageUrl: page.url(),
     viewport: page.viewportSize(),
     browserProfile: config.browserProfile || 'wechat',
     cdpProfileMode: cdpProfile?.mode || config.cdpProfileMode || 'auto',
@@ -1409,6 +1446,41 @@ async function gotoLoginEntryPage(page, config, reason) {
   }
   for (const candidate of candidates) {
     if (config.minimalLogin) {
+      if (pageMatchesEntryUrl(page.url(), candidate.url)) {
+        const entryReady = await waitForLoginEntry(page, 8000);
+        const form = await detectLoginFormState(page);
+        if (entryReady) {
+          await warmupTelecomBehavior(page, config);
+          log('Reused validated login entry page', {
+            reason,
+            strategy: `${candidate.label}-reuse`,
+            url: page.url(),
+            minimalLogin: true,
+            pageState: form.pageState,
+            confidence: form.pageStateConfidence,
+            pageStateReason: form.pageStateReason,
+            htmlLength: form.htmlLength,
+            entryReady,
+            phone: form.phone,
+            code: form.code,
+            send: form.send,
+          });
+          return;
+        }
+        log('Validated entry page no longer ready; reloading', {
+          reason,
+          strategy: `${candidate.label}-reuse`,
+          url: page.url(),
+          pageState: form.pageState,
+          confidence: form.pageStateConfidence,
+          pageStateReason: form.pageStateReason,
+          htmlLength: form.htmlLength,
+          bodyLength: form.bodyLength,
+          phone: form.phone,
+          code: form.code,
+          send: form.send,
+        });
+      }
       // Exact timing from scripts/verify-minimal-login-slider.js (proven getSliderChallenge 200).
       const response = await page.goto(candidate.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(err => {
         rememberPageDiagnostic(page, { type: 'goto-error', url: candidate.url, error: err.message });
@@ -2484,7 +2556,9 @@ module.exports = {
   advanceLoginGoal,
   advanceClaimGoal,
   chooseSliderDistanceCandidate,
+  findReusableCdpEntryPage,
   maskUrlForLog,
+  pageMatchesEntryUrl,
   summarizeCookieHeader,
   summarizeHeadersForLog,
   summarizePostDataForLog,

@@ -20,6 +20,7 @@ const browserProfile = (process.env.TELECOM_BROWSER_PROFILE || 'wechat').toLower
 const browserCdpUrl = process.env.BROWSER_CDP_URL || '';
 const cdpProfileMode = (process.env.TELECOM_CDP_PROFILE_MODE || 'auto').toLowerCase();
 const minimalLogin = process.env.TELECOM_MINIMAL_LOGIN === 'true';
+const keepValidatedPageOpen = process.env.TELECOM_KEEP_VALIDATED_PAGE_OPEN !== 'false';
 
 async function readPageRenderState(page) {
   try {
@@ -112,7 +113,9 @@ async function validateEntry({ label, proxyServer }) {
     screenshot,
   };
   console.log(JSON.stringify(result));
-  await page.close().catch(() => {});
+  if (!(mode === 'cdp' && keepValidatedPageOpen && pass)) {
+    await page.close().catch(() => {});
+  }
   if (mode !== 'cdp') await context.close();
   return pass;
 }

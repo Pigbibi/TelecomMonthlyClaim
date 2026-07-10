@@ -5,11 +5,13 @@ const {
   clickLoginSmsButton,
   detectLoginFormState,
   ensureSmsLoginForm,
+  findReusableCdpEntryPage,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
   maskUrlForLog,
+  pageMatchesEntryUrl,
   summarizeCookieHeader,
   summarizeHeadersForLog,
   summarizePostDataForLog,
@@ -232,8 +234,12 @@ test('summarizes selected request headers for diagnostics', () => {
   const summary = summarizeHeadersForLog({
     Origin: 'https://wapbj.189.cn',
     Referer: 'https://wapbj.189.cn/path?wxopenid=abcdef1234567890',
+    Accept: '*/*',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
     Cookie: 'a=1; csrftoken=abc',
     'User-Agent': 'Mozilla/5.0 test',
+    DNT: '1',
+    fqbhda09: 'token-value-123456',
     'Sec-CH-UA': '"Chromium";v="131"',
     'Sec-CH-UA-Mobile': '?1',
     'Sec-CH-UA-Platform': '"Android"',
@@ -245,9 +251,13 @@ test('summarizes selected request headers for diagnostics', () => {
 
   assert.equal(summary.origin, 'https://wapbj.189.cn');
   assert.match(summary.referer, /wxopenid=abcd\*\*\*\*7890/);
+  assert.equal(summary.accept, '*/*');
+  assert.equal(summary.acceptLanguage, 'zh-CN,zh;q=0.9');
   assert.equal(summary.cookieCount, 2);
   assert.deepEqual(summary.cookieNames, ['a', 'csrftoken']);
   assert.equal(summary.userAgent, 'Mozilla/5.0 test');
+  assert.equal(summary.dnt, '1');
+  assert.equal(summary.fqbhda09, 'toke****3456');
   assert.equal(summary.secChUa, '"Chromium";v="131"');
   assert.equal(summary.secChUaMobile, '?1');
   assert.equal(summary.secChUaPlatform, '"Android"');
@@ -264,6 +274,38 @@ test('summarizes telecom request post data without exposing secrets', () => {
   assert.deepEqual(summary.keys, ['accNo', 'validType', 'wxopenid']);
   assert.match(summary.preview, /138\*\*\*\*8000/);
   assert.match(summary.preview, /abcd\*\*\*\*7890/);
+});
+
+test('matches reusable entry page urls after normalization', () => {
+  assert.equal(
+    pageMatchesEntryUrl(
+      'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1#section',
+      'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1',
+    ),
+    true,
+  );
+  assert.equal(
+    pageMatchesEntryUrl(
+      'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=2',
+      'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1',
+    ),
+    false,
+  );
+});
+
+test('reuses the latest matching validated CDP entry page', () => {
+  const earlier = { url: () => 'https://example.test/', isClosed: () => false };
+  const match1 = { url: () => 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1', isClosed: () => false };
+  const match2 = { url: () => 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1#ready', isClosed: () => false };
+  const closed = { url: () => 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1', isClosed: () => true };
+  const context = {
+    pages: () => [earlier, match1, closed, match2],
+  };
+
+  assert.equal(
+    findReusableCdpEntryPage(context, 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1'),
+    match2,
+  );
 });
 
 test('summarizes telecom response headers and set-cookie names', () => {
