@@ -60,7 +60,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
   assert.match(workflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
   assert.match(workflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
-  assert.match(workflowText, /SEND_CODE_ATTEMPTS: \$\{\{ vars\.SEND_CODE_ATTEMPTS \|\| '1' \}\}/);
+  assert.match(workflowText, /SEND_CODE_ATTEMPTS: "1"/);
   assert.match(workflowText, /local_selfhosted/);
   assert.match(workflowText, /github\.event_name == 'schedule'/);
   assert.match(workflowText, /runner_target != 'github_hosted'/);
@@ -89,7 +89,7 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
   assert.match(localWorkflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
   assert.match(localWorkflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
-  assert.match(localWorkflowText, /SEND_CODE_ATTEMPTS: \$\{\{ vars\.SEND_CODE_ATTEMPTS \|\| '1' \}\}/);
+  assert.match(localWorkflowText, /SEND_CODE_ATTEMPTS: "1"/);
   assert.match(localWorkflowText, /PUSHPLUS_RELAY_INBOX_TOKEN/);
   assert.match(localWorkflowText, /Upload claim debug screenshots/);
   assert.doesNotMatch(localWorkflowText, /git push origin HEAD:main/);

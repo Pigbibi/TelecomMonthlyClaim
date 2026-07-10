@@ -257,7 +257,11 @@ test('summarizes selected request headers for diagnostics', () => {
   assert.deepEqual(summary.cookieNames, ['a', 'csrftoken']);
   assert.equal(summary.userAgent, 'Mozilla/5.0 test');
   assert.equal(summary.dnt, '1');
-  assert.equal(summary.fqbhda09, 'toke****3456');
+  assert.deepEqual(summary.antiBotHeader, {
+    present: true,
+    length: 18,
+    masked: 'toke****3456',
+  });
   assert.equal(summary.secChUa, '"Chromium";v="131"');
   assert.equal(summary.secChUaMobile, '?1');
   assert.equal(summary.secChUaPlatform, '"Android"');

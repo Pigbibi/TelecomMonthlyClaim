@@ -52,6 +52,15 @@ function summarizeCookieHeader(cookieHeader) {
   };
 }
 
+function summarizeOpaqueHeaderForLog(value = '') {
+  const text = String(value || '').trim();
+  return {
+    present: !!text,
+    length: text.length,
+    masked: text ? shortenSecret(text) : '',
+  };
+}
+
 function summarizeHeadersForLog(headers = {}) {
   const normalized = Object.fromEntries(
     Object.entries(headers || {}).map(([key, value]) => [String(key || '').toLowerCase(), String(value || '')]),
@@ -64,7 +73,7 @@ function summarizeHeadersForLog(headers = {}) {
     contentType: normalized['content-type'] || '',
     xRequestedWith: normalized['x-requested-with'] || '',
     dnt: normalized.dnt || '',
-    fqbhda09: shortenSecret(normalized.fqbhda09 || ''),
+    antiBotHeader: summarizeOpaqueHeaderForLog(normalized.fqbhda09 || ''),
     secChUa: (normalized['sec-ch-ua'] || '').slice(0, 160),
     secChUaMobile: normalized['sec-ch-ua-mobile'] || '',
     secChUaPlatform: normalized['sec-ch-ua-platform'] || '',
