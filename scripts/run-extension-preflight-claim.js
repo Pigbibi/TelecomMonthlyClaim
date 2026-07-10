@@ -76,6 +76,28 @@ function diagnosticSuffix(status) {
   return status?.diagnostic ? ` diagnostics=${JSON.stringify(status.diagnostic)}` : '';
 }
 
+async function captureCdpFailureScreenshot(cdpUrl) {
+  let browser;
+  try {
+    const { chromium } = require('playwright');
+    browser = await chromium.connectOverCDP(cdpUrl, { timeout: 10000 });
+    const pages = browser.contexts().flatMap(context => context.pages());
+    const page = pages.find(candidate => candidate.url().startsWith('https://wapbj.189.cn/'));
+    if (!page) return false;
+    const artifactDir = path.join(root, 'artifacts', 'claim-debug');
+    fs.mkdirSync(artifactDir, { recursive: true });
+    await page.screenshot({
+      path: path.join(artifactDir, `${Date.now()}-chrome-session-failed.png`),
+      fullPage: false,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+}
+
 async function main() {
   const chromeBin = resolveChromeBinary();
   if (!fs.existsSync(chromeBin)) throw new Error(`Chrome for Testing binary not found: ${chromeBin}`);
@@ -183,8 +205,17 @@ async function main() {
     await waitForTelecomPage(cdpUrl, timeoutMs);
     const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 60000);
     const deadline = Date.now() + settleMs;
-    while (status.stage === 'starting' && Date.now() < deadline) await wait(500);
+    const pendingStages = new Set([
+      'starting',
+      'tab-opened',
+      'debugger-attached',
+      'network-ready',
+      'phone-ready',
+      'sms-clicked',
+    ]);
+    while (pendingStages.has(status.stage) && Date.now() < deadline) await wait(500);
     if (status.stage !== 'sms-sent') {
+      await captureCdpFailureScreenshot(cdpUrl);
       throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}${diagnosticSuffix(status)}`);
     }
     const config = loadConfig();

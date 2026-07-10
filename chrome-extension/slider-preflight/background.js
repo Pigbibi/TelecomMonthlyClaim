@@ -335,10 +335,14 @@ async function run() {
     const config = await fetch(`${PREFLIGHT_URL}/config`).then(response => response.json());
     const tab = await chrome.tabs.create({ url: config.entryUrl, active: true });
     target = { tabId: tab.id };
+    await postStatus({ stage: 'tab-opened' });
     await chrome.debugger.attach(target, '1.3');
+    await postStatus({ stage: 'debugger-attached' });
     await send(target, 'Network.enable');
     networkMonitor = createNetworkMonitor(tab.id);
+    await postStatus({ stage: 'network-ready' });
     if (!await waitForPhoneInput(target)) throw new Error('phone-input-timeout');
+    await postStatus({ stage: 'phone-ready' });
     if (!await focusPhoneInput(target)) throw new Error('phone-input-missing');
     for (const digit of String(config.phone || '')) {
       await send(target, 'Input.insertText', { text: digit });
@@ -347,6 +351,7 @@ async function run() {
     await sleep(900 + Math.floor(Math.random() * 900));
     smsClick = await clickSmsButton(target);
     if (!smsClick) throw new Error('sms-button-missing');
+    await postStatus({ stage: 'sms-clicked' });
     const slider = await waitForSlider(target);
     const solved = slider.ready ? await solveSlider(target) : { ok: false, reason: slider.message || 'slider-not-ready' };
     if (!solved.ok) {
