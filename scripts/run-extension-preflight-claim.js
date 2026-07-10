@@ -108,6 +108,7 @@ async function main() {
   const cdpPort = requestedCdpPort || await getFreeTcpPort();
   const token = crypto.randomBytes(24).toString('hex');
   let status = { stage: 'starting' };
+  let statusUpdatedAt = Date.now();
   let loginCode = '';
   const smsSince = Date.now() - 10000;
   const server = http.createServer((request, response) => {
@@ -128,6 +129,7 @@ async function main() {
       request.on('data', chunk => { body += chunk; });
       request.on('end', () => {
         try { status = JSON.parse(body); } catch { status = { stage: 'error', message: 'invalid-status' }; }
+        statusUpdatedAt = Date.now();
         response.writeHead(204).end();
       });
       return;
@@ -203,7 +205,8 @@ async function main() {
     await waitForCdp(cdpUrl);
     console.log(`Fresh headed Chrome session ready on an isolated CDP port (${cdpPort})`);
     await waitForTelecomPage(cdpUrl, timeoutMs);
-    const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 60000);
+    const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 180000);
+    const stageTimeoutMs = Number(process.env.TELECOM_EXTENSION_STAGE_TIMEOUT_MS || 90000);
     const deadline = Date.now() + settleMs;
     const pendingStages = new Set([
       'starting',
@@ -212,8 +215,13 @@ async function main() {
       'network-ready',
       'phone-ready',
       'sms-clicked',
+      'slider-ready',
     ]);
-    while (pendingStages.has(status.stage) && Date.now() < deadline) await wait(500);
+    while (
+      pendingStages.has(status.stage)
+      && Date.now() < deadline
+      && Date.now() - statusUpdatedAt < stageTimeoutMs
+    ) await wait(500);
     if (status.stage !== 'sms-sent') {
       await captureCdpFailureScreenshot(cdpUrl);
       throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}${diagnosticSuffix(status)}`);

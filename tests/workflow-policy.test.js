@@ -146,8 +146,10 @@ test('extension preflight does not persist phone or browser profile data', () =>
   assert.match(background, /Page\.captureScreenshot/);
   assert.match(background, /stage: 'tab-opened'/);
   assert.match(background, /stage: 'debugger-attached'/);
+  assert.match(background, /stage: 'slider-ready'/);
   assert.match(script, /extension-preflight-failed/);
   assert.match(script, /connectOverCDP/);
+  assert.match(script, /TELECOM_EXTENSION_STAGE_TIMEOUT_MS/);
 });
 
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {
