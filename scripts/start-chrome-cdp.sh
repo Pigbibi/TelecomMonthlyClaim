@@ -19,6 +19,7 @@ REAL_COPY="${TELECOM_REAL_PROFILE_COPY:-$HOME/.telecom-claim-chrome-real}"
 SRC_PROFILE="${TELECOM_SRC_CHROME_PROFILE:-$HOME/Library/Application Support/Google/Chrome}"
 DISABLE_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-true}"
 FORCE_FRESH="${TELECOM_FORCE_FRESH_CDP_SESSION:-true}"
+REUSE_PROFILE="${TELECOM_REUSE_CDP_PROFILE:-false}"
 PROFILE_TEMP=false
 
 if [ -z "$USE_DEFAULT" ] && [ -z "$PROFILE" ]; then
@@ -73,7 +74,9 @@ if [ "$USE_DEFAULT" = "1" ] || [ "$USE_DEFAULT" = "true" ]; then
   ARGS+=(--user-data-dir="${REAL_COPY}")
   echo "Starting real-profile copy with CDP only: ${ARGS[*]}"
 else
-  if [ -z "${TELECOM_CHROME_PROFILE:-}" ] && { [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; }; then
+  if [ -z "${TELECOM_CHROME_PROFILE:-}" ] \
+    && { [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; } \
+    && [ "$REUSE_PROFILE" != "1" ] && [ "$REUSE_PROFILE" != "true" ]; then
     PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/telecom-claim-profile.XXXXXX")"
     PROFILE_TEMP=true
   elif [ -z "$PROFILE" ]; then

@@ -17,6 +17,7 @@ const browserCdpUrl = process.env.BROWSER_CDP_URL || '';
 const cdpProfileMode = (process.env.TELECOM_CDP_PROFILE_MODE || 'auto').toLowerCase();
 const minimalLogin = process.env.TELECOM_MINIMAL_LOGIN === 'true';
 const keepValidatedPageOpen = process.env.TELECOM_KEEP_VALIDATED_PAGE_OPEN !== 'false';
+const clearBrowserData = process.env.TELECOM_CLEAR_BROWSER_DATA === 'true';
 
 function isEntryRenderReady(state) {
   return state.htmlLength > 3000 && (state.bodyLength > 20 || state.visiblePhoneInputs > 0);
@@ -31,6 +32,18 @@ function buildValidationCases() {
   if (proxyServer) cases.push({ label: 'proxy', proxyServer });
   else if (process.env.VALIDATE_BWG_PROXY === 'true') cases.push({ label: 'bwg', proxyServer: 'http://127.0.0.1:13128' });
   return cases;
+}
+
+async function clearEntryBrowserData(context, page, url) {
+  await context.clearCookies();
+  const session = await context.newCDPSession(page);
+  try {
+    await session.send('Network.clearBrowserCache');
+    const origin = new URL(url).origin;
+    await session.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' });
+  } finally {
+    await session.detach().catch(() => {});
+  }
 }
 
 async function readPageRenderState(page) {
@@ -75,6 +88,10 @@ async function openClaimPage({ label, proxyServer }) {
     const context = browser.contexts()?.[0];
     if (!context) throw new Error('CDP browser has no default context');
     const page = await context.newPage();
+    if (clearBrowserData) {
+      await clearEntryBrowserData(context, page, entryUrl);
+      console.log('Cleared dedicated Chrome cookies, cache, and Telecom origin storage');
+    }
     await applyCdpBrowserProfile(page, browser.version(), browserProfile, {
       mode: cdpProfileMode,
       minimalLogin,
@@ -160,4 +177,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { isEntryRenderReady };
+module.exports = { clearEntryBrowserData, isEntryRenderReady };
