@@ -22,6 +22,17 @@ const cdpProfileMode = (process.env.TELECOM_CDP_PROFILE_MODE || 'auto').toLowerC
 const minimalLogin = process.env.TELECOM_MINIMAL_LOGIN === 'true';
 const keepValidatedPageOpen = process.env.TELECOM_KEEP_VALIDATED_PAGE_OPEN !== 'false';
 
+function buildValidationCases() {
+  const proxyServer = process.env.OPENWRT_HTTP_PROXY || '';
+  if (browserCdpUrl) {
+    return [{ label: proxyServer ? 'proxy' : 'direct', proxyServer }];
+  }
+  const cases = [{ label: 'direct', proxyServer: '' }];
+  if (proxyServer) cases.push({ label: 'proxy', proxyServer });
+  else if (process.env.VALIDATE_BWG_PROXY === 'true') cases.push({ label: 'bwg', proxyServer: 'http://127.0.0.1:13128' });
+  return cases;
+}
+
 async function readPageRenderState(page) {
   try {
     return await page.evaluate(() => ({
@@ -121,13 +132,7 @@ async function validateEntry({ label, proxyServer }) {
 }
 
 (async () => {
-  const cases = [{ label: 'direct', proxyServer: '' }];
-  if (process.env.OPENWRT_HTTP_PROXY) {
-    cases.push({ label: 'proxy', proxyServer: process.env.OPENWRT_HTTP_PROXY });
-  } else if (process.env.VALIDATE_BWG_PROXY === 'true') {
-    cases.push({ label: 'bwg', proxyServer: 'http://127.0.0.1:13128' });
-  }
-
+  const cases = buildValidationCases();
   let ok = true;
   for (const item of cases) {
     try {

@@ -2,7 +2,7 @@
 # macOS: start Chrome for claim CDP with the closest-to-real profile possible.
 #
 # Modes:
-#   TELECOM_USE_DEFAULT_CHROME=1  (default if no TELECOM_CHROME_PROFILE)
+#   TELECOM_USE_DEFAULT_CHROME=1
 #     Copy the user's Default Chrome profile into ~/.telecom-claim-chrome-real
 #     and launch that copy with ONLY --remote-debugging-port.
 #     (Directly attaching CDP to the live Default profile is unreliable on macOS
@@ -22,7 +22,7 @@ FORCE_FRESH="${TELECOM_FORCE_FRESH_CDP_SESSION:-true}"
 PROFILE_TEMP=false
 
 if [ -z "$USE_DEFAULT" ] && [ -z "$PROFILE" ]; then
-  USE_DEFAULT=1
+  USE_DEFAULT=0
 fi
 
 if curl -sf "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then
@@ -41,20 +41,6 @@ fi
 if [ ! -x "$CHROME_BIN" ]; then
   echo "Chrome binary not found: $CHROME_BIN" >&2
   exit 1
-fi
-
-# Stop any Chrome that would fight the profile / port.
-if pgrep -x "Google Chrome" >/dev/null 2>&1; then
-  echo "Quitting running Google Chrome..."
-  osascript -e 'tell application "Google Chrome" to quit' >/dev/null 2>&1 || true
-  for _ in $(seq 1 40); do
-    if ! pgrep -x "Google Chrome" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.5
-  done
-  pkill -x "Google Chrome" 2>/dev/null || true
-  sleep 1
 fi
 
 ARGS=(--remote-debugging-port="${PORT}" --remote-allow-origins=*)
@@ -90,6 +76,8 @@ else
   if [ -z "${TELECOM_CHROME_PROFILE:-}" ] && { [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; }; then
     PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/telecom-claim-profile.XXXXXX")"
     PROFILE_TEMP=true
+  elif [ -z "$PROFILE" ]; then
+    PROFILE="$HOME/.telecom-claim-chrome"
   fi
   mkdir -p "$PROFILE"
   ARGS+=(--user-data-dir="${PROFILE}")

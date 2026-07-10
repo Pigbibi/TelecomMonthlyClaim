@@ -18,6 +18,7 @@ export TELECOM_KEEP_VALIDATED_PAGE_OPEN="${TELECOM_KEEP_VALIDATED_PAGE_OPEN:-tru
 export TELECOM_REUSE_VALIDATED_PAGE="${TELECOM_REUSE_VALIDATED_PAGE:-false}"
 export TELECOM_DISABLE_CHROME_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-false}"
 export SEND_CODE_ATTEMPTS="${SEND_CODE_ATTEMPTS:-1}"
+PROBE_ONLY="${TELECOM_PROBE_ONLY:-false}"
 
 if [ "${TELECOM_MINIMAL_LOGIN}" = "true" ] && [ "${TELECOM_ALLOW_MULTI_SEND_RETRY:-false}" != "true" ]; then
   export SEND_CODE_ATTEMPTS=1
@@ -75,6 +76,11 @@ curl -sf "$BROWSER_CDP_URL/json/version" >/dev/null
 
 if [ "$SKIP_ENTRY_VALIDATION" != "true" ]; then
   node "$ROOT_DIR/scripts/validate-entry-page.js"
+fi
+
+if [ "$PROBE_ONLY" = "true" ]; then
+  echo "Entry probe completed; skipping SMS send and claim."
+  exit 0
 fi
 
 node "$ROOT_DIR/scripts/telecom-monthly-claim.js"

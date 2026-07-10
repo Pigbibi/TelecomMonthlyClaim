@@ -22,6 +22,10 @@ on:
         description: "Override connectivity mode for this manual run: direct, http_proxy, ssh_tunnel, or proxy_pool"
         required: false
         default: ""
+      probe_only:
+        description: "Validate browser and entry page without sending SMS"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -78,14 +82,15 @@ jobs:
       TELECOM_STEALTH_MODE: "false"
       TELECOM_MINIMAL_LOGIN: "true"
       TELECOM_SKIP_ORIGIN_WARMUP: "true"
-      TELECOM_CDP_PROFILE_MODE: "emulated"
+      TELECOM_CDP_PROFILE_MODE: "native"
       TELECOM_REQUIRE_REAL_CHROME: "true"
-      TELECOM_FORCE_FRESH_CDP_SESSION: "true"
+      TELECOM_FORCE_FRESH_CDP_SESSION: "false"
       TELECOM_SLIDER_MODE: "api"
-      TELECOM_USE_DEFAULT_CHROME: "1"
+      TELECOM_USE_DEFAULT_CHROME: "0"
       TELECOM_DISABLE_CHROME_EXTENSIONS: "true"
       TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"
-      TELECOM_REUSE_VALIDATED_PAGE: "false"
+      TELECOM_REUSE_VALIDATED_PAGE: "true"
+      TELECOM_PROBE_ONLY: ${{ github.event.inputs.probe_only || 'false' }}
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
       FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
       FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
