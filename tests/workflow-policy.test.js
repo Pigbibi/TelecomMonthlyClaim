@@ -60,6 +60,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
   assert.match(workflowText, /TELECOM_SLIDER_MODE: "api"/);
   assert.match(workflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
+  assert.match(workflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "false"/);
   assert.match(workflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
   assert.match(workflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
   assert.match(workflowText, /SEND_CODE_ATTEMPTS: "1"/);
@@ -89,6 +90,7 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /bash scripts\/run-real-chrome-claim\.sh/);
   assert.match(localWorkflowText, /TELECOM_CDP_PROFILE_MODE: "emulated"/);
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
+  assert.match(localWorkflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "false"/);
   assert.match(localWorkflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
   assert.match(localWorkflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
   assert.match(localWorkflowText, /SEND_CODE_ATTEMPTS: "1"/);
