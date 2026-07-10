@@ -133,7 +133,11 @@ test('extension preflight does not persist phone or browser profile data', () =>
   assert.match(script, /fs\.rmSync\(profileDir/);
   assert.doesNotMatch(manifest, /TELECOM_PHONE|185\d{8}/);
   assert.match(script, /install-chrome-for-testing\.sh/);
-  assert.match(script, /DevToolsActivePort/);
+  assert.match(script, /node:net/);
+  assert.match(script, /getFreeTcpPort/);
+  assert.match(script, /remote-debugging-port=\$\{cdpPort\}/);
+  assert.doesNotMatch(script, /DevToolsActivePort/);
+  assert.doesNotMatch(script, /remote-debugging-port=0/);
   assert.match(script, /detached:\s*true/);
   assert.doesNotMatch(script, /TELECOM_CDP_PORT \|\| 9222/);
   assert.doesNotMatch(script, /--headless/);

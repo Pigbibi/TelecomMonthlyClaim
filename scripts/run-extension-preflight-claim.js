@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
@@ -28,17 +29,15 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForDevToolsActivePort(profileDir, timeout = 30000) {
-  const activePortFile = path.join(profileDir, 'DevToolsActivePort');
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    try {
-      const port = Number(fs.readFileSync(activePortFile, 'utf8').split(/\r?\n/, 1)[0]);
-      if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
-    } catch {}
-    await wait(200);
-  }
-  throw new Error('Fresh Chrome did not publish its DevTools port');
+function getFreeTcpPort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(error => error ? reject(error) : resolve(port));
+    });
+  });
 }
 
 async function waitForCdp(url, timeout = 30000) {
@@ -80,6 +79,7 @@ async function main() {
   if (!Number.isInteger(requestedCdpPort) || requestedCdpPort < 0 || requestedCdpPort > 65535) {
     throw new Error('TELECOM_CDP_PORT must be an integer between 0 and 65535');
   }
+  const cdpPort = requestedCdpPort || await getFreeTcpPort();
   const token = crypto.randomBytes(24).toString('hex');
   let status = { stage: 'starting' };
   let loginCode = '';
@@ -134,7 +134,7 @@ async function main() {
   fs.writeFileSync(path.join(extensionDir, 'background.js'), background);
 
   const chrome = spawn(chromeBin, [
-    `--remote-debugging-port=${requestedCdpPort}`,
+    `--remote-debugging-port=${cdpPort}`,
     '--remote-allow-origins=*',
     `--user-data-dir=${profileDir}`,
     `--disable-extensions-except=${extensionDir}`,
@@ -159,7 +159,6 @@ async function main() {
   };
 
   try {
-    const cdpPort = requestedCdpPort || await waitForDevToolsActivePort(profileDir);
     const cdpUrl = `http://127.0.0.1:${cdpPort}`;
     await waitForCdp(cdpUrl);
     console.log(`Fresh headed Chrome session ready on an isolated CDP port (${cdpPort})`);
