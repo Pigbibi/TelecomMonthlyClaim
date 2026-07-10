@@ -182,6 +182,7 @@ async function clickVisible(target, selectors, textPattern = '') {
     let element = selectors.map(selector => document.querySelector(selector)).find(visible);
     if (!element && pattern) element = [...document.querySelectorAll('button,a,div,span')].find(node => visible(node) && pattern.test((node.innerText || '').trim()));
     if (!element) return null;
+    element.scrollIntoView({ block: 'center', inline: 'center' });
     const rect = element.getBoundingClientRect();
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   })()`);
