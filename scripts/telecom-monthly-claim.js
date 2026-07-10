@@ -334,7 +334,7 @@ async function openCdpClaimPage(browser, config = {}) {
     await attachBrokenUniRouteGuard(page);
     attachPageDiagnostics(page);
   } else {
-    attachSliderApiCapture(page);
+    attachPageDiagnostics(page);
   }
   page.setDefaultTimeout(15000);
   page.setDefaultNavigationTimeout(45000);
@@ -858,6 +858,46 @@ async function sendLoginSmsViaBackend(page, config) {
   return false;
 }
 
+async function handleLoginSmsSlider(page, config, timeoutMs = 7000) {
+  if (!await waitForSliderVerification(page, timeoutMs)) return;
+  log('Login SMS send requires slider verification');
+  const challenge = await waitForSliderChallengeLoad(page, 15000);
+  if (!challenge.ok) log('Slider challenge prefetch not ready', challenge);
+  const assets = await waitForSliderPuzzleAssets(page, 20000);
+  log('Slider puzzle asset wait', assets);
+  if (assets.busy) {
+    throw new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image');
+  }
+  if (!assets.ready) {
+    log('Slider challenge API failed; trying direct login SMS backend call');
+    if (!await sendLoginSmsViaBackend(page, config)) {
+      throw new Error(`Telecom slider puzzle image missing after challenge${sliderFailureHint(page)}`);
+    }
+    return;
+  }
+  try {
+    await solvePuzzle(page, config, {
+      async onChallengeRejected() {
+        await dismissSliderPopup(page);
+        await humanPause(4000, 7000);
+        if (config.openwrtProxy) {
+          await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
+        }
+        await clickLoginSmsButton(page, config);
+        const ready = await waitForSliderVerification(page, 10000);
+        if (!ready) return false;
+        const nextAssets = await waitForSliderPuzzleAssets(page, 15000);
+        log('Slider puzzle asset wait after retrigger', nextAssets);
+        return !!(nextAssets.ready && !nextAssets.busy);
+      },
+    });
+  } catch (err) {
+    if (!/getSliderChallenge HTTP 400|Telecom slider challenge rejected|slider puzzle image missing|slider challenge busy/i.test(err?.message || '')) throw err;
+    log('Slider challenge API failed; trying direct login SMS backend call');
+    if (!await sendLoginSmsViaBackend(page, config)) throw err;
+  }
+}
+
 async function warmupTelecomBehavior(page, config) {
   await page.waitForFunction(() => {
     const scripts = Array.from(document.scripts || []).map(s => s.src || '');
@@ -888,20 +928,7 @@ async function sendLoginCode(page, config) {
     await fillInputField(phoneField.locator, config.phone);
     await humanPause(600, 1200);
     await clickLoginSmsButton(page, config);
-    if (await waitForSliderVerification(page, 10000)) {
-      log('Login SMS send requires slider verification');
-      const assets = await waitForSliderPuzzleAssets(page, 15000);
-      log('Slider puzzle asset wait', assets);
-      if (assets.busy) {
-        throw new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image');
-      }
-      if (!assets.ready) {
-        throw new Error(`Telecom slider puzzle image missing after challenge${sliderFailureHint(page)}`);
-      }
-      await solvePuzzle(page, config, {
-        async onChallengeRejected() { return false; },
-      });
-    }
+    await handleLoginSmsSlider(page, config, 10000);
     await sleep(3000);
     const closedDialogs = await closeDialogs(page);
     const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
@@ -919,41 +946,7 @@ async function sendLoginCode(page, config) {
   await clickLoginSmsButton(page, config);
   // Do not block on preActiveMeta before the click path has already fired; only observe after.
   await waitForTelecomApiReady(page, config, [/preActiveMeta/], 15000).catch(() => false);
-  if (await waitForSliderVerification(page)) {
-    log('Login SMS send requires slider verification');
-    const challenge = await waitForSliderChallengeLoad(page, 15000);
-    if (!challenge.ok) log('Slider challenge prefetch not ready', challenge);
-    const assets = await waitForSliderPuzzleAssets(page, 20000);
-    log('Slider puzzle asset wait', assets);
-    if (assets.busy) {
-      throw new Error('Telecom slider challenge busy (服务繁忙); getSliderChallenge rejected before puzzle image');
-    }
-    if (!assets.ready) {
-      throw new Error(`Telecom slider puzzle image missing after challenge${sliderFailureHint(page)}`);
-    }
-    try {
-      await solvePuzzle(page, config, {
-        // Minimal path: never retrigger send on 400 — that burns rate limits and never yields images.
-        async onChallengeRejected() {
-          await dismissSliderPopup(page);
-          await humanPause(4000, 7000);
-          if (config.openwrtProxy) {
-            await verifyProxyPath(config.openwrtProxy, process.env.PROXY_HEALTH_URL || 'https://wapbj.189.cn/');
-          }
-          await clickLoginSmsButton(page, config);
-          const ready = await waitForSliderVerification(page, 10000);
-          if (!ready) return false;
-          const nextAssets = await waitForSliderPuzzleAssets(page, 15000);
-          log('Slider puzzle asset wait after retrigger', nextAssets);
-          return !!(nextAssets.ready && !nextAssets.busy);
-        },
-      });
-    } catch (err) {
-      if (!/getSliderChallenge HTTP 400|Telecom slider challenge rejected|slider puzzle image missing|slider challenge busy/i.test(err?.message || '')) throw err;
-      log('Slider challenge API failed; trying direct login SMS backend call');
-      if (!await sendLoginSmsViaBackend(page, config)) throw err;
-    }
-  }
+  await handleLoginSmsSlider(page, config);
   await sleep(3000);
   const closedDialogs = await closeDialogs(page);
   const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
