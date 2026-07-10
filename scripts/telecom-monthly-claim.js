@@ -1319,6 +1319,7 @@ async function gotoLoginEntryPage(page, config, reason) {
       const entryReady = await waitForLoginEntry(page, status === 412 ? 25000 : 15000);
       const form = await detectLoginFormState(page);
       if (entryReady) {
+        await warmupTelecomBehavior(page, config);
         log('Login entry ready', {
           reason,
           strategy: candidate.label,
