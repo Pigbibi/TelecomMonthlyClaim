@@ -86,6 +86,9 @@ async function applyCdpBrowserProfile(page, browserVersion = '', profile = 'wech
   }
   const desktop = profile === 'desktop';
   const chrome = chromeVersion(browserVersion, desktop ? '149.0.0.0' : '131.0.0.0');
+  const major = chrome.split('.')[0] || (desktop ? '149' : '131');
+  const greaseBrand = 'Not)A;Brand';
+  const greaseVersion = '24';
   const viewport = desktop
     ? { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }
     : { width: 393, height: 873, deviceScaleFactor: 2.75, mobile: true };
@@ -111,14 +114,14 @@ async function applyCdpBrowserProfile(page, browserVersion = '', profile = 'wech
   const userAgentMetadata = desktop
     ? {
         brands: [
-          { brand: 'Not/A)Brand', version: '8' },
-          { brand: 'Chromium', version: chrome.split('.')[0] || '149' },
-          { brand: 'Google Chrome', version: chrome.split('.')[0] || '149' },
+          { brand: 'Google Chrome', version: major },
+          { brand: 'Chromium', version: major },
+          { brand: greaseBrand, version: greaseVersion },
         ],
         fullVersionList: [
-          { brand: 'Not/A)Brand', version: '8.0.0.0' },
-          { brand: 'Chromium', version: chrome },
           { brand: 'Google Chrome', version: chrome },
+          { brand: 'Chromium', version: chrome },
+          { brand: greaseBrand, version: `${greaseVersion}.0.0.0` },
         ],
         platform: 'macOS',
         platformVersion: '10.15.7',
@@ -131,14 +134,14 @@ async function applyCdpBrowserProfile(page, browserVersion = '', profile = 'wech
       }
     : {
         brands: [
-          { brand: 'Not/A)Brand', version: '8' },
-          { brand: 'Chromium', version: chrome.split('.')[0] || '131' },
-          { brand: 'Google Chrome', version: chrome.split('.')[0] || '131' },
+          { brand: 'Google Chrome', version: major },
+          { brand: 'Chromium', version: major },
+          { brand: greaseBrand, version: greaseVersion },
         ],
         fullVersionList: [
-          { brand: 'Not/A)Brand', version: '8.0.0.0' },
-          { brand: 'Chromium', version: chrome },
           { brand: 'Google Chrome', version: chrome },
+          { brand: 'Chromium', version: chrome },
+          { brand: greaseBrand, version: `${greaseVersion}.0.0.0` },
         ],
         platform: 'Android',
         platformVersion: '13.0.0',
