@@ -470,8 +470,10 @@ const LOGIN_SMS_SEND_SELECTORS = [
 const LOGIN_PHONE_SELECTORS = [
   '#phoneNumber',
   'input.phonenum',
+  'input[type="tel"]',
   'input[placeholder*="手机号码"]',
   'input[placeholder*="手机号"]',
+  'input.van-field__control',
 ];
 const LOGIN_CODE_SELECTORS = [
   '#code',
@@ -575,6 +577,63 @@ async function waitForLoginEntry(page, timeoutMs = 25000) {
     await sleep(1000);
   }
   return false;
+}
+
+async function detectLoginFormState(page) {
+  return page.evaluate(({ phoneSelectors, codeSelectors, sendSelectors }) => {
+    const visible = element => {
+      if (!element) return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && rect.width > 0
+        && rect.height > 0;
+    };
+    const firstVisible = selectors => {
+      for (const selector of selectors) {
+        const match = Array.from(document.querySelectorAll(selector)).find(visible);
+        if (match) {
+          return {
+            selector,
+            placeholder: match.getAttribute('placeholder') || '',
+            type: match.getAttribute('type') || '',
+          };
+        }
+      }
+      return null;
+    };
+    const phone = firstVisible(phoneSelectors);
+    const code = firstVisible(codeSelectors);
+    const send = firstVisible(sendSelectors);
+    return {
+      htmlLength: document.documentElement?.outerHTML?.length || 0,
+      bodyLength: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
+      title: document.title || '',
+      formReady: !!phone,
+      hasPhone: !!phone,
+      hasCode: !!code,
+      hasSendBtn: !!send,
+      phone,
+      code,
+      send,
+    };
+  }, {
+    phoneSelectors: LOGIN_PHONE_SELECTORS,
+    codeSelectors: LOGIN_CODE_SELECTORS,
+    sendSelectors: LOGIN_SMS_SEND_SELECTORS,
+  }).catch(() => ({
+    htmlLength: 0,
+    bodyLength: 0,
+    title: '',
+    formReady: false,
+    hasPhone: false,
+    hasCode: false,
+    hasSendBtn: false,
+    phone: null,
+    code: null,
+    send: null,
+  }));
 }
 
 async function ensureSmsLoginForm(page, config) {
@@ -974,14 +1033,7 @@ async function gotoLoginEntryPage(page, config, reason) {
       // 412 is normal for telecom WAF challenge pages that then rewrite to the form.
       // Extra settle after 412 avoids clicking send before the challenge session is ready.
       await sleep(status === 412 ? 12000 : 5000);
-      const form = await page.evaluate(() => {
-        const phone = document.querySelector('#phoneNumber, input.phonenum');
-        const rect = phone?.getBoundingClientRect();
-        return {
-          htmlLength: document.documentElement?.outerHTML?.length || 0,
-          hasPhone: !!(phone && rect && rect.width > 0),
-        };
-      }).catch(() => ({ htmlLength: 0, hasPhone: false }));
+      const form = await detectLoginFormState(page);
       if (form.hasPhone) {
         log('Login entry ready', {
           reason,
@@ -990,6 +1042,9 @@ async function gotoLoginEntryPage(page, config, reason) {
           url: page.url(),
           minimalLogin: true,
           htmlLength: form.htmlLength,
+          phone: form.phone,
+          code: form.code,
+          send: form.send,
         });
         return;
       }
@@ -1344,22 +1399,7 @@ function latestTelecomApiResponse(page, pattern) {
 
 async function readPageRenderState(page) {
   try {
-    return await page.evaluate(() => {
-      const phone = document.querySelector('#phoneNumber, input.phonenum');
-      const code = document.querySelector('#code, input.checknum-input');
-      const sendBtn = document.querySelector('.checknum-button, .slider-sms-btn, .content_send_unlog');
-      const phoneRect = phone?.getBoundingClientRect();
-      const formReady = !!(phone && phoneRect && phoneRect.width > 0 && phoneRect.height > 0);
-      return {
-        htmlLength: document.documentElement?.outerHTML?.length || 0,
-        bodyLength: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
-        title: document.title || '',
-        formReady,
-        hasPhone: !!phone,
-        hasCode: !!code,
-        hasSendBtn: !!sendBtn,
-      };
-    });
+    return await detectLoginFormState(page);
   } catch {
     return { htmlLength: 0, bodyLength: 0, title: '', formReady: false, navigating: true };
   }
@@ -1964,8 +2004,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  LOGIN_PHONE_SELECTORS,
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
+  detectLoginFormState,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,

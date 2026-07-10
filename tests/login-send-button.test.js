@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  LOGIN_PHONE_SELECTORS,
   clickLoginSmsButton,
+  detectLoginFormState,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
@@ -51,6 +53,38 @@ test('clicks the Vant login SMS send button text', async () => {
 
   assert.equal(selector, 'button:has-text("点击获取")');
   assert.deepEqual(page.clicked, ['button:has-text("点击获取")']);
+});
+
+test('phone selectors include Vant field fallback for minimal login page', () => {
+  assert.equal(LOGIN_PHONE_SELECTORS.includes('input.van-field__control'), true);
+});
+
+test('detectLoginFormState uses broad selector lists for minimal login readiness', async () => {
+  let payload = null;
+  const page = {
+    evaluate: async (_fn, args) => {
+      payload = args;
+      return {
+        htmlLength: 12345,
+        bodyLength: 12,
+        title: '预存平台登录',
+        formReady: true,
+        hasPhone: true,
+        hasCode: true,
+        hasSendBtn: true,
+        phone: { selector: 'input.van-field__control' },
+        code: { selector: 'input.checknum-input' },
+        send: { selector: '.checknum-button' },
+      };
+    },
+  };
+
+  const state = await detectLoginFormState(page);
+
+  assert.equal(payload.phoneSelectors.includes('input.van-field__control'), true);
+  assert.equal(payload.codeSelectors.includes('input.checknum-input'), true);
+  assert.equal(payload.sendSelectors.includes('.checknum-button.slider-sms-btn'), true);
+  assert.equal(state.formReady, true);
 });
 
 test('picks a visible input when the first matching Vant input is hidden', async () => {
