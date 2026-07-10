@@ -227,5 +227,7 @@ test('loads Chrome extension completed-login handoff flag', () => withCleanTelec
   process.env.TELECOM_PHONE = '18500000000';
   process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
   process.env.TELECOM_LOGIN_ALREADY_COMPLETE = 'true';
+  process.env.TELECOM_CONFIRM_SMS_ALREADY_SENT = 'true';
   assert.equal(loadConfig().loginAlreadyComplete, true);
+  assert.equal(loadConfig().confirmationSmsAlreadySent, true);
 }));

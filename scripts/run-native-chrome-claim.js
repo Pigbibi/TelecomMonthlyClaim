@@ -313,6 +313,159 @@ async function submitLoginCode(client, code) {
   throw new Error('Native Chrome login verification timed out before Playwright attachment');
 }
 
+async function waitForPageState(client, expression, timeoutMs, errorMessage) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await client.evaluate(expression)) return;
+    await wait(500);
+  }
+  throw new Error(errorMessage);
+}
+
+async function selectTargetPackage(client, productName) {
+  await waitForPageState(
+    client,
+    `(() => location.href.includes('preDepositCfg_list') && !!document.querySelector('#conduct'))()`,
+    20000,
+    'Native Chrome package list did not become ready',
+  );
+  const selected = await client.evaluate(`(() => {
+    const name = ${JSON.stringify(productName)};
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const item = [...document.querySelectorAll('li')].find(node => visible(node) && (node.innerText || '').includes(name));
+    if (!item) return false;
+    item.click();
+    return true;
+  })()`);
+  if (!selected) throw new Error('Native Chrome target package missing');
+  await wait(1000);
+  if (!await clickPageElement(client, ['#conduct'])) throw new Error('Native Chrome package submit button missing');
+  await waitForPageState(
+    client,
+    `(() => !!document.querySelector('#activeName') && !!document.querySelector('#payConfirm'))()`,
+    20000,
+    'Native Chrome confirm page did not become ready',
+  );
+}
+
+async function openConfirmationSlider(client) {
+  if (!await clickPageElement(client, ['#payConfirm'])) throw new Error('Native Chrome pay confirm button missing');
+  await waitForPageState(
+    client,
+    `(() => {
+      const popup = document.querySelector('#secondPopCombo');
+      if (!popup) return false;
+      const rect = popup.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    })()`,
+    15000,
+    'Native Chrome second confirmation popup missing',
+  );
+  if (!await clickPageElement(client, ['#SecondConfirmationSms'])) {
+    throw new Error('Native Chrome confirmation SMS button missing');
+  }
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const state = await client.evaluate(`(() => {
+      const root = document.querySelector('#secondPop_puzzle_check') || document;
+      const canvas = [...root.querySelectorAll('canvas:not(.block),canvas')]
+        .find(item => item.width >= 100 && item.height >= 50 && item.getBoundingClientRect().width > 0);
+      const slider = root.querySelector('#slider_track_btn,.slider-btn,.slider,[class*="slider" i]');
+      const message = document.querySelector('#secondPop_msg,.puzzle-msg,.slider-check-msg')?.innerText?.trim() || '';
+      return {
+        ready: !!(canvas && slider),
+        busy: /服务繁忙|请稍后再试/.test(message),
+      };
+    })()`);
+    if (state?.ready) return;
+    if (state?.busy) throw new Error('Native Chrome confirmation slider challenge was rejected');
+    await wait(500);
+  }
+  throw new Error('Native Chrome confirmation slider did not become ready');
+}
+
+async function solveConfirmationSlider(client) {
+  const info = await client.evaluate(`(() => {
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const root = document.querySelector('#secondPop_puzzle_check') || document;
+    const canvas = [...root.querySelectorAll('canvas:not(.block),canvas')]
+      .find(item => visible(item) && item.width >= 100 && item.height >= 50);
+    if (!canvas) return null;
+    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let minx = canvas.width; let count = 0;
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        if (data[(y * canvas.width + x) * 4 + 3] === 0) {
+          count += 1;
+          minx = Math.min(minx, x);
+        }
+      }
+    }
+    const slider = [...root.querySelectorAll('#slider_track_btn,.slider-btn,.slider,[class*="slider" i]')]
+      .filter(visible)
+      .sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0];
+    if (!slider || count < 500 || minx >= canvas.width) return null;
+    const sliderRect = slider.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    return {
+      naturalX: minx,
+      moveX: Math.round(minx * canvasRect.width / canvas.width),
+      startX: sliderRect.x + sliderRect.width / 2,
+      startY: sliderRect.y + sliderRect.height / 2,
+    };
+  })()`, 30000);
+  if (!info || info.moveX < 40) throw new Error('Native Chrome confirmation slider target missing');
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: info.startX, y: info.startY });
+  await wait(250);
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: info.startX, y: info.startY, button: 'left', clickCount: 1 });
+  for (let step = 1; step <= 50; step += 1) {
+    const t = step / 50;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    await client.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: info.startX + info.moveX * ease,
+      y: info.startY + Math.sin(t * Math.PI * 3) * 2,
+      button: 'left',
+    });
+    await wait(24 + (step % 5) * 8);
+  }
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: info.startX + info.moveX,
+    y: info.startY,
+    button: 'left',
+    clickCount: 1,
+  });
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    const state = await client.evaluate(`(() => {
+      const text = document.body?.innerText || '';
+      const popup = document.querySelector('#secondPop_puzzle_check');
+      const rect = popup?.getBoundingClientRect();
+      const visible = !!(popup && rect.width > 0 && rect.height > 0 && getComputedStyle(popup).display !== 'none');
+      return {
+        sent: /验证码已下发|请注意查收/.test(text),
+        failed: /服务繁忙|验证失败|请稍后再试/.test(text),
+        visible,
+      };
+    })()`);
+    if (state?.sent || (!state?.visible && !state?.failed)) return info.naturalX;
+    if (state?.failed) throw new Error('Native Chrome confirmation slider validation failed');
+    await wait(500);
+  }
+  throw new Error('Native Chrome confirmation slider validation timed out');
+}
+
 async function captureCdpScreenshot(client) {
   try {
     await client.send('Page.enable');
@@ -369,6 +522,10 @@ async function main() {
       if (!sms?.code) throw new Error('Native Chrome login SMS was not received');
       await submitLoginCode(cdp, sms.code);
       console.log('Native Chrome login completed before Playwright attachment');
+      await selectTargetPackage(cdp, config.productName);
+      await openConfirmationSlider(cdp);
+      const confirmationDistance = await solveConfirmationSlider(cdp);
+      console.log(`Native Chrome confirmation SMS sent before Playwright attachment (${confirmationDistance}px)`);
     } catch (error) {
       await captureCdpScreenshot(cdp);
       throw error;
@@ -387,6 +544,7 @@ async function main() {
         TELECOM_CLEAR_BROWSER_DATA: 'false',
         TELECOM_REUSE_VALIDATED_PAGE: 'true',
         TELECOM_LOGIN_ALREADY_COMPLETE: 'true',
+        TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true',
       },
     });
     if (result.code !== 0) process.exitCode = result.code || 1;

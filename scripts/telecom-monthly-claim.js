@@ -2518,15 +2518,20 @@ async function openSecondPopup(page, config) {
 }
 
 async function confirmWithRetry(page, smsInbox, config) {
-  await openSecondPopup(page, config);
+  if (!config.confirmationSmsAlreadySent) await openSecondPopup(page, config);
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending confirmation SMS attempt ${attempt}/${config.sendCodeAttempts}`);
-    const since = Date.now() - 10000;
-    await closeDialogs(page);
-    await actionDelay(config);
-    await page.locator('#SecondConfirmationSms').click({ force: true });
-    await solvePuzzle(page, config);
-    await closeDialogs(page);
+    const preflightSent = attempt === 1 && config.confirmationSmsAlreadySent;
+    const since = Date.now() - (preflightSent ? 120000 : 10000);
+    if (preflightSent) {
+      log('Confirmation SMS was already sent before Playwright attachment');
+    } else {
+      await closeDialogs(page);
+      await actionDelay(config);
+      await page.locator('#SecondConfirmationSms').click({ force: true });
+      await solvePuzzle(page, config);
+      await closeDialogs(page);
+    }
     const sms = await smsInbox.waitForCode({ stage: 'confirm', since, timeoutMs: config.smsTimeoutMs, pollMs: config.smsPollMs });
     if (!sms) {
       log('Confirmation SMS not received before timeout');
