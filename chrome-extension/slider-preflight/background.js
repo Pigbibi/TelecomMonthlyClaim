@@ -209,18 +209,28 @@ async function submitLoginCode(target, code) {
     await send(target, 'Input.insertText', { text: digit });
     await sleep(80 + Math.floor(Math.random() * 80));
   }
+  await evaluate(target, `(() => {
+    const input = document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input');
+    if (!input) return false;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.blur();
+    return true;
+  })()`);
   await sleep(700);
-  if (!await clickVisible(target, ['.know-box.button'], '立即领取|立即办理')) throw new Error('login-submit-missing');
-
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const state = await evaluate(target, `(() => ({
-      complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
-      failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙/.test(document.body?.innerText || ''),
-    }))()`);
-    if (state?.complete) return true;
-    if (state?.failed) return false;
-    await sleep(500);
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (!await clickVisible(target, ['.know-box.button'], '立即领取|立即办理')) throw new Error('login-submit-missing');
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      const state = await evaluate(target, `(() => ({
+        complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
+        failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙/.test(document.body?.innerText || ''),
+      }))()`);
+      if (state?.complete) return true;
+      if (state?.failed) return false;
+      await sleep(500);
+    }
+    await clickVisible(target, ['#wap-dialog button', '.wap-dialog button'], '我知道了|知道了|确定').catch(() => false);
+    await sleep(700);
   }
   return false;
 }
