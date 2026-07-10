@@ -63,6 +63,7 @@ function loadConfig() {
     pushPlusRelayInboxUrl: process.env.PUSHPLUS_RELAY_INBOX_URL || '',
     pushPlusRelayInboxToken: process.env.PUSHPLUS_RELAY_INBOX_TOKEN || '',
     sendCodeAttempts: numberEnv('SEND_CODE_ATTEMPTS', 3),
+    loginSmsAlreadySent: process.env.TELECOM_LOGIN_SMS_ALREADY_SENT === 'true',
     actionDelayMs: numberEnv('TELECOM_ACTION_DELAY_MS', 800),
     postSuccessWaitMs: numberEnv('TELECOM_POST_SUCCESS_WAIT_MS', 8000),
     openwrtProxy: process.env.OPENWRT_HTTP_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '',

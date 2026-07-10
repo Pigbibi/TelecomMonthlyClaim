@@ -215,3 +215,10 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   assert.equal(config.pushPlusRelayInboxToken, 'relay-token-1');
   assert.equal(config.smsSender, '10001');
 }));
+
+test('loads Chrome extension preflight SMS handoff flag', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+  process.env.TELECOM_LOGIN_SMS_ALREADY_SENT = 'true';
+  assert.equal(loadConfig().loginSmsAlreadySent, true);
+}));

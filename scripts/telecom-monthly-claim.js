@@ -2100,10 +2100,15 @@ async function loginWithRetry(browser, page, smsInbox, config) {
   let activePage = page;
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending login SMS attempt ${attempt}/${config.sendCodeAttempts}`);
-    const since = Date.now() - 10000;
+    const preflightSent = attempt === 1 && config.loginSmsAlreadySent;
+    const since = Date.now() - (preflightSent ? 120000 : 10000);
     try {
-      await gotoLoginEntryPage(activePage, config, `attempt-${attempt}`);
-      await sendLoginCode(activePage, config);
+      if (preflightSent) {
+        log('Login SMS was already sent by the Chrome extension preflight');
+      } else {
+        await gotoLoginEntryPage(activePage, config, `attempt-${attempt}`);
+        await sendLoginCode(activePage, config);
+      }
     } catch (err) {
       const summary = await getPageSummary(activePage).catch(summaryErr => ({ error: summaryErr.message }));
       log('Login SMS send failed before code wait', { error: err.message, summary });

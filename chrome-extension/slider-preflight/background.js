@@ -1,4 +1,5 @@
 const PREFLIGHT_URL = '__PREFLIGHT_URL__';
+const MATCH_FUNCTION_SOURCE = '__MATCH_FUNCTION_SOURCE__';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -102,6 +103,59 @@ async function waitForSlider(target, timeoutMs = 30000) {
   return { ready: false, busy: false, message: 'slider-timeout' };
 }
 
+async function solveSlider(target) {
+  const match = await evaluate(target, `(${MATCH_FUNCTION_SOURCE})({})`);
+  if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
+    throw new Error(`slider-match-failed:${match?.reason || 'invalid-result'}`);
+  }
+  const startX = match.btn.cx;
+  const startY = match.btn.cy;
+  await send(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
+  await sleep(250);
+  await send(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
+  for (let step = 1; step <= 50; step += 1) {
+    const t = step / 50;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    await send(target, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: startX + match.moveX * ease,
+      y: startY + Math.sin(t * Math.PI * 3) * 2,
+      button: 'left',
+    });
+    await sleep(24 + (step % 5) * 8);
+  }
+  await send(target, 'Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: startX + match.moveX,
+    y: startY,
+    button: 'left',
+    clickCount: 1,
+  });
+
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    const state = await evaluate(target, `(() => {
+      const text = document.body?.innerText || '';
+      const slider = document.querySelector('#slider_check,.slider-check-box');
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      return {
+        sent: /验证码已下发|请注意查收/.test(text),
+        failed: /服务繁忙|验证失败|请稍后再试/.test(text),
+        sliderVisible: visible(slider),
+      };
+    })()`);
+    if (state?.sent || (!state?.sliderVisible && !state?.failed)) return { ok: true, naturalX: match.naturalX };
+    if (state?.failed) return { ok: false, reason: 'slider-validation-failed', naturalX: match.naturalX };
+    await sleep(500);
+  }
+  return { ok: false, reason: 'sms-send-timeout', naturalX: match.naturalX };
+}
+
 async function run() {
   let target = null;
   try {
@@ -118,11 +172,12 @@ async function run() {
     await sleep(900 + Math.floor(Math.random() * 900));
     if (!await clickSmsButton(target)) throw new Error('sms-button-missing');
     const slider = await waitForSlider(target);
+    const solved = slider.ready ? await solveSlider(target) : { ok: false, reason: slider.message || 'slider-not-ready' };
     await chrome.debugger.detach(target).catch(() => {});
     target = null;
-    await postStatus(slider.ready ? { stage: 'slider-ready' } : {
+    await postStatus(solved.ok ? { stage: 'sms-sent' } : {
       stage: slider.busy ? 'slider-busy' : 'slider-timeout',
-      message: slider.message,
+      message: solved.reason || slider.message,
     });
   } catch (error) {
     if (target) await chrome.debugger.detach(target).catch(() => {});

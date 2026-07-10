@@ -5,6 +5,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
+const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
 
 const root = path.resolve(__dirname, '..');
 const cdpPort = Number(process.env.TELECOM_CDP_PORT || 9222);
@@ -99,7 +100,8 @@ async function main() {
   const extensionSource = path.join(root, 'chrome-extension', 'slider-preflight');
   fs.copyFileSync(path.join(extensionSource, 'manifest.json'), path.join(extensionDir, 'manifest.json'));
   const background = fs.readFileSync(path.join(extensionSource, 'background.js'), 'utf8')
-    .replace("'__PREFLIGHT_URL__'", JSON.stringify(preflightUrl));
+    .replace("'__PREFLIGHT_URL__'", JSON.stringify(preflightUrl))
+    .replace("'__MATCH_FUNCTION_SOURCE__'", JSON.stringify(computeSliderImageMatchInPage.toString()));
   fs.writeFileSync(path.join(extensionDir, 'background.js'), background);
 
   const chrome = spawn(chromeBin, [
@@ -124,10 +126,10 @@ async function main() {
     const cdpUrl = `http://127.0.0.1:${cdpPort}`;
     await waitForCdp(cdpUrl);
     await waitForTelecomPage(cdpUrl, timeoutMs);
-    const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 25000);
+    const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 60000);
     const deadline = Date.now() + settleMs;
     while (status.stage === 'starting' && Date.now() < deadline) await wait(500);
-    if (status.stage !== 'starting' && status.stage !== 'slider-ready') {
+    if (status.stage !== 'sms-sent') {
       throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}`);
     }
     console.log('Chrome extension preflight completed; handing the Telecom page to the claim runner');
@@ -139,6 +141,7 @@ async function main() {
         BROWSER_CDP_URL: cdpUrl,
         TELECOM_REUSE_VALIDATED_PAGE: 'true',
         TELECOM_CDP_PROFILE_MODE: 'native',
+        TELECOM_LOGIN_SMS_ALREADY_SENT: 'true',
       },
     });
     if (result.code !== 0) process.exitCode = result.code || 1;
