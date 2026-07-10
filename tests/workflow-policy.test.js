@@ -132,6 +132,7 @@ test('extension preflight does not persist phone or browser profile data', () =>
   assert.match(script, /fs\.rmSync\(extensionDir/);
   assert.match(script, /fs\.rmSync\(profileDir/);
   assert.doesNotMatch(manifest, /TELECOM_PHONE|185\d{8}/);
+  assert.match(script, /install-chrome-for-testing\.sh/);
 });
 
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {

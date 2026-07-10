@@ -4,10 +4,9 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
-const chromeBin = process.env.TELECOM_CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const cdpPort = Number(process.env.TELECOM_CDP_PORT || 9222);
 const entryUrl = process.env.TELECOM_ENTRY_URL;
 const phone = process.env.TELECOM_PHONE;
@@ -15,7 +14,13 @@ const timeoutMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_TIMEOUT_MS || 9
 
 if (!entryUrl) throw new Error('Missing TELECOM_ENTRY_URL');
 if (!phone) throw new Error('Missing TELECOM_PHONE');
-if (!fs.existsSync(chromeBin)) throw new Error(`Chrome binary not found: ${chromeBin}`);
+function resolveChromeBinary() {
+  if (process.env.TELECOM_CHROME_BIN) return process.env.TELECOM_CHROME_BIN;
+  const output = execFileSync('bash', [path.join(root, 'scripts', 'install-chrome-for-testing.sh')], {
+    encoding: 'utf8',
+  }).trim();
+  return output.split(/\r?\n/).filter(Boolean).pop() || '';
+}
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -42,6 +47,8 @@ function runChild(command, args, options) {
 }
 
 async function main() {
+  const chromeBin = resolveChromeBinary();
+  if (!fs.existsSync(chromeBin)) throw new Error(`Chrome for Testing binary not found: ${chromeBin}`);
   const token = crypto.randomBytes(24).toString('hex');
   let status = { stage: 'starting' };
   const server = http.createServer((request, response) => {
