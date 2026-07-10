@@ -222,3 +222,10 @@ test('loads Chrome extension preflight SMS handoff flag', () => withCleanTelecom
   process.env.TELECOM_LOGIN_SMS_ALREADY_SENT = 'true';
   assert.equal(loadConfig().loginSmsAlreadySent, true);
 }));
+
+test('loads Chrome extension completed-login handoff flag', () => withCleanTelecomEnv(() => {
+  process.env.TELECOM_PHONE = '18500000000';
+  process.env.TELECOM_ENTRY_URL = 'https://example.test/entry';
+  process.env.TELECOM_LOGIN_ALREADY_COMPLETE = 'true';
+  assert.equal(loadConfig().loginAlreadyComplete, true);
+}));

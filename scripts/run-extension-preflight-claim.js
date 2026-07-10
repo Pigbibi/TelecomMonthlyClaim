@@ -6,6 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
+const { loadConfig } = require('../src/config');
+const { SmsInboxClient } = require('../src/sms-inbox-client');
 
 const root = path.resolve(__dirname, '..');
 const cdpPort = Number(process.env.TELECOM_CDP_PORT || 9222);
@@ -64,6 +66,8 @@ async function main() {
   if (!fs.existsSync(chromeBin)) throw new Error(`Chrome for Testing binary not found: ${chromeBin}`);
   const token = crypto.randomBytes(24).toString('hex');
   let status = { stage: 'starting' };
+  let loginCode = '';
+  const smsSince = Date.now() - 10000;
   const server = http.createServer((request, response) => {
     response.setHeader('access-control-allow-origin', '*');
     response.setHeader('access-control-allow-headers', 'content-type');
@@ -84,6 +88,15 @@ async function main() {
         try { status = JSON.parse(body); } catch { status = { stage: 'error', message: 'invalid-status' }; }
         response.writeHead(204).end();
       });
+      return;
+    }
+    if (request.method === 'GET' && request.url === `${base}/login-code`) {
+      if (!loginCode) {
+        response.writeHead(204).end();
+        return;
+      }
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ code: loginCode }));
       return;
     }
     response.writeHead(404).end();
@@ -132,7 +145,21 @@ async function main() {
     if (status.stage !== 'sms-sent') {
       throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}`);
     }
-    console.log('Chrome extension preflight completed; handing the Telecom page to the claim runner');
+    const config = loadConfig();
+    const sms = await new SmsInboxClient(config).waitForCode({
+      stage: 'login',
+      since: smsSince,
+      timeoutMs: config.smsTimeoutMs,
+      pollMs: config.smsPollMs,
+    });
+    if (!sms?.code) throw new Error('Login SMS was not received after extension preflight');
+    loginCode = sms.code;
+    const loginDeadline = Date.now() + 45000;
+    while (status.stage === 'sms-sent' && Date.now() < loginDeadline) await wait(500);
+    if (status.stage !== 'login-complete') {
+      throw new Error(`Chrome extension login failed: ${status.stage}${status.message ? ` (${status.message})` : ''}`);
+    }
+    console.log('Chrome extension login completed; handing the package page to the claim runner');
     const result = await runChild(process.execPath, [path.join(root, 'scripts', 'telecom-monthly-claim.js')], {
       cwd: root,
       stdio: 'inherit',
@@ -141,7 +168,7 @@ async function main() {
         BROWSER_CDP_URL: cdpUrl,
         TELECOM_REUSE_VALIDATED_PAGE: 'true',
         TELECOM_CDP_PROFILE_MODE: 'native',
-        TELECOM_LOGIN_SMS_ALREADY_SENT: 'true',
+        TELECOM_LOGIN_ALREADY_COMPLETE: 'true',
       },
     });
     if (result.code !== 0) process.exitCode = result.code || 1;

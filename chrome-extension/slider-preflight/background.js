@@ -156,6 +156,75 @@ async function solveSlider(target) {
   return { ok: false, reason: 'sms-send-timeout', naturalX: match.naturalX };
 }
 
+async function waitForLoginCode(timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${PREFLIGHT_URL}/login-code`);
+    if (response.ok) {
+      const payload = await response.json();
+      if (/^\d{4,8}$/.test(String(payload.code || ''))) return String(payload.code);
+    }
+    await sleep(1500);
+  }
+  throw new Error('login-code-timeout');
+}
+
+async function clickVisible(target, selectors, textPattern = '') {
+  const point = await evaluate(target, `(() => {
+    const selectors = ${JSON.stringify(selectors)};
+    const pattern = ${JSON.stringify(textPattern)} ? new RegExp(${JSON.stringify(textPattern)}) : null;
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    let element = selectors.map(selector => document.querySelector(selector)).find(visible);
+    if (!element && pattern) element = [...document.querySelectorAll('button,a,div,span')].find(node => visible(node) && pattern.test((node.innerText || '').trim()));
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`);
+  if (!point) return false;
+  await send(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await sleep(100);
+  await send(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  return true;
+}
+
+async function submitLoginCode(target, code) {
+  await clickVisible(target, ['#wap-dialog button', '.wap-dialog button'], '我知道了|知道了|确定').catch(() => false);
+  await sleep(500);
+  const focused = await evaluate(target, `(() => {
+    const input = document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input');
+    if (!input) return false;
+    input.focus();
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+    if (setter) setter.call(input, ''); else input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  if (!focused) throw new Error('login-code-input-missing');
+  for (const digit of code) {
+    await send(target, 'Input.insertText', { text: digit });
+    await sleep(80 + Math.floor(Math.random() * 80));
+  }
+  await sleep(700);
+  if (!await clickVisible(target, ['.know-box.button'], '立即领取|立即办理')) throw new Error('login-submit-missing');
+
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const state = await evaluate(target, `(() => ({
+      complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
+      failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙/.test(document.body?.innerText || ''),
+    }))()`);
+    if (state?.complete) return true;
+    if (state?.failed) return false;
+    await sleep(500);
+  }
+  return false;
+}
+
 async function run() {
   let target = null;
   try {
@@ -173,12 +242,18 @@ async function run() {
     if (!await clickSmsButton(target)) throw new Error('sms-button-missing');
     const slider = await waitForSlider(target);
     const solved = slider.ready ? await solveSlider(target) : { ok: false, reason: slider.message || 'slider-not-ready' };
+    if (!solved.ok) {
+      await chrome.debugger.detach(target).catch(() => {});
+      target = null;
+      await postStatus({ stage: slider.busy ? 'slider-busy' : 'slider-timeout', message: solved.reason || slider.message });
+      return;
+    }
+    await postStatus({ stage: 'sms-sent' });
+    const code = await waitForLoginCode();
+    const loggedIn = await submitLoginCode(target, code);
     await chrome.debugger.detach(target).catch(() => {});
     target = null;
-    await postStatus(solved.ok ? { stage: 'sms-sent' } : {
-      stage: slider.busy ? 'slider-busy' : 'slider-timeout',
-      message: solved.reason || slider.message,
-    });
+    await postStatus({ stage: loggedIn ? 'login-complete' : 'login-failed' });
   } catch (error) {
     if (target) await chrome.debugger.detach(target).catch(() => {});
     await postStatus({ stage: 'error', message: String(error?.message || error).slice(0, 120) }).catch(() => {});

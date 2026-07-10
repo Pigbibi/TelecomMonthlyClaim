@@ -645,7 +645,9 @@ async function openCdpClaimPage(browser, config = {}) {
     await installTelecomPagePatches(context);
   }
   const reusedPage = process.env.TELECOM_REUSE_VALIDATED_PAGE !== 'false'
-    ? findReusableCdpEntryPage(context, config.entryUrl)
+    ? (config.loginAlreadyComplete
+      ? [...context.pages()].reverse().find(candidate => candidate.url().startsWith('https://wapbj.189.cn/'))
+      : findReusableCdpEntryPage(context, config.entryUrl))
     : null;
   const page = reusedPage || await context.newPage();
   const cdpProfile = await applyCdpBrowserProfile(page, browser.version(), config.browserProfile || 'wechat', {
@@ -2624,7 +2626,11 @@ async function runClaim(config) {
   try {
     const { page } = await newMobilePage(browser, config);
     activePage = page;
-    activePage = await loginWithRetry(browser, page, smsInbox, config);
+    if (config.loginAlreadyComplete) {
+      log('Login was already completed by the Chrome extension preflight');
+    } else {
+      activePage = await loginWithRetry(browser, page, smsInbox, config);
+    }
     await choosePackage(activePage, config);
     const result = await confirmWithRetry(activePage, smsInbox, config);
     if (result === 'dry-run') return;
