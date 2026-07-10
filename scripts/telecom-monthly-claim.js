@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const {
   applyCdpBrowserProfile,
@@ -372,6 +373,33 @@ async function launchBrowser(config) {
   }
   if (config.browserChannel && config.browserChannel !== 'bundled') options.channel = config.browserChannel;
   try {
+    if (nativeHeadedChrome) {
+      const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-claim-playwright-'));
+      const context = await chromium.launchPersistentContext(userDataDir, {
+        ...options,
+        ...nativeBrowserContextOptions(),
+      });
+      const adapter = {
+        persistentContext: context,
+        version: () => context.browser()?.version() || '',
+        newContext: async () => context,
+        close: async () => {
+          try {
+            await context.close();
+          } finally {
+            fs.rmSync(userDataDir, { recursive: true, force: true });
+          }
+        },
+      };
+      log('Browser launched', {
+        version: adapter.version(),
+        channel: options.channel || 'bundled',
+        persistent: true,
+        stealth: config.stealthMode,
+        driver,
+      });
+      return adapter;
+    }
     const browser = await chromium.launch(options);
     log('Browser launched', {
       version: browser.version(),
@@ -657,7 +685,9 @@ async function newMobilePage(browser, config = {}) {
     ? nativeBrowserContextOptions()
     : mobileContextOptions(browser.version()));
   if (!config.minimalLogin) await installTelecomPagePatches(context);
-  const page = await context.newPage();
+  const page = browser.persistentContext
+    ? (context.pages()[0] || await context.newPage())
+    : await context.newPage();
   await attachBrokenUniRouteGuard(page);
   if (config.blockHeavyAssets) {
     await page.route('**/*', route => {
