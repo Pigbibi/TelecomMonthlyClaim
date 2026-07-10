@@ -11,16 +11,16 @@ const {
 } = require('../src/browser-stealth');
 
 const entryUrl = process.env.TELECOM_ENTRY_URL;
-if (!entryUrl) {
-  console.error('Missing TELECOM_ENTRY_URL');
-  process.exit(2);
-}
 
 const browserProfile = (process.env.TELECOM_BROWSER_PROFILE || 'wechat').toLowerCase();
 const browserCdpUrl = process.env.BROWSER_CDP_URL || '';
 const cdpProfileMode = (process.env.TELECOM_CDP_PROFILE_MODE || 'auto').toLowerCase();
 const minimalLogin = process.env.TELECOM_MINIMAL_LOGIN === 'true';
 const keepValidatedPageOpen = process.env.TELECOM_KEEP_VALIDATED_PAGE_OPEN !== 'false';
+
+function isEntryRenderReady(state) {
+  return state.htmlLength > 3000 && (state.bodyLength > 20 || state.visiblePhoneInputs > 0);
+}
 
 function buildValidationCases() {
   const proxyServer = process.env.OPENWRT_HTTP_PROXY || '';
@@ -38,11 +38,18 @@ async function readPageRenderState(page) {
     return await page.evaluate(() => ({
       htmlLength: document.documentElement?.outerHTML?.length || 0,
       bodyLength: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
+      visiblePhoneInputs: [...document.querySelectorAll(
+        'input[type="tel"], input[placeholder*="手机"], #phone, #phoneNumber, input.van-field__control',
+      )].filter(element => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      }).length,
       title: document.title || '',
       navigating: false,
     }));
   } catch {
-    return { htmlLength: 0, bodyLength: 0, title: '', navigating: true };
+    return { htmlLength: 0, bodyLength: 0, visiblePhoneInputs: 0, title: '', navigating: true };
   }
 }
 
@@ -56,7 +63,7 @@ async function waitForWafPageReady(page, timeoutMs = 45000) {
       await page.waitForTimeout(800);
       continue;
     }
-    if (last.htmlLength > 3000 && last.bodyLength > 20) return { ready: true, ...last };
+    if (isEntryRenderReady(last)) return { ready: true, ...last };
     await page.waitForTimeout(last.htmlLength < 500 ? 1500 : 800);
   }
   return { ready: false, ...last };
@@ -97,7 +104,7 @@ async function validateEntry({ label, proxyServer }) {
 
   const response = await page.goto(entryUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
   const waf = await waitForWafPageReady(page, 45000);
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
   const html = await page.content();
   const body = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim());
   const phoneInputs = await page.locator(
@@ -131,7 +138,8 @@ async function validateEntry({ label, proxyServer }) {
   return pass;
 }
 
-(async () => {
+async function main() {
+  if (!entryUrl) throw new Error('Missing TELECOM_ENTRY_URL');
   const cases = buildValidationCases();
   let ok = true;
   for (const item of cases) {
@@ -142,8 +150,14 @@ async function validateEntry({ label, proxyServer }) {
       console.log(JSON.stringify({ label: item.label, pass: false, error: err.message }));
     }
   }
-  process.exit(ok ? 0 : 1);
-})().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+  process.exitCode = ok ? 0 : 1;
+}
+
+if (require.main === module) {
+  main().catch(err => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { isEntryRenderReady };
