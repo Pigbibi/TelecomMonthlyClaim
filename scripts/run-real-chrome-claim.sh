@@ -6,8 +6,16 @@ PORT="${TELECOM_CDP_PORT:-9222}"
 OS_NAME="$(uname -s)"
 KEEP_CDP_OPEN="${TELECOM_KEEP_CDP_OPEN:-false}"
 SKIP_ENTRY_VALIDATION="${TELECOM_SKIP_ENTRY_VALIDATION:-false}"
+TRANSPORT="${TELECOM_BROWSER_TRANSPORT:-auto}"
 
-export BROWSER_CDP_URL="${BROWSER_CDP_URL:-http://127.0.0.1:${PORT}}"
+if [ "$TRANSPORT" = "auto" ]; then
+  if [ "$OS_NAME" = "Darwin" ]; then
+    TRANSPORT=playwright
+  else
+    TRANSPORT=cdp
+  fi
+fi
+
 export TELECOM_REQUIRE_REAL_CHROME="${TELECOM_REQUIRE_REAL_CHROME:-true}"
 export TELECOM_MINIMAL_LOGIN="${TELECOM_MINIMAL_LOGIN:-true}"
 export TELECOM_SKIP_ORIGIN_WARMUP="${TELECOM_SKIP_ORIGIN_WARMUP:-true}"
@@ -23,6 +31,20 @@ PROBE_ONLY="${TELECOM_PROBE_ONLY:-false}"
 if [ "${TELECOM_MINIMAL_LOGIN}" = "true" ] && [ "${TELECOM_ALLOW_MULTI_SEND_RETRY:-false}" != "true" ]; then
   export SEND_CODE_ATTEMPTS=1
 fi
+
+if [ "$TRANSPORT" = "playwright" ]; then
+  unset BROWSER_CDP_URL
+  export TELECOM_BROWSER_PROFILE="${TELECOM_BROWSER_PROFILE:-desktop}"
+  if [ "$PROBE_ONLY" = "true" ]; then
+    node "$ROOT_DIR/scripts/validate-entry-page.js"
+    echo "Entry probe completed; skipping SMS send and claim."
+    exit 0
+  fi
+  node "$ROOT_DIR/scripts/telecom-monthly-claim.js"
+  exit $?
+fi
+
+export BROWSER_CDP_URL="${BROWSER_CDP_URL:-http://127.0.0.1:${PORT}}"
 
 if [ "$OS_NAME" = "Darwin" ]; then
   export TELECOM_USE_DEFAULT_CHROME="${TELECOM_USE_DEFAULT_CHROME:-1}"

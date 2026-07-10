@@ -6,6 +6,7 @@ const {
   getStealthChromium,
   chromeLaunchArgs,
   mobileContextOptions,
+  nativeBrowserContextOptions,
   playwrightLaunchExtras,
 } = require('../src/browser-stealth');
 const { loadConfig } = require('../src/config');
@@ -345,21 +346,21 @@ async function launchBrowser(config) {
     });
     return browser;
   }
-  if (config.requireRealChrome) {
+  if (config.requireRealChrome && (!config.browserChannel || config.browserChannel === 'bundled')) {
     throw new Error(
-      'TELECOM_REQUIRE_REAL_CHROME is set but BROWSER_CDP_URL is empty. '
-      + 'Run bash scripts/run-real-chrome-claim.sh / npm run claim:cdp, '
-      + 'or start real Chrome first: bash scripts/start-chrome-cdp.sh (Mac) '
-      + 'or bash scripts/start-chrome-cdp-linux.sh (Linux/CI), then export BROWSER_CDP_URL=http://127.0.0.1:9222',
+      'TELECOM_REQUIRE_REAL_CHROME requires BROWSER_CDP_URL or a real BROWSER_CHANNEL such as chrome',
     );
   }
   const chromium = config.stealthMode && driver === 'playwright'
     ? getStealthChromium(true)
     : playwrightChromium;
+  const nativeHeadedChrome = config.requireRealChrome && config.minimalLogin;
   const options = {
     headless: config.headless,
-    args: chromeLaunchArgs(),
-    ...playwrightLaunchExtras(),
+    args: nativeHeadedChrome ? [] : chromeLaunchArgs(),
+    ...(nativeHeadedChrome
+      ? { ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'] }
+      : playwrightLaunchExtras()),
   };
   if (config.openwrtProxy) {
     const label = config.proxyPoolProxy && config.openwrtProxy === config.proxyPoolProxy ? 'proxy pool' : 'configured proxy';
@@ -652,8 +653,10 @@ async function openCdpClaimPage(browser, config = {}) {
 async function newMobilePage(browser, config = {}) {
   if (config.browserCdpUrl) return openCdpClaimPage(browser, config);
 
-  const context = await browser.newContext(mobileContextOptions(browser.version()));
-  await installTelecomPagePatches(context);
+  const context = await browser.newContext(config.requireRealChrome && config.minimalLogin
+    ? nativeBrowserContextOptions()
+    : mobileContextOptions(browser.version()));
+  if (!config.minimalLogin) await installTelecomPagePatches(context);
   const page = await context.newPage();
   await attachBrokenUniRouteGuard(page);
   if (config.blockHeavyAssets) {

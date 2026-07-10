@@ -3,9 +3,19 @@ const assert = require('node:assert/strict');
 const {
   applyCdpBrowserProfile,
   mobileUserAgent,
+  nativeBrowserContextOptions,
   chromeLaunchArgs,
   resolveCdpProfileMode,
 } = require('../src/browser-stealth');
+
+test('native headed Chrome context keeps the browser viewport', () => {
+  assert.deepEqual(nativeBrowserContextOptions(), {
+    locale: 'zh-CN',
+    timezoneId: 'Asia/Shanghai',
+    ignoreHTTPSErrors: true,
+    viewport: null,
+  });
+});
 
 test('mobile user agent tracks launched Chrome version', () => {
   const ua = mobileUserAgent('Google Chrome 150.0.7871.46');

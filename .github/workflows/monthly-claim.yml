@@ -78,6 +78,8 @@ jobs:
       PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
+      TELECOM_BROWSER_TRANSPORT: "auto"
+      TELECOM_BROWSER_PROFILE: "desktop"
       BROWSER_CDP_URL: "http://127.0.0.1:9222"
       TELECOM_STEALTH_MODE: "false"
       TELECOM_MINIMAL_LOGIN: "true"
@@ -336,7 +338,9 @@ jobs:
           if [ -n "${PROXY_TUNNEL_PID:-}" ]; then
             kill "$PROXY_TUNNEL_PID" 2>/dev/null || true
           fi
-          pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+          if [ "${TELECOM_BROWSER_TRANSPORT:-auto}" != "playwright" ] && [ "$(uname -s)" != "Darwin" ]; then
+            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+          fi
           pkill -x Xvfb 2>/dev/null || true
 
       - name: Commit monthly state

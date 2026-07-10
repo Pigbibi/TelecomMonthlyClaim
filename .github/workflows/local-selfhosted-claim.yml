@@ -71,6 +71,8 @@ jobs:
       PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
+      TELECOM_BROWSER_TRANSPORT: "playwright"
+      TELECOM_BROWSER_PROFILE: "desktop"
       BROWSER_CDP_URL: "http://127.0.0.1:9222"
       TELECOM_STEALTH_MODE: "false"
       TELECOM_MINIMAL_LOGIN: "true"
