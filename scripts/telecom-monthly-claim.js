@@ -5,6 +5,8 @@ const { getStealthChromium, chromeLaunchArgs, mobileContextOptions, playwrightLa
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient, sleep } = require('../src/sms-inbox-client');
 const { stateMonth, isFinalRetryDay, beijingParts } = require('../src/retry-date');
+const { observeTelecomPage } = require('../src/page-observer');
+const { planTelecomPageAction } = require('../src/page-planner');
 const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { evaluateSliderImageMatch } = require('../src/slider-local-match');
 
@@ -641,60 +643,190 @@ async function waitForLoginEntry(page, timeoutMs = 25000) {
 }
 
 async function detectLoginFormState(page) {
-  return page.evaluate(({ phoneSelectors, codeSelectors, sendSelectors }) => {
-    const visible = element => {
-      if (!element) return false;
-      const style = getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      return style.display !== 'none'
-        && style.visibility !== 'hidden'
-        && rect.width > 0
-        && rect.height > 0;
-    };
-    const firstVisible = selectors => {
-      for (const selector of selectors) {
-        const match = Array.from(document.querySelectorAll(selector)).find(visible);
-        if (match) {
-          return {
-            selector,
-            placeholder: match.getAttribute('placeholder') || '',
-            type: match.getAttribute('type') || '',
-          };
-        }
-      }
-      return null;
-    };
-    const phone = firstVisible(phoneSelectors);
-    const code = firstVisible(codeSelectors);
-    const send = firstVisible(sendSelectors);
-    return {
-      htmlLength: document.documentElement?.outerHTML?.length || 0,
-      bodyLength: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
-      title: document.title || '',
-      formReady: !!phone,
-      hasPhone: !!phone,
-      hasCode: !!code,
-      hasSendBtn: !!send,
-      phone,
-      code,
-      send,
-    };
-  }, {
+  return detectClaimPageState(page);
+}
+
+async function detectClaimPageState(page) {
+  return observeTelecomPage(page, {
     phoneSelectors: LOGIN_PHONE_SELECTORS,
     codeSelectors: LOGIN_CODE_SELECTORS,
     sendSelectors: LOGIN_SMS_SEND_SELECTORS,
   }).catch(() => ({
+    url: '',
     htmlLength: 0,
     bodyLength: 0,
     title: '',
+    bodyText: '',
+    dialogs: [],
+    actionTexts: [],
+    packageTexts: [],
+    activeNameText: '',
+    slider: { popup: false, track: false, canvas: false, message: '' },
     formReady: false,
     hasPhone: false,
     hasCode: false,
     hasSendBtn: false,
+    hasConductBtn: false,
+    hasPayConfirmBtn: false,
+    hasSecondSmsBtn: false,
+    hasSecondCodeInput: false,
+    hasSecondConfirmBtn: false,
+    hasFinalAgreementBtn: false,
     phone: null,
     code: null,
     send: null,
+    pageState: 'unknown',
+    pageStateConfidence: 0,
+    pageStateReason: 'page observation failed',
   }));
+}
+
+async function clickSmsLoginTab(page, config, attempt, observed) {
+  const smsLogin = page.getByText('短信验证码登录', { exact: true });
+  if (await smsLogin.isVisible().catch(() => false)) {
+    await actionDelay(config);
+    await smsLogin.click({ force: true });
+    log('Clicked SMS login tab', { strategy: 'text', attempt });
+    return true;
+  }
+  if (observed?.pageState === 'entry_shell') {
+    const domTarget = await activateSmsLoginByDom(page).catch(() => null);
+    if (domTarget) {
+      log('Clicked SMS login tab', { strategy: 'dom-shell', attempt, target: domTarget });
+      await sleep(800);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function advanceLoginGoal(page, config, goal, options = {}) {
+  const maxSteps = options.maxSteps || 4;
+  for (let step = 1; step <= maxSteps; step += 1) {
+    const observed = await detectClaimPageState(page);
+    let plan = planTelecomPageAction({
+      goal,
+      observation: observed,
+      phoneFilled: !!options.phoneFilled,
+    });
+    if (
+      plan.action === 'wait'
+      && (goal === 'ensure_sms_login_form' || goal === 'trigger_login_sms_send')
+      && await page.getByText('短信验证码登录', { exact: true }).isVisible().catch(() => false)
+    ) {
+      plan = {
+        action: 'click_sms_login_tab',
+        reason: 'visible sms login tab fallback',
+      };
+    }
+    log('Login goal plan', {
+      goal,
+      step,
+      pageState: observed.pageState,
+      confidence: observed.pageStateConfidence,
+      action: plan.action,
+      reason: plan.reason,
+    });
+
+    if (plan.action === 'done' || plan.action === 'handoff_slider') {
+      return { observed, plan };
+    }
+    if (plan.action === 'click_login_sms_send') {
+      await clickLoginSmsButton(page, config);
+      return { observed, plan };
+    }
+    if (plan.action === 'fill_phone_first') {
+      return { observed, plan };
+    }
+    if (plan.action === 'click_sms_login_tab') {
+      const clicked = await clickSmsLoginTab(page, config, step, observed);
+      if (!clicked) {
+        await sleep(800);
+      }
+      const phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, Math.max(Number(config?.actionDelayMs || 0) * 2, 12000));
+      if (phoneField && goal === 'ensure_sms_login_form') {
+        return { observed: await detectLoginFormState(page), plan: { action: 'done', reason: 'sms login form became ready after tab switch' } };
+      }
+      continue;
+    }
+    if (plan.action === 'wait') {
+      await sleep(plan.waitMs || 800);
+      continue;
+    }
+    if (plan.action === 'stop') {
+      return { observed, plan };
+    }
+  }
+  return {
+    observed: await detectClaimPageState(page),
+    plan: { action: 'stop', reason: `goal ${goal} did not converge within step budget` },
+  };
+}
+
+async function executeTargetPackageSelection(page, config) {
+  await page.locator('li').filter({ hasText: config.productName }).waitFor({ state: 'visible' });
+  await actionDelay(config);
+  await page.locator('li').filter({ hasText: config.productName }).click({ force: true });
+  await sleep(1500);
+  const checked = await page.locator('li.checked').innerText().catch(() => '');
+  if (!checked.includes(config.productName)) throw new Error(`Target package not selected: ${checked}`);
+  await actionDelay(config);
+  await page.locator('#conduct').click({ force: true });
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await sleep(8000);
+}
+
+async function advanceClaimGoal(page, config, goal, options = {}) {
+  const maxSteps = options.maxSteps || 3;
+  for (let step = 1; step <= maxSteps; step += 1) {
+    const observed = await detectClaimPageState(page);
+    const plan = planTelecomPageAction({
+      goal,
+      observation: {
+        ...observed,
+        dryRunReady: !!options.dryRunReady,
+        confirmCodeFilled: !!options.confirmCodeFilled,
+        afterSecondConfirmation: !!options.afterSecondConfirmation,
+      },
+      phoneFilled: !!options.phoneFilled,
+    });
+    log('Claim goal plan', {
+      goal,
+      step,
+      pageState: observed.pageState,
+      confidence: observed.pageStateConfidence,
+      action: plan.action,
+      reason: plan.reason,
+    });
+    if (plan.action === 'done' || plan.action === 'stop_before_final_submit') {
+      return { observed, plan };
+    }
+    if (plan.action === 'select_target_package') {
+      await executeTargetPackageSelection(page, config);
+      continue;
+    }
+    if (plan.action === 'click_second_confirmation') {
+      await actionDelay(config);
+      await page.locator('#secondConfirmation').click({ force: true });
+      await sleep(12000);
+      return { observed: await detectClaimPageState(page), plan };
+    }
+    if (plan.action === 'click_final_agreement') {
+      await actionDelay(config);
+      await page.locator('#confirm2').click({ force: true });
+      await sleep(8000);
+      return { observed: await detectClaimPageState(page), plan };
+    }
+    if (plan.action === 'wait' || plan.action === 'wait_for_success') {
+      await sleep(plan.waitMs || 1000);
+      continue;
+    }
+    return { observed, plan };
+  }
+  return {
+    observed: await detectClaimPageState(page),
+    plan: { action: 'stop', reason: `goal ${goal} did not converge within step budget` },
+  };
 }
 
 async function ensureSmsLoginForm(page, config) {
@@ -703,18 +835,21 @@ async function ensureSmsLoginForm(page, config) {
     let phoneField = await firstVisibleLocator(page, LOGIN_PHONE_SELECTORS);
     if (phoneField) return phoneField;
 
-    const smsLogin = page.getByText('短信验证码登录', { exact: true });
-    if (await smsLogin.isVisible().catch(() => false)) {
-      await actionDelay(config);
-      await smsLogin.click({ force: true });
-      log('Clicked SMS login tab', { strategy: 'text', attempt });
-      phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, smsFormWaitMs);
-      if (phoneField) return phoneField;
-      const domTarget = await activateSmsLoginByDom(page).catch(() => null);
-      if (domTarget) log('Clicked SMS login tab', { strategy: 'dom', attempt, target: domTarget });
-      await sleep(800);
-    }
-
+    const goalResult = await advanceLoginGoal(page, config, 'ensure_sms_login_form', { maxSteps: 3 });
+    const observed = goalResult.observed || await detectLoginFormState(page);
+    log('Observed login page state', {
+      attempt,
+      pageState: observed.pageState,
+      confidence: observed.pageStateConfidence,
+      reason: observed.pageStateReason,
+      title: observed.title,
+      hasPhone: observed.hasPhone,
+      hasCode: observed.hasCode,
+      hasSendBtn: observed.hasSendBtn,
+      actions: observed.actionTexts?.slice(0, 6) || [],
+      plannerAction: goalResult.plan?.action,
+      plannerReason: goalResult.plan?.reason,
+    });
     phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, smsFormWaitMs);
     if (phoneField) return phoneField;
 
@@ -988,7 +1123,14 @@ async function sendLoginCode(page, config) {
     const phoneField = await ensureSmsLoginForm(page, config);
     await fillInputField(phoneField.locator, config.phone);
     await humanPause(600, 1200);
-    await clickLoginSmsButton(page, config);
+    const goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: true });
+    if (goalResult.plan?.action === 'fill_phone_first') {
+      throw new Error('Planner expected phone field to be filled before sending login SMS');
+    }
+    if (goalResult.plan?.action === 'stop') {
+      const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+      throw new Error(`Planner could not trigger login SMS send: ${goalResult.plan.reason}; page summary: ${mask(JSON.stringify(summary))}`);
+    }
     await handleLoginSmsSlider(page, config, 10000);
     await sleep(3000);
     const closedDialogs = await closeDialogs(page);
@@ -1004,7 +1146,14 @@ async function sendLoginCode(page, config) {
   await humanPause(1500, 2800);
   await page.mouse.move(200 + Math.random() * 40, 520 + Math.random() * 20).catch(() => {});
   await humanPause(400, 900);
-  await clickLoginSmsButton(page, config);
+  const goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: true });
+  if (goalResult.plan?.action === 'fill_phone_first') {
+    throw new Error('Planner expected phone field to be filled before sending login SMS');
+  }
+  if (goalResult.plan?.action === 'stop') {
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    throw new Error(`Planner could not trigger login SMS send: ${goalResult.plan.reason}; page summary: ${mask(JSON.stringify(summary))}`);
+  }
   // Do not block on preActiveMeta before the click path has already fired; only observe after.
   await waitForTelecomApiReady(page, config, [/preActiveMeta/], 15000).catch(() => false);
   await handleLoginSmsSlider(page, config);
@@ -1091,6 +1240,9 @@ async function gotoLoginEntryPage(page, config, reason) {
           status,
           url: page.url(),
           minimalLogin: true,
+          pageState: form.pageState,
+          confidence: form.pageStateConfidence,
+          pageStateReason: form.pageStateReason,
           htmlLength: form.htmlLength,
           entryReady,
           phone: form.phone,
@@ -1104,6 +1256,9 @@ async function gotoLoginEntryPage(page, config, reason) {
         strategy: candidate.label,
         status,
         url: page.url(),
+        pageState: form.pageState,
+        confidence: form.pageStateConfidence,
+        pageStateReason: form.pageStateReason,
         htmlLength: form.htmlLength,
         bodyLength: form.bodyLength,
         phone: form.phone,
@@ -1577,17 +1732,15 @@ async function loginWithRetry(browser, page, smsInbox, config) {
 }
 
 async function choosePackage(page, config) {
-  await page.locator('li').filter({ hasText: config.productName }).waitFor({ state: 'visible' });
-  await actionDelay(config);
-  await page.locator('li').filter({ hasText: config.productName }).click({ force: true });
-  await sleep(1500);
-  const checked = await page.locator('li.checked').innerText().catch(() => '');
-  if (!checked.includes(config.productName)) throw new Error(`Target package not selected: ${checked}`);
-  await actionDelay(config);
-  await page.locator('#conduct').click({ force: true });
-  await page.waitForLoadState('domcontentloaded').catch(() => {});
-  await sleep(8000);
-  const activeName = await page.locator('#activeName').innerText().catch(() => '');
+  let goalResult = await advanceClaimGoal(page, config, 'reach_confirm_page_after_package_select', { maxSteps: 2 });
+  if (goalResult.plan?.action === 'stop') {
+    const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+    throw new Error(`Planner could not reach confirm page after package select: ${goalResult.plan.reason}; page summary: ${mask(JSON.stringify(summary))}`);
+  }
+  if (goalResult.plan?.action !== 'done') {
+    goalResult = await advanceClaimGoal(page, config, 'reach_confirm_page_after_package_select', { maxSteps: 2 });
+  }
+  const activeName = goalResult.observed?.activeNameText || await page.locator('#activeName').innerText().catch(() => '');
   if (!activeName.includes(config.productName)) throw new Error(`Confirm page package mismatch: ${activeName}`);
 }
 
@@ -1951,22 +2104,43 @@ async function confirmWithRetry(page, smsInbox, config) {
       continue;
     }
     if (config.dryRunBeforeFinalSubmit) {
+      const goalResult = await advanceClaimGoal(page, config, 'complete_final_submit', {
+        maxSteps: 1,
+        dryRunReady: true,
+      });
       const summary = await getPageSummary(page);
       log('Dry run reached final submit step; confirmation SMS was received, final submit was not clicked.', summary);
+      log('Dry run planner decision', {
+        action: goalResult.plan?.action,
+        reason: goalResult.plan?.reason,
+        pageState: goalResult.observed?.pageState,
+      });
       return 'dry-run';
     }
     await actionDelay(config);
     await page.locator('#smsCodeProtocol').fill(sms.code);
-    await actionDelay(config);
-    await page.locator('#secondConfirmation').click({ force: true });
-    await sleep(12000);
+    const submitResult = await advanceClaimGoal(page, config, 'complete_final_submit', {
+      maxSteps: 2,
+      confirmCodeFilled: true,
+    });
+    if (submitResult.plan?.action === 'fill_confirm_code_first') {
+      throw new Error('Planner expected confirmation code to be filled before final submit');
+    }
+    if (submitResult.plan?.action === 'stop') {
+      const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
+      throw new Error(`Planner could not submit final confirmation: ${submitResult.plan.reason}; page summary: ${mask(JSON.stringify(summary))}`);
+    }
     if (await waitForSuccess(page, 20000, config)) return;
     const text = await visibleText(page);
     if (/验证码.*错误|验证码.*过期|随机短信输入错误/.test(text)) {
       log('Confirmation code rejected, retrying');
       continue;
     }
-    if (await clickFinalAgreementIfPresent(page, config)) {
+    const agreementResult = await advanceClaimGoal(page, config, 'complete_final_submit', {
+      maxSteps: 2,
+      afterSecondConfirmation: true,
+    });
+    if (agreementResult.plan?.action === 'click_final_agreement' || agreementResult.observed?.hasFinalAgreementBtn) {
       if (await waitForSuccess(page, 20000, config)) return;
     }
   }
@@ -1988,9 +2162,11 @@ async function clickFinalAgreementIfPresent(page, config) {
 async function waitForSuccess(page, timeoutMs, config) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const body = await visibleText(page);
+    const observed = await detectClaimPageState(page);
+    const body = observed.bodyText || await visibleText(page);
     if (
-      /已办理成功|支付成功/.test(body)
+      observed.pageState === 'success_page'
+      || /已办理成功|支付成功/.test(body)
       || (config?.productName && body.includes('业务名称') && body.includes(config.productName))
       || page.url().includes('preDeposit_result')
     ) return true;
@@ -2111,11 +2287,14 @@ module.exports = {
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
   detectLoginFormState,
+  detectClaimPageState,
   ensureSmsLoginForm,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  advanceLoginGoal,
+  advanceClaimGoal,
   chooseSliderDistanceCandidate,
   waitForTelecomApiReady,
 };
