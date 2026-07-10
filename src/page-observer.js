@@ -25,21 +25,37 @@ async function observeTelecomPage(page, {
       || element?.getAttribute?.('title')
       || '',
     ).replace(/\s+/g, ' ').trim();
-    const firstVisible = selectors => {
+    const safeQueryAll = selector => {
+      if (!selector) return [];
+      try {
+        return Array.from(document.querySelectorAll(selector));
+      } catch {
+        return [];
+      }
+    };
+    const describeElement = (element, selector) => ({
+      selector,
+      placeholder: element.getAttribute('placeholder') || '',
+      type: element.getAttribute('type') || '',
+      text: textOf(element).slice(0, 120),
+    });
+    const findByTextPattern = (selector, pattern) => safeQueryAll(selector)
+      .filter(visible)
+      .find(element => pattern.test(textOf(element)));
+    const firstVisible = (selectors, fallback = null) => {
       for (const selector of selectors) {
-        const match = Array.from(document.querySelectorAll(selector)).find(visible);
+        const match = safeQueryAll(selector).find(visible);
         if (match) {
-          return {
-            selector,
-            placeholder: match.getAttribute('placeholder') || '',
-            type: match.getAttribute('type') || '',
-            text: textOf(match).slice(0, 120),
-          };
+          return describeElement(match, selector);
         }
+      }
+      if (fallback?.selector && fallback?.pattern) {
+        const match = findByTextPattern(fallback.selector, fallback.pattern);
+        if (match) return describeElement(match, fallback.label || '__text_fallback__');
       }
       return null;
     };
-    const collectTexts = (selector, pattern, limit = 12) => Array.from(document.querySelectorAll(selector))
+    const collectTexts = (selector, pattern, limit = 12) => safeQueryAll(selector)
       .filter(visible)
       .map(textOf)
       .filter(Boolean)
@@ -47,7 +63,11 @@ async function observeTelecomPage(page, {
       .slice(0, limit);
     const phone = firstVisible(phoneList);
     const code = firstVisible(codeList);
-    const send = firstVisible(sendList);
+    const send = firstVisible(sendList, {
+      selector: 'button,a,span,div,input',
+      pattern: /(获取|发送|点击获取).*(验证码|校验码|动态码|随机码)|获取验证码|发送验证码|点击获取/i,
+      label: '__send_text_fallback__',
+    });
     const activeNameText = textOf(document.querySelector('#activeName')).slice(0, 160);
     const packageTexts = Array.from(document.querySelectorAll('li'))
       .filter(visible)

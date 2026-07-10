@@ -651,7 +651,7 @@ async function detectClaimPageState(page) {
     phoneSelectors: LOGIN_PHONE_SELECTORS,
     codeSelectors: LOGIN_CODE_SELECTORS,
     sendSelectors: LOGIN_SMS_SEND_SELECTORS,
-  }).catch(() => ({
+  }).catch(err => ({
     url: '',
     htmlLength: 0,
     bodyLength: 0,
@@ -677,7 +677,7 @@ async function detectClaimPageState(page) {
     send: null,
     pageState: 'unknown',
     pageStateConfidence: 0,
-    pageStateReason: 'page observation failed',
+    pageStateReason: `page observation failed: ${err?.message || 'unknown error'}`,
   }));
 }
 
