@@ -95,7 +95,7 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /Run claim via real Chrome CDP/);
   assert.match(localWorkflowText, /bash scripts\/run-real-chrome-claim\.sh/);
   assert.match(localWorkflowText, /TELECOM_CDP_PROFILE_MODE: "native"/);
-  assert.match(localWorkflowText, /TELECOM_BROWSER_TRANSPORT: "extension"/);
+  assert.match(localWorkflowText, /TELECOM_BROWSER_TRANSPORT: "native_playwright"/);
   assert.match(localWorkflowText, /TELECOM_BROWSER_PROFILE: "desktop"/);
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "0"/);
   assert.match(localWorkflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "true"/);
@@ -150,6 +150,20 @@ test('extension preflight does not persist phone or browser profile data', () =>
   assert.match(script, /extension-preflight-failed/);
   assert.match(script, /connectOverCDP/);
   assert.match(script, /TELECOM_EXTENSION_STAGE_TIMEOUT_MS/);
+});
+
+test('native Playwright transport starts a fresh headed system Chrome before attachment', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts/run-native-chrome-claim.js'), 'utf8');
+  const wrapper = fs.readFileSync(path.join(root, 'scripts/run-real-chrome-claim.sh'), 'utf8');
+  assert.match(wrapper, /TRANSPORT=native_playwright/);
+  assert.match(wrapper, /run-native-chrome-claim\.js/);
+  assert.match(script, /Google Chrome\.app\/Contents\/MacOS\/Google Chrome/);
+  assert.match(script, /getFreeTcpPort/);
+  assert.match(script, /mkdtempSync/);
+  assert.match(script, /TELECOM_REUSE_VALIDATED_PAGE: 'true'/);
+  assert.match(script, /`--remote-debugging-port=\$\{cdpPort\}`/);
+  assert.doesNotMatch(script, /--headless/);
+  assert.doesNotMatch(script, /remote-debugging-port=0/);
 });
 
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {
