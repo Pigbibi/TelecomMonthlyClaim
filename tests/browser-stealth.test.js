@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyCdpBrowserProfile, mobileUserAgent, chromeLaunchArgs } = require('../src/browser-stealth');
+const {
+  applyCdpBrowserProfile,
+  mobileUserAgent,
+  chromeLaunchArgs,
+  resolveCdpProfileMode,
+} = require('../src/browser-stealth');
 
 test('mobile user agent tracks launched Chrome version', () => {
   const ua = mobileUserAgent('Google Chrome 150.0.7871.46');
@@ -39,4 +44,30 @@ test('cdp browser profile applies mobile emulation overrides', async () => {
   assert.equal(commands[3][1].userAgentMetadata.platform, 'Android');
   assert.equal(commands[3][1].userAgentMetadata.platformVersion, '13.0.0');
   assert.equal(commands[3][1].userAgentMetadata.model, 'Pixel 7');
+});
+
+test('minimal-login real Chrome CDP path keeps native browser profile', async () => {
+  const commands = [];
+  const page = {
+    setViewportSize: async size => { commands.push(['viewport', size]); },
+    context: () => ({
+      newCDPSession: async () => ({
+        send: async (method, payload) => { commands.push([method, payload]); },
+      }),
+    }),
+  };
+
+  const result = await applyCdpBrowserProfile(page, 'Google Chrome 150.0.7871.46', 'wechat', {
+    mode: 'native',
+    minimalLogin: true,
+  });
+
+  assert.deepEqual(commands, []);
+  assert.deepEqual(result, { applied: false, mode: 'native' });
+});
+
+test('auto CDP profile mode resolves to native for minimal login and emulated otherwise', () => {
+  assert.equal(resolveCdpProfileMode('auto', { minimalLogin: true }), 'native');
+  assert.equal(resolveCdpProfileMode('auto', { minimalLogin: false }), 'emulated');
+  assert.equal(resolveCdpProfileMode('force', { minimalLogin: true }), 'emulated');
 });

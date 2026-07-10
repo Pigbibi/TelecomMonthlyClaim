@@ -18,6 +18,8 @@ if (!entryUrl) {
 
 const browserProfile = (process.env.TELECOM_BROWSER_PROFILE || 'wechat').toLowerCase();
 const browserCdpUrl = process.env.BROWSER_CDP_URL || '';
+const cdpProfileMode = (process.env.TELECOM_CDP_PROFILE_MODE || 'auto').toLowerCase();
+const minimalLogin = process.env.TELECOM_MINIMAL_LOGIN === 'true';
 
 async function readPageRenderState(page) {
   try {
@@ -54,7 +56,10 @@ async function openClaimPage({ label, proxyServer }) {
     const context = browser.contexts()?.[0];
     if (!context) throw new Error('CDP browser has no default context');
     const page = await context.newPage();
-    await applyCdpBrowserProfile(page, browser.version(), browserProfile);
+    await applyCdpBrowserProfile(page, browser.version(), browserProfile, {
+      mode: cdpProfileMode,
+      minimalLogin,
+    });
     return { browser, context, page, mode: 'cdp' };
   }
 

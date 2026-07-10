@@ -77,6 +77,7 @@ jobs:
       TELECOM_STEALTH_MODE: "false"
       TELECOM_MINIMAL_LOGIN: "true"
       TELECOM_SKIP_ORIGIN_WARMUP: "true"
+      TELECOM_CDP_PROFILE_MODE: "native"
       TELECOM_REQUIRE_REAL_CHROME: "true"
       TELECOM_CHROME_PROFILE: "/tmp/telecom-claim-cdp"
       TELECOM_SLIDER_MODE: "api"

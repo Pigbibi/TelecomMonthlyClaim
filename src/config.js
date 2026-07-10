@@ -64,6 +64,7 @@ function loadConfig() {
     browserChannel: process.env.BROWSER_CHANNEL || 'chrome',
     browserCdpUrl: process.env.BROWSER_CDP_URL || '',
     browserProfile: optionalEnv('TELECOM_BROWSER_PROFILE', 'wechat').toLowerCase(),
+    cdpProfileMode: optionalEnv('TELECOM_CDP_PROFILE_MODE', 'auto').toLowerCase(),
     // Prefer real Chrome via CDP. When true, refuse Playwright-launched browsers.
     requireRealChrome: process.env.TELECOM_REQUIRE_REAL_CHROME === 'true'
       || process.env.TELECOM_REQUIRE_REAL_CHROME === '1'

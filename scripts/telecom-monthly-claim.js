@@ -75,6 +75,83 @@ function summarizeHeadersForLog(headers = {}) {
   };
 }
 
+function maskFieldValueForLog(key, value) {
+  const name = String(key || '').toLowerCase();
+  const text = String(value ?? '');
+  if (!text) return text;
+  if (/^(accno|phoneno|phone|mobile|msisdn)$/.test(name)) {
+    return text.replace(/1\d{10}/g, m => `${m.slice(0, 3)}****${m.slice(7)}`);
+  }
+  if (/(campaignid|wxopenid|openid|openid|token|sign|auth|access)/.test(name)) {
+    return shortenSecret(text);
+  }
+  return mask(text);
+}
+
+function summarizePostDataForLog(postData = '') {
+  const raw = String(postData || '');
+  if (!raw) return { length: 0, keys: [], preview: '' };
+
+  let keys = [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      keys = Object.keys(parsed).slice(0, 20);
+      const sanitized = Object.fromEntries(
+        Object.entries(parsed).map(([key, value]) => [key, maskFieldValueForLog(key, value)]),
+      );
+      return {
+        length: raw.length,
+        keys,
+        preview: JSON.stringify(sanitized).slice(0, 240),
+      };
+    }
+  } catch {}
+
+  try {
+    const params = new URLSearchParams(raw);
+    const entries = Array.from(params.entries());
+    if (entries.length > 0) {
+      keys = entries.map(([key]) => key).slice(0, 20);
+      return {
+        length: raw.length,
+        keys,
+        preview: entries
+          .slice(0, 8)
+          .map(([key, value]) => `${key}=${maskFieldValueForLog(key, value)}`)
+          .join('&')
+          .slice(0, 240),
+      };
+    }
+  } catch {}
+
+  return {
+    length: raw.length,
+    keys,
+    preview: mask(raw).slice(0, 240),
+  };
+}
+
+function summarizeResponseHeadersForLog(headers = {}, headersArray = []) {
+  const normalized = Object.fromEntries(
+    Object.entries(headers || {}).map(([key, value]) => [String(key || '').toLowerCase(), String(value || '')]),
+  );
+  const setCookieNames = Array.isArray(headersArray)
+    ? headersArray
+      .filter(entry => String(entry?.name || '').toLowerCase() === 'set-cookie')
+      .map(entry => String(entry?.value || '').split(';')[0]?.split('=')[0]?.trim())
+      .filter(Boolean)
+      .slice(0, 20)
+    : [];
+  return {
+    contentType: normalized['content-type'] || '',
+    cacheControl: normalized['cache-control'] || '',
+    location: maskUrlForLog(normalized.location || ''),
+    setCookieCount: setCookieNames.length,
+    setCookieNames,
+  };
+}
+
 function mask(s) {
   const phone = process.env.TELECOM_PHONE || '';
   let out = String(s || '').replace(/1\d{10}/g, m => `${m.slice(0, 3)}****${m.slice(7)}`);
@@ -155,7 +232,7 @@ async function actionDelay(config) {
 function rememberPageDiagnostic(page, entry) {
   page.__telecomDiagnostics = page.__telecomDiagnostics || [];
   page.__telecomDiagnostics.push({ at: new Date().toISOString(), ...entry });
-  page.__telecomDiagnostics = page.__telecomDiagnostics.slice(-20);
+  page.__telecomDiagnostics = page.__telecomDiagnostics.slice(-40);
 }
 
 function sliderFailureHint(page) {
@@ -383,6 +460,7 @@ function attachSliderApiCapture(page) {
 
 function attachPageDiagnostics(page) {
   attachSliderApiCapture(page);
+  const interestingTelecomUrl = /preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog|preDepositHighPic_check|preDepositHigh_login/i;
   page.on('framenavigated', frame => {
     if (frame !== page.mainFrame()) return;
     if (!/wapbj\.189\.cn/i.test(frame.url())) return;
@@ -399,13 +477,31 @@ function attachPageDiagnostics(page) {
       error: request.failure()?.errorText || '',
     });
   });
+  page.on('request', request => {
+    if (!/wapbj\.189\.cn/i.test(request.url())) return;
+    if (!interestingTelecomUrl.test(request.url())) return;
+    Promise.resolve().then(async () => {
+      const headers = await request.allHeaders().catch(() => request.headers());
+      rememberPageDiagnostic(page, {
+        type: 'request',
+        url: maskUrlForLog(request.url()),
+        method: request.method(),
+        resourceType: request.resourceType(),
+        frameUrl: maskUrlForLog(request.frame()?.url?.() || ''),
+        postData: summarizePostDataForLog(request.postData() || ''),
+        requestHeaders: summarizeHeadersForLog(headers),
+      });
+    }).catch(() => {});
+  });
   page.on('response', response => {
     if (!/wapbj\.189\.cn/i.test(response.url())) return;
-    const interesting = /preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog|preDepositHighPic_check|preDepositHigh_login/i.test(response.url());
+    const interesting = interestingTelecomUrl.test(response.url());
     if (response.status() < 400 && !interesting) return;
     Promise.resolve().then(async () => {
       const request = response.request();
-      const headers = await request.allHeaders().catch(() => request.headers());
+      const requestHeaders = await request.allHeaders().catch(() => request.headers());
+      const responseHeaders = await response.allHeaders().catch(() => response.headers());
+      const responseHeadersArray = await response.headersArray().catch(() => []);
       const entry = {
         type: 'response',
         url: maskUrlForLog(response.url()),
@@ -413,13 +509,14 @@ function attachPageDiagnostics(page) {
         method: request.method(),
         resourceType: request.resourceType(),
         frameUrl: maskUrlForLog(request.frame()?.url?.() || response.frame()?.url?.() || ''),
-        postDataLength: (request.postData() || '').length,
-        requestHeaders: summarizeHeadersForLog(headers),
+        postData: summarizePostDataForLog(request.postData() || ''),
+        requestHeaders: summarizeHeadersForLog(requestHeaders),
+        responseHeaders: summarizeResponseHeadersForLog(responseHeaders, responseHeadersArray),
       };
       rememberPageDiagnostic(page, entry);
       if (!/preActiveMeta|getSliderChallenge|validSlider|sendRandProtocolV3|sendRandByUnlog/i.test(response.url())) return;
       response.text()
-        .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 300) }))
+        .then(body => rememberPageDiagnostic(page, { ...entry, body: mask(body).slice(0, 500) }))
         .catch(() => {});
     }).catch(() => {});
   });
@@ -474,7 +571,10 @@ async function openCdpClaimPage(browser, config = {}) {
     await installTelecomPagePatches(context);
   }
   const page = await context.newPage();
-  await applyCdpBrowserProfile(page, browser.version(), config.browserProfile || 'wechat');
+  const cdpProfile = await applyCdpBrowserProfile(page, browser.version(), config.browserProfile || 'wechat', {
+    mode: config.cdpProfileMode || 'auto',
+    minimalLogin: !!config.minimalLogin,
+  });
   await attachSliderSubmitHook(page);
   await attachBrokenUniRouteGuard(page);
   if (!config.minimalLogin) {
@@ -489,6 +589,8 @@ async function openCdpClaimPage(browser, config = {}) {
     contexts: browser.contexts().length,
     viewport: page.viewportSize(),
     browserProfile: config.browserProfile || 'wechat',
+    cdpProfileMode: cdpProfile?.mode || config.cdpProfileMode || 'auto',
+    cdpProfileApplied: !!cdpProfile?.applied,
     minimalLogin: !!config.minimalLogin,
     patches: !config.minimalLogin,
   });
@@ -2385,5 +2487,7 @@ module.exports = {
   maskUrlForLog,
   summarizeCookieHeader,
   summarizeHeadersForLog,
+  summarizePostDataForLog,
+  summarizeResponseHeadersForLog,
   waitForTelecomApiReady,
 };

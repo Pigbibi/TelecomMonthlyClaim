@@ -12,6 +12,8 @@ const {
   maskUrlForLog,
   summarizeCookieHeader,
   summarizeHeadersForLog,
+  summarizePostDataForLog,
+  summarizeResponseHeadersForLog,
 } = require('../scripts/telecom-monthly-claim');
 
 function fakePage(visibleSelectors) {
@@ -253,6 +255,35 @@ test('summarizes selected request headers for diagnostics', () => {
   assert.equal(summary.secChUaModel, '"Pixel 7"');
   assert.equal(summary.secChUaFullVersionList, '"Chromium";v="131.0.0.0"');
   assert.equal(summary.secFetchSite, 'same-origin');
+});
+
+test('summarizes telecom request post data without exposing secrets', () => {
+  const summary = summarizePostDataForLog('{"accNo":"13800138000","validType":"SLIDER","wxopenid":"abcdef1234567890"}');
+
+  assert.equal(summary.length > 20, true);
+  assert.deepEqual(summary.keys, ['accNo', 'validType', 'wxopenid']);
+  assert.match(summary.preview, /138\*\*\*\*8000/);
+  assert.match(summary.preview, /abcd\*\*\*\*7890/);
+});
+
+test('summarizes telecom response headers and set-cookie names', () => {
+  const summary = summarizeResponseHeadersForLog(
+    {
+      'Content-Type': 'application/json;charset=UTF-8',
+      'Cache-Control': 'no-store',
+      Location: 'https://wapbj.189.cn/path?wxopenid=abcdef1234567890',
+    },
+    [
+      { name: 'set-cookie', value: 'JSESSIONID=abc; Path=/; HttpOnly' },
+      { name: 'set-cookie', value: 'ecs_token=xyz; Path=/; Secure' },
+    ],
+  );
+
+  assert.equal(summary.contentType, 'application/json;charset=UTF-8');
+  assert.equal(summary.cacheControl, 'no-store');
+  assert.match(summary.location, /wxopenid=abcd\*\*\*\*7890/);
+  assert.equal(summary.setCookieCount, 2);
+  assert.deepEqual(summary.setCookieNames, ['JSESSIONID', 'ecs_token']);
 });
 
 test('preActiveMeta HTTP 400 fails fast without reloading', async () => {
