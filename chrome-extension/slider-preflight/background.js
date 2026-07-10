@@ -160,7 +160,7 @@ async function waitForLoginCode(timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const response = await fetch(`${PREFLIGHT_URL}/login-code`);
-    if (response.ok) {
+    if (response.status === 200) {
       const payload = await response.json();
       if (/^\d{4,8}$/.test(String(payload.code || ''))) return String(payload.code);
     }
