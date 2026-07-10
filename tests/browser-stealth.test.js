@@ -13,6 +13,11 @@ test('mobile user agent tracks launched Chrome version', () => {
   assert.match(ua, /Android 13; Pixel 7/);
 });
 
+test('mobile user agent also accepts raw Chrome version strings from CDP', () => {
+  const ua = mobileUserAgent('149.0.7827.201');
+  assert.match(ua, /Chrome\/149\.0\.7827\.201 Mobile/);
+});
+
 test('chrome launch args hide automation hints', () => {
   const args = chromeLaunchArgs();
   assert.ok(args.some(a => a.includes('AutomationControlled')));

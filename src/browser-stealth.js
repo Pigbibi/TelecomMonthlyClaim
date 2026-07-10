@@ -30,7 +30,10 @@ function playwrightLaunchExtras() {
 }
 
 function chromeVersion(browserVersion = '', fallback = '131.0.0.0') {
-  return /Chrome(?:\/|\s)([\d.]+)/.exec(browserVersion)?.[1] || fallback;
+  const text = String(browserVersion || '').trim();
+  return /Chrome(?:\/|\s)([\d.]+)/.exec(text)?.[1]
+    || (/^\d[\d.]*$/.test(text) ? text : '')
+    || fallback;
 }
 
 function browserProfileContextOptions(profile = 'wechat') {
