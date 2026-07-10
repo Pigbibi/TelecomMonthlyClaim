@@ -329,9 +329,9 @@ async function openCdpClaimPage(browser, config = {}) {
   }
   const page = await context.newPage();
   await attachSliderSubmitHook(page);
+  await attachBrokenUniRouteGuard(page);
   if (!config.minimalLogin) {
     await page.setViewportSize({ width: 390, height: 844 }).catch(() => {});
-    await attachBrokenUniRouteGuard(page);
     attachPageDiagnostics(page);
   } else {
     attachPageDiagnostics(page);
