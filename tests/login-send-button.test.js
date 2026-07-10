@@ -10,6 +10,7 @@ const {
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  shouldRetryThroughProxyPool,
   maskUrlForLog,
   pageMatchesEntryUrl,
   summarizeCookieHeader,
@@ -208,6 +209,33 @@ test('classifies blank telecom slider challenge as WAF rejection', () => {
   assert.equal(
     isTelecomWafRejection(new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400')),
     true,
+  );
+});
+
+test('retries direct WAF rejection once through proxy pool when available', () => {
+  assert.equal(
+    shouldRetryThroughProxyPool(
+      { openwrtProxy: '', proxyPoolProxy: 'http://pool.example:8080' },
+      new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400'),
+    ),
+    true,
+  );
+});
+
+test('does not retry through proxy pool when already on proxy pool or error is not WAF', () => {
+  assert.equal(
+    shouldRetryThroughProxyPool(
+      { openwrtProxy: 'http://pool.example:8080', proxyPoolProxy: 'http://pool.example:8080' },
+      new Error('Telecom slider challenge rejected with blank HTTP 400; getSliderChallenge HTTP 400'),
+    ),
+    false,
+  );
+  assert.equal(
+    shouldRetryThroughProxyPool(
+      { openwrtProxy: '', proxyPoolProxy: 'http://pool.example:8080' },
+      new Error('Proxy tunnel failed during slider challenge; ERR_TUNNEL_CONNECTION_FAILED'),
+    ),
+    false,
   );
 });
 

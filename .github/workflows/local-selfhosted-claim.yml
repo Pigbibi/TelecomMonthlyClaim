@@ -63,6 +63,7 @@ jobs:
       PROXY_SSH_KNOWN_HOSTS: ${{ secrets.PROXY_SSH_KNOWN_HOSTS }}
       PROXY_TUNNEL_LOCAL_PORT: ${{ vars.PROXY_TUNNEL_LOCAL_PORT || '13128' }}
       PROXY_TUNNEL_REMOTE_ENDPOINT: ${{ secrets.PROXY_TUNNEL_REMOTE_ENDPOINT || vars.PROXY_TUNNEL_REMOTE_ENDPOINT || '127.0.0.1:13128' }}
+      PROXY_TUNNEL_PROXY_SCHEME: ${{ vars.PROXY_TUNNEL_PROXY_SCHEME || 'http' }}
       PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
@@ -129,6 +130,15 @@ jobs:
             ssh_tunnel)
               : "${PROXY_SSH_HOST:?Missing PROXY_SSH_HOST secret for ssh_tunnel mode}"
               : "${PROXY_SSH_PRIVATE_KEY:?Missing PROXY_SSH_PRIVATE_KEY secret for ssh_tunnel mode}"
+              : "${PROXY_TUNNEL_LOCAL_PORT:?Missing PROXY_TUNNEL_LOCAL_PORT variable for ssh_tunnel mode}"
+              : "${PROXY_TUNNEL_REMOTE_ENDPOINT:?Missing PROXY_TUNNEL_REMOTE_ENDPOINT variable or secret for ssh_tunnel mode}"
+              case "${PROXY_TUNNEL_PROXY_SCHEME:-http}" in
+                http|socks5) ;;
+                *)
+                  echo "Unsupported PROXY_TUNNEL_PROXY_SCHEME: ${PROXY_TUNNEL_PROXY_SCHEME}. Use http or socks5."
+                  exit 1
+                  ;;
+              esac
               ssh_dir="$RUNNER_TEMP/proxy-ssh"
               mkdir -p "$ssh_dir"
               chmod 700 "$ssh_dir"
@@ -157,7 +167,8 @@ jobs:
                 "${PROXY_SSH_USER:-root}@${PROXY_SSH_HOST}" &
               tunnel_pid="$!"
               echo "PROXY_TUNNEL_PID=$tunnel_pid" >> "$GITHUB_ENV"
-              echo "OPENWRT_HTTP_PROXY=http://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}" >> "$GITHUB_ENV"
+              proxy_url="${PROXY_TUNNEL_PROXY_SCHEME:-http}://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}"
+              echo "OPENWRT_HTTP_PROXY=$proxy_url" >> "$GITHUB_ENV"
               for attempt in $(seq 1 20); do
                 if nc -z 127.0.0.1 "${PROXY_TUNNEL_LOCAL_PORT}" >/dev/null 2>&1; then
                   break
@@ -172,7 +183,6 @@ jobs:
                 fi
                 sleep 1
               done
-              proxy_url="http://127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}"
               proxy_probe_ok=0
               for probe in $(seq 1 5); do
                 if curl -sS --connect-timeout 8 --max-time 20 --proxy "$proxy_url" "$PROXY_HEALTH_URL" -o /dev/null; then

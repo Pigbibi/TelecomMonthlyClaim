@@ -237,6 +237,12 @@ function isTelecomWafRejection(err) {
   return /Telecom slider challenge rejected|getSliderChallenge HTTP 400/i.test(err?.message || '');
 }
 
+function shouldRetryThroughProxyPool(config, err) {
+  return !!(config?.proxyPoolProxy
+    && config.proxyPoolProxy !== config.openwrtProxy
+    && isTelecomWafRejection(err));
+}
+
 async function actionDelay(config) {
   const delayMs = Number(config?.actionDelayMs || 0);
   if (delayMs > 0) await sleep(delayMs);
@@ -2506,8 +2512,8 @@ async function runClaimWithOptionalDirectFallback(config) {
   try {
     await runClaim(config);
   } catch (err) {
-    if (config.proxyPoolProxy && config.openwrtProxy && config.openwrtProxy !== config.proxyPoolProxy && isTelecomWafRejection(err)) {
-      log('Telecom WAF rejected configured proxy path; retrying once through proxy pool', {
+    if (shouldRetryThroughProxyPool(config, err)) {
+      log(`Telecom WAF rejected ${config.openwrtProxy ? 'configured proxy path' : 'direct session'}; retrying once through proxy pool`, {
         configuredProxy: maskProxyUrl(config.openwrtProxy),
         proxyPool: maskProxyUrl(config.proxyPoolProxy),
         error: err.message,
@@ -2562,6 +2568,7 @@ module.exports = {
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  shouldRetryThroughProxyPool,
   advanceLoginGoal,
   advanceClaimGoal,
   chooseSliderDistanceCandidate,

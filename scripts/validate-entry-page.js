@@ -121,11 +121,11 @@ async function validateEntry({ label, proxyServer }) {
 }
 
 (async () => {
-  const cases = [{ label: 'direct', proxy: '' }];
+  const cases = [{ label: 'direct', proxyServer: '' }];
   if (process.env.OPENWRT_HTTP_PROXY) {
-    cases.push({ label: 'proxy', proxy: process.env.OPENWRT_HTTP_PROXY });
+    cases.push({ label: 'proxy', proxyServer: process.env.OPENWRT_HTTP_PROXY });
   } else if (process.env.VALIDATE_BWG_PROXY === 'true') {
-    cases.push({ label: 'bwg', proxy: 'http://127.0.0.1:13128' });
+    cases.push({ label: 'bwg', proxyServer: 'http://127.0.0.1:13128' });
   }
 
   let ok = true;
