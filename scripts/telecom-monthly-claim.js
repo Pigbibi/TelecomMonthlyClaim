@@ -474,6 +474,10 @@ function attachBrokenUniRouteGuard(page) {
   });
 }
 
+function shouldInstallRequestInterception(config = {}) {
+  return !config.minimalLogin;
+}
+
 function attachSliderApiCapture(page) {
   page.on('response', response => {
     if (!/getSliderChallenge|validSlider|sendRandByUnlog|sendRandProtocolV3/i.test(response.url())) return;
@@ -654,8 +658,10 @@ async function openCdpClaimPage(browser, config = {}) {
     mode: config.cdpProfileMode || 'auto',
     minimalLogin: !!config.minimalLogin,
   });
-  await attachSliderSubmitHook(page);
-  await attachBrokenUniRouteGuard(page);
+  if (shouldInstallRequestInterception(config)) {
+    await attachSliderSubmitHook(page);
+    await attachBrokenUniRouteGuard(page);
+  }
   if (!config.minimalLogin) {
     await page.setViewportSize({ width: 390, height: 844 }).catch(() => {});
     attachPageDiagnostics(page);
@@ -688,7 +694,7 @@ async function newMobilePage(browser, config = {}) {
   const page = browser.persistentContext
     ? (context.pages()[0] || await context.newPage())
     : await context.newPage();
-  await attachBrokenUniRouteGuard(page);
+  if (shouldInstallRequestInterception(config)) await attachBrokenUniRouteGuard(page);
   if (config.blockHeavyAssets) {
     await page.route('**/*', route => {
       const type = route.request().resourceType();
@@ -2723,6 +2729,7 @@ module.exports = {
   isTelecomWafRejection,
   readInputFieldState,
   shouldRetryThroughProxyPool,
+  shouldInstallRequestInterception,
   advanceLoginGoal,
   advanceClaimGoal,
   chooseSliderDistanceCandidate,

@@ -12,6 +12,7 @@ const {
   isRetryableLoginSendError,
   isTelecomWafRejection,
   shouldRetryThroughProxyPool,
+  shouldInstallRequestInterception,
   maskUrlForLog,
   pageMatchesEntryUrl,
   summarizeCookieHeader,
@@ -19,6 +20,11 @@ const {
   summarizePostDataForLog,
   summarizeResponseHeadersForLog,
 } = require('../scripts/telecom-monthly-claim');
+
+test('minimal real-Chrome login does not intercept browser requests', () => {
+  assert.equal(shouldInstallRequestInterception({ minimalLogin: true }), false);
+  assert.equal(shouldInstallRequestInterception({ minimalLogin: false }), true);
+});
 
 function fakePage(visibleSelectors) {
   const clicked = [];
