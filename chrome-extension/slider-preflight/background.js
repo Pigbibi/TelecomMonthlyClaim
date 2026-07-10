@@ -239,7 +239,7 @@ async function submitLoginCode(target, code) {
   })()`);
   await sleep(700);
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    if (!await clickVisible(target, [], '^(立即领取|立即办理)$')) throw new Error('login-submit-missing');
+    if (!await clickVisible(target, ['.know-box.button'], '^(立即领取|立即办理)$')) throw new Error('login-submit-missing');
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
       const state = await evaluate(target, `(() => ({
