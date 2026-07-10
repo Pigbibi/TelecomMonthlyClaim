@@ -180,7 +180,13 @@ async function clickVisible(target, selectors, textPattern = '') {
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
     let element = selectors.map(selector => document.querySelector(selector)).find(visible);
-    if (!element && pattern) element = [...document.querySelectorAll('button,a,div,span')].find(node => visible(node) && pattern.test((node.innerText || '').trim()));
+    if (!element && pattern) element = [...document.querySelectorAll('button,a,div,span')]
+      .filter(node => visible(node) && pattern.test((node.innerText || '').trim()))
+      .sort((left, right) => {
+        const a = left.getBoundingClientRect();
+        const b = right.getBoundingClientRect();
+        return a.width * a.height - b.width * b.height;
+      })[0];
     if (!element) return null;
     element.scrollIntoView({ block: 'center', inline: 'center' });
     const rect = element.getBoundingClientRect();
@@ -194,7 +200,21 @@ async function clickVisible(target, selectors, textPattern = '') {
 }
 
 async function submitLoginCode(target, code) {
-  await clickVisible(target, ['#wap-dialog button', '.wap-dialog button'], '我知道了|知道了|确定').catch(() => false);
+  await evaluate(target, `(() => {
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    for (const dialog of [...document.querySelectorAll('#wap-dialog,.wap-dialog,.diaog-popup')].filter(visible)) {
+      const close = [...dialog.querySelectorAll('button,a,div,span')]
+        .filter(visible)
+        .find(node => /^(我知道了|知道了|确定)$/.test((node.innerText || '').replace(/\s+/g, '')));
+      if (close) close.click();
+    }
+    return true;
+  })()`);
   await sleep(500);
   const focused = await evaluate(target, `(() => {
     const input = document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input');
@@ -219,7 +239,7 @@ async function submitLoginCode(target, code) {
   })()`);
   await sleep(700);
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    if (!await clickVisible(target, ['.know-box.button'], '立即领取|立即办理')) throw new Error('login-submit-missing');
+    if (!await clickVisible(target, [], '^(立即领取|立即办理)$')) throw new Error('login-submit-missing');
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
       const state = await evaluate(target, `(() => ({
@@ -230,7 +250,14 @@ async function submitLoginCode(target, code) {
       if (state?.failed) return false;
       await sleep(500);
     }
-    await clickVisible(target, ['#wap-dialog button', '.wap-dialog button'], '我知道了|知道了|确定').catch(() => false);
+    await evaluate(target, `(() => {
+      const dialog = [...document.querySelectorAll('#wap-dialog,.wap-dialog,.diaog-popup')]
+        .find(element => getComputedStyle(element).display !== 'none');
+      const close = dialog && [...dialog.querySelectorAll('button,a,div,span')]
+        .find(node => /^(我知道了|知道了|确定)$/.test((node.innerText || '').replace(/\s+/g, '')));
+      close?.click();
+      return !!close;
+    })()`).catch(() => false);
     await sleep(700);
   }
   return false;
