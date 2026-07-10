@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const {
+  applyCdpBrowserProfile,
   browserProfileContextOptions,
   chromeLaunchArgs,
   playwrightLaunchExtras,
@@ -53,6 +54,7 @@ async function openClaimPage({ label, proxyServer }) {
     const context = browser.contexts()?.[0];
     if (!context) throw new Error('CDP browser has no default context');
     const page = await context.newPage();
+    await applyCdpBrowserProfile(page, browser.version(), browserProfile);
     return { browser, context, page, mode: 'cdp' };
   }
 

@@ -123,9 +123,12 @@ test('defaults to headed Chrome unless HEADLESS=true', () => withCleanTelecomEnv
 
   assert.equal(loadConfig().headless, false);
   assert.equal(loadConfig().browserChannel, 'chrome');
+  assert.equal(loadConfig().browserProfile, 'wechat');
 
   process.env.HEADLESS = 'true';
   assert.equal(loadConfig().headless, true);
+  process.env.TELECOM_BROWSER_PROFILE = 'desktop';
+  assert.equal(loadConfig().browserProfile, 'desktop');
 }));
 
 test('enables minimal login by default when BROWSER_CDP_URL is set', () => withCleanTelecomEnv(() => {

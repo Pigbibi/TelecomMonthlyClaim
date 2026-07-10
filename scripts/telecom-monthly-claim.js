@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
-const { getStealthChromium, chromeLaunchArgs, mobileContextOptions, playwrightLaunchExtras } = require('../src/browser-stealth');
+const {
+  applyCdpBrowserProfile,
+  getStealthChromium,
+  chromeLaunchArgs,
+  mobileContextOptions,
+  playwrightLaunchExtras,
+} = require('../src/browser-stealth');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient, sleep } = require('../src/sms-inbox-client');
 const { stateMonth, isFinalRetryDay, beijingParts } = require('../src/retry-date');
@@ -462,6 +468,7 @@ async function openCdpClaimPage(browser, config = {}) {
     await installTelecomPagePatches(context);
   }
   const page = await context.newPage();
+  await applyCdpBrowserProfile(page, browser.version(), config.browserProfile || 'wechat');
   await attachSliderSubmitHook(page);
   await attachBrokenUniRouteGuard(page);
   if (!config.minimalLogin) {
@@ -475,6 +482,7 @@ async function openCdpClaimPage(browser, config = {}) {
   log('Opened CDP page on default Chrome context', {
     contexts: browser.contexts().length,
     viewport: page.viewportSize(),
+    browserProfile: config.browserProfile || 'wechat',
     minimalLogin: !!config.minimalLogin,
     patches: !config.minimalLogin,
   });
