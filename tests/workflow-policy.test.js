@@ -161,6 +161,10 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /getFreeTcpPort/);
   assert.match(script, /mkdtempSync/);
   assert.match(script, /TELECOM_REUSE_VALIDATED_PAGE: 'true'/);
+  assert.match(script, /new WebSocket/);
+  assert.match(script, /Input\.insertText/);
+  assert.match(script, /Input\.dispatchMouseEvent/);
+  assert.match(script, /slider challenge ready before Playwright attachment/);
   assert.match(script, /`--remote-debugging-port=\$\{cdpPort\}`/);
   assert.doesNotMatch(script, /--headless/);
   assert.doesNotMatch(script, /remote-debugging-port=0/);
