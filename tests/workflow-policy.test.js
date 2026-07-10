@@ -58,7 +58,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
   assert.match(workflowText, /TELECOM_CDP_PROFILE_MODE: "native"/);
   assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
-  assert.match(workflowText, /TELECOM_FORCE_FRESH_CDP_SESSION: "false"/);
+  assert.match(workflowText, /TELECOM_FORCE_FRESH_CDP_SESSION: "true"/);
   assert.match(workflowText, /TELECOM_SLIDER_MODE: "api"/);
   assert.match(workflowText, /TELECOM_USE_DEFAULT_CHROME: "0"/);
   assert.match(workflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "true"/);
@@ -93,7 +93,7 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /TELECOM_CDP_PROFILE_MODE: "native"/);
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "0"/);
   assert.match(localWorkflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "true"/);
-  assert.match(localWorkflowText, /TELECOM_FORCE_FRESH_CDP_SESSION: "false"/);
+  assert.match(localWorkflowText, /TELECOM_FORCE_FRESH_CDP_SESSION: "true"/);
   assert.match(localWorkflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
   assert.match(localWorkflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
   assert.match(localWorkflowText, /TELECOM_PROBE_ONLY/);
