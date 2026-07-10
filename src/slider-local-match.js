@@ -125,6 +125,69 @@ function computeSliderImageMatchInPage(options = {}) {
       }
     }
   }
+
+  // The challenge replaces the rectangular core of the missing piece with a
+  // single pale color. Detect that flat run directly instead of allowing busy
+  // scenery (clouds, foliage, highlights) to win the edge scorer.
+  const coreLeft = Math.max(5, Math.round(blockCanvas.width * 0.12));
+  const coreRight = Math.min(blockCanvas.width - 5, Math.round(blockCanvas.width * 0.7));
+  const coreTop = Math.max(5, Math.round(blockCanvas.height * 0.14));
+  const coreBottom = Math.min(blockCanvas.height - 5, Math.round(blockCanvas.height * 0.86));
+  const flatStats = [];
+  for (let x = 40; x <= maxX - 8; x += 1) {
+    let best = null;
+    for (const y0 of yCandidates) {
+      const sums = [0, 0, 0];
+      const squares = [0, 0, 0];
+      let samples = 0;
+      for (let by = coreTop; by < coreBottom; by += 1) {
+        for (let bx = coreLeft; bx < coreRight; bx += 1) {
+          const i = ((y0 + by) * bgCanvas.width + x + bx) * 4;
+          for (let channel = 0; channel < 3; channel += 1) {
+            const value = bgData[i + channel];
+            sums[channel] += value;
+            squares[channel] += value * value;
+          }
+          samples += 1;
+        }
+      }
+      if (samples === 0) continue;
+      const means = sums.map(sum => sum / samples);
+      const variance = squares.reduce((total, sum, channel) => (
+        total + Math.max(0, sum / samples - means[channel] * means[channel])
+      ), 0);
+      const luminance = means[0] * 0.299 + means[1] * 0.587 + means[2] * 0.114;
+      const spread = Math.max(...means) - Math.min(...means);
+      if (luminance < 160 || spread > 70) continue;
+      if (!best || variance < best.variance) best = { variance, y: y0 };
+    }
+    if (best) flatStats.push({ x, ...best });
+  }
+  const flatEligible = flatStats.filter(item => item.variance <= 12);
+  const flatGroups = [];
+  for (const item of flatEligible) {
+    const last = flatGroups[flatGroups.length - 1];
+    if (!last || item.x !== last[last.length - 1].x + 1) flatGroups.push([item]);
+    else last.push(item);
+  }
+  const expectedFlatRun = Math.max(3, Math.round(blockCanvas.width * 0.23));
+  const usableFlatGroups = flatGroups.filter(group => (
+    group.length >= 3 && group.length <= Math.round(blockCanvas.width * 0.45)
+  ));
+  usableFlatGroups.sort((left, right) => {
+    const leftVariance = left.reduce((sum, item) => sum + item.variance, 0) / left.length;
+    const rightVariance = right.reduce((sum, item) => sum + item.variance, 0) / right.length;
+    return (leftVariance + Math.abs(left.length - expectedFlatRun) * 2)
+      - (rightVariance + Math.abs(right.length - expectedFlatRun) * 2);
+  });
+  const flatGroup = usableFlatGroups[0] || null;
+  const flatX = flatGroup
+    ? Math.round((flatGroup[0].x + flatGroup[flatGroup.length - 1].x) / 2)
+    : 0;
+  const flatOk = inRange(flatX);
+  const flatScore = flatGroup
+    ? Math.round(1000 - flatGroup.reduce((sum, item) => sum + item.variance, 0) / flatGroup.length)
+    : 0;
   const holeOk = inRange(holeX) && Number.isFinite(holeScore) && holeScore > (preferMinGreen ? 50 : 20);
   const holeMethod = preferMinGreen ? 'cream-edge' : 'green-cream-edge';
 
@@ -172,7 +235,11 @@ function computeSliderImageMatchInPage(options = {}) {
   let bestX;
   let method;
   let score;
-  if (edgeStrong) {
+  if (flatOk) {
+    bestX = flatX;
+    method = 'flat-mask';
+    score = flatScore;
+  } else if (edgeStrong) {
     bestX = edgeX;
     method = 'edge';
     score = edgeScore;
@@ -202,6 +269,7 @@ function computeSliderImageMatchInPage(options = {}) {
     candidates.push({ naturalX: n, method: label });
   };
   pushCand(bestX, method);
+  if (flatOk) pushCand(flatX, 'flat-mask');
   if (holeOk) pushCand(holeX, holeMethod);
   if (edgeOk) pushCand(edgeX, 'edge');
   if (textureOk) pushCand(textureX, 'texture');
@@ -228,6 +296,12 @@ function computeSliderImageMatchInPage(options = {}) {
     displayScale,
     targetY: holeY,
     candidates,
+    flat: {
+      naturalX: flatX,
+      score: flatScore,
+      run: flatGroup?.length || 0,
+      ok: flatOk,
+    },
     hole: {
       naturalX: Math.round(holeX),
       score: Math.round(holeScore * 10) / 10,

@@ -47,5 +47,6 @@ test('matches known successful slider distances from captured challenges', async
       Math.abs(result.naturalX - sample.expectedDistance) <= 2,
       `${sample.name}: expected ${sample.expectedDistance}, got ${result.naturalX} (${result.method})`,
     );
+    assert.equal(result.method, 'flat-mask', `${sample.name}: expected flat mask detection`);
   }
 });

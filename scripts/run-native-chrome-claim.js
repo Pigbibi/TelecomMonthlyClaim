@@ -198,6 +198,8 @@ async function solveSliderChallenge(client) {
   console.log('Native Chrome slider match', {
     method: match.method,
     naturalX: match.naturalX,
+    flatX: match.flat?.naturalX,
+    flatRun: match.flat?.run,
     holeX: match.hole?.naturalX,
     textureX: match.texture?.naturalX,
     edgeX: match.edge?.naturalX,
