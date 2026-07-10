@@ -9,6 +9,7 @@ PROXY="${OPENWRT_HTTP_PROXY:-${HTTP_PROXY:-}}"
 HEADLESS="${TELECOM_CDP_HEADLESS:-false}"
 DISPLAY_VALUE="${DISPLAY:-${TELECOM_XVFB_DISPLAY:-:99}}"
 XVFB_SCREEN="${TELECOM_XVFB_SCREEN:-1366x768x24}"
+DISABLE_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-true}"
 
 if curl -sf "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then
   echo "Chrome CDP already listening on ${PORT} (profile: ${PROFILE})"
@@ -86,6 +87,9 @@ ARGS=(
 
 if [ -n "$PROXY" ]; then
   ARGS+=(--proxy-server="$PROXY")
+fi
+if [ "$DISABLE_EXTENSIONS" = "1" ] || [ "$DISABLE_EXTENSIONS" = "true" ]; then
+  ARGS+=(--disable-extensions --disable-component-extensions-with-background-pages)
 fi
 
 # GitHub Actions Linux runners need --no-sandbox under the default user.

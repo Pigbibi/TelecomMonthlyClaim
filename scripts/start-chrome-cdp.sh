@@ -17,6 +17,7 @@ USE_DEFAULT="${TELECOM_USE_DEFAULT_CHROME:-}"
 CHROME_BIN="${TELECOM_CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 REAL_COPY="${TELECOM_REAL_PROFILE_COPY:-$HOME/.telecom-claim-chrome-real}"
 SRC_PROFILE="${TELECOM_SRC_CHROME_PROFILE:-$HOME/Library/Application Support/Google/Chrome}"
+DISABLE_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-true}"
 
 if [ -z "$USE_DEFAULT" ] && [ -z "$PROFILE" ]; then
   USE_DEFAULT=1
@@ -51,6 +52,11 @@ fi
 ARGS=(--remote-debugging-port="${PORT}" --remote-allow-origins=*)
 if [ -n "${OPENWRT_HTTP_PROXY:-}" ]; then
   ARGS+=(--proxy-server="${OPENWRT_HTTP_PROXY}")
+fi
+if [ "$DISABLE_EXTENSIONS" = "1" ] || [ "$DISABLE_EXTENSIONS" = "true" ]; then
+  # The copied real profile may contain content-script extensions that inject on all pages
+  # and perturb Telecom's anti-bot checks. Keep profile cookies/storage, but launch without extensions.
+  ARGS+=(--disable-extensions --disable-component-extensions-with-background-pages)
 fi
 
 if [ "$USE_DEFAULT" = "1" ] || [ "$USE_DEFAULT" = "true" ]; then
