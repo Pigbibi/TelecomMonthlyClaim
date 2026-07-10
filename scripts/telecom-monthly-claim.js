@@ -1033,7 +1033,12 @@ async function gotoLoginEntryPage(page, config, reason) {
       // 412 is normal for telecom WAF challenge pages that then rewrite to the form.
       // Extra settle after 412 avoids clicking send before the challenge session is ready.
       await sleep(status === 412 ? 12000 : 5000);
-      const form = await detectLoginFormState(page);
+      const minimalDeadline = Date.now() + (status === 412 ? 25000 : 15000);
+      let form = await detectLoginFormState(page);
+      while (!form.hasPhone && Date.now() < minimalDeadline) {
+        await sleep(500);
+        form = await detectLoginFormState(page);
+      }
       if (form.hasPhone) {
         log('Login entry ready', {
           reason,
@@ -1048,6 +1053,17 @@ async function gotoLoginEntryPage(page, config, reason) {
         });
         return;
       }
+      log('Minimal login entry still missing after settle', {
+        reason,
+        strategy: candidate.label,
+        status,
+        url: page.url(),
+        htmlLength: form.htmlLength,
+        bodyLength: form.bodyLength,
+        phone: form.phone,
+        code: form.code,
+        send: form.send,
+      });
       continue;
     }
     let entryTimeoutMs = hasProxyTunnelFailures(page) ? 8000 : 25000;
