@@ -38,6 +38,18 @@ async function waitForCdp(url, timeout = 30000) {
   throw new Error('Chrome CDP did not become ready');
 }
 
+async function waitForTelecomPage(url, timeout = 45000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      const targets = await fetch(`${url}/json`).then(response => response.json());
+      if (targets.some(target => target.type === 'page' && target.url.startsWith('https://wapbj.189.cn/'))) return;
+    } catch {}
+    await wait(500);
+  }
+  throw new Error('Chrome extension did not open the Telecom page');
+}
+
 function runChild(command, args, options) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, options);
@@ -111,12 +123,14 @@ async function main() {
   try {
     const cdpUrl = `http://127.0.0.1:${cdpPort}`;
     await waitForCdp(cdpUrl);
-    const deadline = Date.now() + timeoutMs;
+    await waitForTelecomPage(cdpUrl, timeoutMs);
+    const settleMs = Number(process.env.TELECOM_EXTENSION_PREFLIGHT_SETTLE_MS || 25000);
+    const deadline = Date.now() + settleMs;
     while (status.stage === 'starting' && Date.now() < deadline) await wait(500);
-    if (status.stage !== 'slider-ready') {
+    if (status.stage !== 'starting' && status.stage !== 'slider-ready') {
       throw new Error(`Chrome extension slider preflight failed: ${status.stage}${status.message ? ` (${status.message})` : ''}`);
     }
-    console.log('Chrome extension obtained the Telecom slider challenge; handing off to claim runner');
+    console.log('Chrome extension preflight completed; handing the Telecom page to the claim runner');
     const result = await runChild(process.execPath, [path.join(root, 'scripts', 'telecom-monthly-claim.js')], {
       cwd: root,
       stdio: 'inherit',
