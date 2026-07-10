@@ -884,15 +884,10 @@ async function warmTelecomOrigin(page, config) {
 
 async function sendLoginCode(page, config) {
   if (config.minimalLogin) {
-    // Bare path proven by scripts/verify-minimal-login-slider.js (getSliderChallenge 200 + images).
-    const phone = page.locator('#phoneNumber, input.phonenum').first();
-    await phone.waitFor({ state: 'visible', timeout: 15000 });
-    await phone.click({ timeout: 8000 }).catch(() => {});
-    await phone.fill(config.phone);
-    await sleep(800);
-    const sendBtn = page.locator('.checknum-button.slider-sms-btn, .checknum-button, .content_send_unlog').first();
-    await sendBtn.click({ force: true });
-    log('Clicked login SMS send button', { selector: 'minimal-login-direct' });
+    const phoneField = await ensureSmsLoginForm(page, config);
+    await fillInputField(phoneField.locator, config.phone);
+    await humanPause(600, 1200);
+    await clickLoginSmsButton(page, config);
     if (await waitForSliderVerification(page, 10000)) {
       log('Login SMS send requires slider verification');
       const assets = await waitForSliderPuzzleAssets(page, 15000);
@@ -2021,6 +2016,7 @@ module.exports = {
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
   detectLoginFormState,
+  ensureSmsLoginForm,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,

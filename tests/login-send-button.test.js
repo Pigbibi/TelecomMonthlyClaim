@@ -4,6 +4,7 @@ const {
   LOGIN_PHONE_SELECTORS,
   clickLoginSmsButton,
   detectLoginFormState,
+  ensureSmsLoginForm,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
@@ -85,6 +86,33 @@ test('detectLoginFormState uses broad selector lists for minimal login readiness
   assert.equal(payload.codeSelectors.includes('input.checknum-input'), true);
   assert.equal(payload.sendSelectors.includes('.checknum-button.slider-sms-btn'), true);
   assert.equal(state.formReady, true);
+});
+
+test('ensureSmsLoginForm clicks SMS login tab for minimal entry page', async () => {
+  let smsTabClicked = false;
+  const page = {
+    locator(selector) {
+      const visible = smsTabClicked && selector === 'input.van-field__control';
+      return {
+        count: async () => (visible ? 1 : 0),
+        nth: () => ({
+          evaluate: async () => true,
+          isVisible: async () => true,
+        }),
+      };
+    },
+    getByText(text) {
+      return {
+        isVisible: async () => text === '短信验证码登录',
+        click: async () => { smsTabClicked = true; },
+      };
+    },
+  };
+
+  const match = await ensureSmsLoginForm(page, { actionDelayMs: 0 });
+
+  assert.equal(smsTabClicked, true);
+  assert.equal(match.selector, 'input.van-field__control');
 });
 
 test('picks a visible input when the first matching Vant input is hidden', async () => {
