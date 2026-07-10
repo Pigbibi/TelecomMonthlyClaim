@@ -33,12 +33,18 @@ async function observeTelecomPage(page, {
         return [];
       }
     };
-    const describeElement = (element, selector) => ({
-      selector,
-      placeholder: element.getAttribute('placeholder') || '',
-      type: element.getAttribute('type') || '',
-      text: textOf(element).slice(0, 120),
-    });
+    const describeElement = (element, selector) => {
+      const rawValue = String(element?.value || '').replace(/\s+/g, '');
+      return {
+        selector,
+        placeholder: element.getAttribute('placeholder') || '',
+        type: element.getAttribute('type') || '',
+        inputMode: element.getAttribute('inputmode') || '',
+        text: textOf(element).slice(0, 120),
+        filled: rawValue.length > 0,
+        valueLength: rawValue.length,
+      };
+    };
     const findByTextPattern = (selector, pattern) => safeQueryAll(selector)
       .filter(visible)
       .find(element => pattern.test(textOf(element)));

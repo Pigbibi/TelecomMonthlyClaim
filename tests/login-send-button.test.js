@@ -5,6 +5,7 @@ const {
   clickLoginSmsButton,
   detectLoginFormState,
   ensureSmsLoginForm,
+  fillInputField,
   findReusableCdpEntryPage,
   firstVisibleLocator,
   hasProxyTunnelFailures,
@@ -53,6 +54,54 @@ test('falls back to visible text selector when legacy class changes', async () =
 
   assert.equal(selector, 'button:has-text("验证码")');
   assert.deepEqual(page.clicked, ['button:has-text("验证码")']);
+});
+
+test('fillInputField falls back to DOM setter when typing does not stick', async () => {
+  const state = { value: '', placeholder: '点击输入手机号码', type: 'text', inputMode: 'tel' };
+  const prototype = {};
+  Object.defineProperty(prototype, 'value', {
+    get() {
+      return state.value;
+    },
+    set(nextValue) {
+      state.value = String(nextValue ?? '');
+    },
+  });
+  const locator = {
+    async click() {},
+    async fill() {
+      state.value = '';
+    },
+    async type() {
+      state.value = '';
+    },
+    async evaluate(fn, arg) {
+      const element = Object.create(prototype);
+      Object.assign(element, {
+        disabled: false,
+        readOnly: false,
+        focus() {},
+        blur() {},
+        dispatchEvent() {},
+        getAttribute(name) {
+          return {
+            value: state.value,
+            placeholder: state.placeholder,
+            type: state.type,
+            inputmode: state.inputMode,
+          }[name] || '';
+        },
+      });
+      return fn(element, arg);
+    },
+  };
+
+  const result = await fillInputField(locator, '18519200015');
+
+  assert.equal(result.method, 'dom');
+  assert.equal(result.filled, true);
+  assert.equal(result.matchesExpected, true);
+  assert.equal(result.valueLength, 11);
 });
 
 test('clicks the Vant login SMS send button text', async () => {

@@ -120,6 +120,8 @@ test('observeTelecomPage ignores Playwright-only selectors and falls back to vis
   assert.equal(observation.hasPhone, true);
   assert.equal(observation.hasCode, true);
   assert.equal(observation.hasSendBtn, true);
+  assert.equal(observation.phone.filled, true);
+  assert.equal(observation.phone.valueLength, 11);
   assert.equal(observation.send.selector, '__send_text_fallback__');
   assert.equal(observation.pageState, 'sms_login_form');
 });

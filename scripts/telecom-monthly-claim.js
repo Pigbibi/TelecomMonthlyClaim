@@ -697,13 +697,19 @@ async function closeDialogs(page, pattern = /验证码已下发|请注意查收|
 async function getPageSummary(page) {
   const summary = await page.evaluate(() => {
     const visible = e => !!e && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
-    const describe = e => ({
-      tag: e.tagName,
-      id: e.id || '',
-      className: String(e.className || '').slice(0, 120),
-      type: e.getAttribute('type') || '',
-      text: String(e.innerText || e.value || e.getAttribute('aria-label') || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
-    });
+    const describe = e => {
+      const rawValue = String(e.value || '').replace(/\s+/g, '');
+      return {
+        tag: e.tagName,
+        id: e.id || '',
+        className: String(e.className || '').slice(0, 120),
+        type: e.getAttribute('type') || '',
+        placeholder: e.getAttribute('placeholder') || '',
+        text: String(e.innerText || e.value || e.getAttribute('aria-label') || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+        filled: rawValue.length > 0,
+        valueLength: rawValue.length,
+      };
+    };
     return {
       url: location.href,
       title: document.title,
@@ -943,10 +949,11 @@ async function advanceLoginGoal(page, config, goal, options = {}) {
   const maxSteps = options.maxSteps || 4;
   for (let step = 1; step <= maxSteps; step += 1) {
     const observed = await detectClaimPageState(page);
+    const effectivePhoneFilled = !!(options.phoneFilled || observed?.phone?.filled);
     let plan = planTelecomPageAction({
       goal,
       observation: observed,
-      phoneFilled: !!options.phoneFilled,
+      phoneFilled: effectivePhoneFilled,
     });
     if (
       plan.action === 'wait'
@@ -963,6 +970,7 @@ async function advanceLoginGoal(page, config, goal, options = {}) {
       step,
       pageState: observed.pageState,
       confidence: observed.pageStateConfidence,
+      phoneFilled: effectivePhoneFilled,
       action: plan.action,
       reason: plan.reason,
     });
@@ -1215,17 +1223,113 @@ async function humanType(locator, value) {
   }
 }
 
+function normalizeInputValue(value) {
+  return String(value ?? '').replace(/\s+/g, '');
+}
+
+async function readInputFieldState(locator, expectedValue = '') {
+  const snapshot = await locator.evaluate(el => {
+    const attrValue = el.getAttribute?.('value') || '';
+    return {
+      value: String(el?.value || ''),
+      attributeValue: String(attrValue || ''),
+      placeholder: el.getAttribute?.('placeholder') || '',
+      type: el.getAttribute?.('type') || '',
+      inputMode: el.getAttribute?.('inputmode') || '',
+      disabled: !!el.disabled,
+      readOnly: !!el.readOnly,
+    };
+  }).catch(() => ({
+    value: '',
+    attributeValue: '',
+    placeholder: '',
+    type: '',
+    inputMode: '',
+    disabled: false,
+    readOnly: false,
+  }));
+
+  const normalizedValue = normalizeInputValue(snapshot.value);
+  const normalizedAttributeValue = normalizeInputValue(snapshot.attributeValue);
+  const normalizedExpected = normalizeInputValue(expectedValue);
+  return {
+    filled: normalizedValue.length > 0,
+    matchesExpected: !!normalizedExpected && normalizedValue === normalizedExpected,
+    valueLength: normalizedValue.length,
+    attributeValueLength: normalizedAttributeValue.length,
+    placeholder: snapshot.placeholder,
+    type: snapshot.type,
+    inputMode: snapshot.inputMode,
+    disabled: snapshot.disabled,
+    readOnly: snapshot.readOnly,
+  };
+}
+
+async function setInputValueByDom(locator, value) {
+  await locator.evaluate((el, nextValue) => {
+    const normalized = String(nextValue ?? '');
+    if (typeof el.focus === 'function') el.focus();
+    const prototype = Object.getPrototypeOf(el);
+    const valueSetter = prototype && Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (typeof valueSetter === 'function') valueSetter.call(el, normalized);
+    else el.value = normalized;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (typeof el.blur === 'function') el.blur();
+  }, value);
+}
+
 async function fillInputField(locator, value) {
+  const attempts = [];
+  const collectState = async method => {
+    await sleep(120);
+    const state = await readInputFieldState(locator, value);
+    attempts.push({
+      method,
+      filled: state.filled,
+      matchesExpected: state.matchesExpected,
+      valueLength: state.valueLength,
+      attributeValueLength: state.attributeValueLength,
+    });
+    if (state.matchesExpected) return { method, ...state };
+    return null;
+  };
+
   try {
     await humanType(locator, value);
   } catch (err) {
     if (!/not visible|Timeout/i.test(err?.message || '')) throw err;
-    await locator.evaluate((el, nextValue) => {
-      el.value = nextValue;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    }, value);
   }
+  const typedState = await collectState('type');
+  if (typedState) return typedState;
+
+  await locator.fill(String(value)).catch(() => {});
+  const filledState = await collectState('fill');
+  if (filledState) return filledState;
+
+  await setInputValueByDom(locator, value);
+  const domState = await collectState('dom');
+  if (domState) return domState;
+
+  throw new Error(`Input field did not retain expected value; attempts: ${JSON.stringify(attempts)}`);
+}
+
+async function ensureLoginPhoneFieldBeforeSmsSend(page, phoneField, config, pauseRange = [600, 1200]) {
+  const populated = await fillInputField(phoneField.locator, config.phone);
+  log('Login phone field populated', { selector: phoneField.selector, state: populated });
+  await humanPause(...pauseRange);
+
+  let state = await readInputFieldState(phoneField.locator, config.phone);
+  log('Login phone field before SMS send', { selector: phoneField.selector, state });
+  if (state.matchesExpected) return state;
+
+  const repopulated = await fillInputField(phoneField.locator, config.phone);
+  log('Login phone field repopulated after reset', { selector: phoneField.selector, state: repopulated });
+  state = await readInputFieldState(phoneField.locator, config.phone);
+  log('Login phone field recheck before SMS send', { selector: phoneField.selector, state });
+  if (state.matchesExpected) return state;
+
+  throw new Error(`Login phone field lost expected value before SMS send; state: ${JSON.stringify(state)}`);
 }
 
 async function humanPause(minMs = 800, maxMs = 1800) {
@@ -1360,11 +1464,14 @@ async function warmTelecomOrigin(page, config) {
 async function sendLoginCode(page, config) {
   if (config.minimalLogin) {
     const phoneField = await ensureSmsLoginForm(page, config);
-    await fillInputField(phoneField.locator, config.phone);
-    await humanPause(600, 1200);
-    const goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: true });
+    let phoneState = await ensureLoginPhoneFieldBeforeSmsSend(page, phoneField, config, [600, 1200]);
+    let goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: phoneState.matchesExpected });
     if (goalResult.plan?.action === 'fill_phone_first') {
-      throw new Error('Planner expected phone field to be filled before sending login SMS');
+      phoneState = await ensureLoginPhoneFieldBeforeSmsSend(page, phoneField, config, [250, 450]);
+      goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: phoneState.matchesExpected });
+    }
+    if (goalResult.plan?.action === 'fill_phone_first') {
+      throw new Error(`Planner still observed empty phone field before sending login SMS; phone: ${JSON.stringify(goalResult.observed?.phone || null)}`);
     }
     if (goalResult.plan?.action === 'stop') {
       const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
@@ -1381,13 +1488,16 @@ async function sendLoginCode(page, config) {
   const phoneField = await ensureSmsLoginForm(page, config);
   await warmupTelecomBehavior(page, config);
   await humanPause(1800, 3200);
-  await fillInputField(phoneField.locator, config.phone);
-  await humanPause(1500, 2800);
+  let phoneState = await ensureLoginPhoneFieldBeforeSmsSend(page, phoneField, config, [1500, 2800]);
   await page.mouse.move(200 + Math.random() * 40, 520 + Math.random() * 20).catch(() => {});
   await humanPause(400, 900);
-  const goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: true });
+  let goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: phoneState.matchesExpected });
   if (goalResult.plan?.action === 'fill_phone_first') {
-    throw new Error('Planner expected phone field to be filled before sending login SMS');
+    phoneState = await ensureLoginPhoneFieldBeforeSmsSend(page, phoneField, config, [250, 450]);
+    goalResult = await advanceLoginGoal(page, config, 'trigger_login_sms_send', { maxSteps: 4, phoneFilled: phoneState.matchesExpected });
+  }
+  if (goalResult.plan?.action === 'fill_phone_first') {
+    throw new Error(`Planner still observed empty phone field before sending login SMS; phone: ${JSON.stringify(goalResult.observed?.phone || null)}`);
   }
   if (goalResult.plan?.action === 'stop') {
     const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
@@ -2564,10 +2674,12 @@ module.exports = {
   detectLoginFormState,
   detectClaimPageState,
   ensureSmsLoginForm,
+  fillInputField,
   firstVisibleLocator,
   hasProxyTunnelFailures,
   isRetryableLoginSendError,
   isTelecomWafRejection,
+  readInputFieldState,
   shouldRetryThroughProxyPool,
   advanceLoginGoal,
   advanceClaimGoal,
