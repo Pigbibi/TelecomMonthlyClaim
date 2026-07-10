@@ -150,7 +150,7 @@ async function main() {
       console.log(JSON.stringify({ label: item.label, pass: false, error: err.message }));
     }
   }
-  process.exitCode = ok ? 0 : 1;
+  process.exit(ok ? 0 : 1);
 }
 
 if (require.main === module) {
