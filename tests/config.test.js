@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadConfig } = require('../src/config');
+const { loadConfig, normalizeTelecomEntryUrl } = require('../src/config');
 
 function withCleanTelecomEnv(fn) {
   const originalEnv = { ...process.env };
@@ -150,6 +150,17 @@ test('enables minimal login by default when BROWSER_CDP_URL is set', () => withC
   assert.equal(loadConfig().minimalLogin, false);
   assert.equal(loadConfig().skipOriginWarmup, false);
 }));
+
+test('normalizes telecom entry url to https on wapbj host', () => {
+  assert.equal(
+    normalizeTelecomEntryUrl('http://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1'),
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1',
+  );
+  assert.equal(
+    normalizeTelecomEntryUrl('https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1'),
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?a=1',
+  );
+});
 
 test('defaults slider mode to api (native submitVerify)', () => withCleanTelecomEnv(() => {
   process.env.TELECOM_PHONE = '18500000000';

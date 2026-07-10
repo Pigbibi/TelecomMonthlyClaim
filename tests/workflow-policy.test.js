@@ -74,7 +74,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /XVFB_PID/);
   assert.doesNotMatch(workflowText, /playwright install/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
-  assert.match(workflowText, /preDepositHighPic_check\.html\?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85/);
+  assert.match(workflowText, /https:\/\/wapbj\.189\.cn\/wap2017\/index\/preDepositHighPic_check\.html\?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85/);
 });
 
 test('local self-hosted workflow targets mac runner and does not mutate repo state', () => {

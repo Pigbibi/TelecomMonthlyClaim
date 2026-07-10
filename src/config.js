@@ -25,8 +25,15 @@ function numberEnv(name, fallback) {
   return Number(value);
 }
 
+function normalizeTelecomEntryUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url) return url;
+  return url.replace(/^http:\/\/wapbj\.189\.cn(?=\/)/i, 'https://wapbj.189.cn');
+}
+
 function loadConfig() {
   const phone = requireEnv('TELECOM_PHONE');
+  const entryUrl = normalizeTelecomEntryUrl(requireEnv('TELECOM_ENTRY_URL'));
   const targetPackage = process.env.TELECOM_TARGET_PACKAGE || 'voice200';
   const preset = PACKAGE_PRESETS[targetPackage] || {};
   const productName = optionalEnv('TELECOM_PRODUCT_NAME', preset.productName);
@@ -35,7 +42,7 @@ function loadConfig() {
   }
   return {
     phone,
-    entryUrl: requireEnv('TELECOM_ENTRY_URL'),
+    entryUrl,
     targetPackage,
     productName,
     expectedPlanId: optionalEnv('TELECOM_EXPECTED_PLAN_ID', preset.expectedPlanId),
@@ -89,4 +96,4 @@ function loadConfig() {
   };
 }
 
-module.exports = { PACKAGE_PRESETS, loadConfig };
+module.exports = { PACKAGE_PRESETS, loadConfig, normalizeTelecomEntryUrl };

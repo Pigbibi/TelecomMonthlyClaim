@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 45
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
-      TELECOM_ENTRY_URL: ${{ vars.TELECOM_ENTRY_URL || 'http://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85' }}
+      TELECOM_ENTRY_URL: ${{ vars.TELECOM_ENTRY_URL || 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85' }}
       TELECOM_TARGET_PACKAGE: ${{ vars.TELECOM_TARGET_PACKAGE || 'voice200' }}
       TELECOM_PRODUCT_NAME: ${{ vars.TELECOM_PRODUCT_NAME || '' }}
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}
