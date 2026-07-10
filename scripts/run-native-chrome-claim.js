@@ -73,15 +73,26 @@ class CdpClient {
     this.socket = socket;
     this.nextId = 1;
     this.pending = new Map();
+    this.listeners = new Map();
     socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data || '{}'));
-      if (!message.id || !this.pending.has(message.id)) return;
+      if (!message.id) {
+        for (const listener of this.listeners.get(message.method) || []) listener(message.params || {});
+        return;
+      }
+      if (!this.pending.has(message.id)) return;
       const { resolve, reject, timer } = this.pending.get(message.id);
       this.pending.delete(message.id);
       clearTimeout(timer);
       if (message.error) reject(new Error(message.error.message || 'CDP command failed'));
       else resolve(message.result || {});
     });
+  }
+
+  on(method, listener) {
+    const listeners = this.listeners.get(method) || [];
+    listeners.push(listener);
+    this.listeners.set(method, listeners);
   }
 
   static async connect(url) {
@@ -136,6 +147,28 @@ async function waitForPhoneInput(client, timeoutMs = 30000) {
 }
 
 async function openSliderChallenge(client, phone) {
+  const networkEvents = [];
+  const describeUrl = rawUrl => {
+    try {
+      const url = new URL(rawUrl);
+      return url.hostname === 'wapbj.189.cn' ? url.pathname : '';
+    } catch {
+      return '';
+    }
+  };
+  client.on('Network.requestWillBeSent', event => {
+    const pathname = describeUrl(event.request?.url);
+    if (pathname && /Slider|slider|send|code|check/i.test(pathname)) {
+      networkEvents.push({ phase: 'request', pathname });
+    }
+  });
+  client.on('Network.responseReceived', event => {
+    const pathname = describeUrl(event.response?.url);
+    if (pathname && /Slider|slider|send|code|check/i.test(pathname)) {
+      networkEvents.push({ phase: 'response', pathname, status: event.response?.status });
+    }
+  });
+  await client.send('Network.enable');
   await waitForPhoneInput(client);
   const focused = await client.evaluate(`(() => {
     const input = document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]');
@@ -163,7 +196,16 @@ async function openSliderChallenge(client, phone) {
     const button = selectors.map(selector => document.querySelector(selector)).find(visible);
     if (!button) return null;
     const rect = button.getBoundingClientRect();
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    const x = rect.x + rect.width / 2;
+    const y = rect.y + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return {
+      x,
+      y,
+      text: (button.innerText || button.textContent || '').trim(),
+      disabled: !!button.disabled,
+      hitInsideButton: hit === button || button.contains(hit),
+    };
   })()`);
   if (!point) throw new Error('Native Chrome SMS button missing');
   await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
@@ -187,6 +229,18 @@ async function openSliderChallenge(client, phone) {
     if (state?.busy) throw new Error('Native Chrome getSliderChallenge was rejected before Playwright attachment');
     await wait(500);
   }
+  const finalState = await client.evaluate(`(() => ({
+    buttonText: (document.querySelector('.checknum-button.slider-sms-btn,.checknum-button,.slider-sms-btn,.content_send_unlog,#sendCode')?.innerText || '').trim(),
+    sliderPresent: !!document.querySelector('#slider_bg_image,#slider_check,.slider-check-box'),
+  }))()`);
+  console.log('Native Chrome slider open diagnostics', {
+    buttonText: point.text,
+    buttonDisabled: point.disabled,
+    hitInsideButton: point.hitInsideButton,
+    finalButtonText: finalState?.buttonText,
+    sliderPresent: finalState?.sliderPresent,
+    networkEvents: networkEvents.slice(-8),
+  });
   throw new Error('Native Chrome slider challenge did not become ready before Playwright attachment');
 }
 
