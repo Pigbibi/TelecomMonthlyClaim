@@ -13,8 +13,9 @@ export TELECOM_MINIMAL_LOGIN="${TELECOM_MINIMAL_LOGIN:-true}"
 export TELECOM_SKIP_ORIGIN_WARMUP="${TELECOM_SKIP_ORIGIN_WARMUP:-true}"
 export TELECOM_CDP_PROFILE_MODE="${TELECOM_CDP_PROFILE_MODE:-emulated}"
 export TELECOM_SLIDER_MODE="${TELECOM_SLIDER_MODE:-api}"
-export TELECOM_KEEP_VALIDATED_PAGE_OPEN="${TELECOM_KEEP_VALIDATED_PAGE_OPEN:-true}"
-export TELECOM_REUSE_VALIDATED_PAGE="${TELECOM_REUSE_VALIDATED_PAGE:-true}"
+export TELECOM_FORCE_FRESH_CDP_SESSION="${TELECOM_FORCE_FRESH_CDP_SESSION:-true}"
+export TELECOM_KEEP_VALIDATED_PAGE_OPEN="${TELECOM_KEEP_VALIDATED_PAGE_OPEN:-false}"
+export TELECOM_REUSE_VALIDATED_PAGE="${TELECOM_REUSE_VALIDATED_PAGE:-false}"
 export TELECOM_DISABLE_CHROME_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-false}"
 export SEND_CODE_ATTEMPTS="${SEND_CODE_ATTEMPTS:-1}"
 
@@ -38,6 +39,8 @@ printf '%s\n' "$start_output"
 
 CHROME_CDP_PID="$(printf '%s\n' "$start_output" | sed -n 's/^CHROME_CDP_PID=//p' | tail -1)"
 XVFB_PID="$(printf '%s\n' "$start_output" | sed -n 's/^XVFB_PID=//p' | tail -1)"
+CHROME_CDP_PROFILE_DIR="$(printf '%s\n' "$start_output" | sed -n 's/^CHROME_CDP_PROFILE_DIR=//p' | tail -1)"
+CHROME_CDP_PROFILE_TEMP="$(printf '%s\n' "$start_output" | sed -n 's/^CHROME_CDP_PROFILE_TEMP=//p' | tail -1)"
 
 if [ -n "${GITHUB_ENV:-}" ]; then
   if [ -n "$CHROME_CDP_PID" ]; then
@@ -45,6 +48,9 @@ if [ -n "${GITHUB_ENV:-}" ]; then
   fi
   if [ -n "$XVFB_PID" ]; then
     echo "XVFB_PID=$XVFB_PID" >> "$GITHUB_ENV"
+  fi
+  if [ -n "$CHROME_CDP_PROFILE_DIR" ]; then
+    echo "CHROME_CDP_PROFILE_DIR=$CHROME_CDP_PROFILE_DIR" >> "$GITHUB_ENV"
   fi
 fi
 
@@ -56,6 +62,9 @@ cleanup() {
     fi
     if [ -n "$XVFB_PID" ]; then
       kill "$XVFB_PID" 2>/dev/null || true
+    fi
+    if [ "$CHROME_CDP_PROFILE_TEMP" = "true" ] && [ -n "$CHROME_CDP_PROFILE_DIR" ]; then
+      rm -rf "$CHROME_CDP_PROFILE_DIR" 2>/dev/null || true
     fi
   fi
   exit "$status"

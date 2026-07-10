@@ -58,11 +58,12 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
   assert.match(workflowText, /TELECOM_CDP_PROFILE_MODE: "emulated"/);
   assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
+  assert.match(workflowText, /TELECOM_FORCE_FRESH_CDP_SESSION: "true"/);
   assert.match(workflowText, /TELECOM_SLIDER_MODE: "api"/);
   assert.match(workflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
   assert.match(workflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "false"/);
-  assert.match(workflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
-  assert.match(workflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
+  assert.match(workflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "false"/);
+  assert.match(workflowText, /TELECOM_REUSE_VALIDATED_PAGE: "false"/);
   assert.match(workflowText, /SEND_CODE_ATTEMPTS: "1"/);
   assert.match(workflowText, /local_selfhosted/);
   assert.match(workflowText, /github\.event_name == 'schedule'/);
@@ -91,8 +92,9 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /TELECOM_CDP_PROFILE_MODE: "emulated"/);
   assert.match(localWorkflowText, /TELECOM_USE_DEFAULT_CHROME: "1"/);
   assert.match(localWorkflowText, /TELECOM_DISABLE_CHROME_EXTENSIONS: "false"/);
-  assert.match(localWorkflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"/);
-  assert.match(localWorkflowText, /TELECOM_REUSE_VALIDATED_PAGE: "true"/);
+  assert.match(localWorkflowText, /TELECOM_FORCE_FRESH_CDP_SESSION: "true"/);
+  assert.match(localWorkflowText, /TELECOM_KEEP_VALIDATED_PAGE_OPEN: "false"/);
+  assert.match(localWorkflowText, /TELECOM_REUSE_VALIDATED_PAGE: "false"/);
   assert.match(localWorkflowText, /SEND_CODE_ATTEMPTS: "1"/);
   assert.match(localWorkflowText, /PUSHPLUS_RELAY_INBOX_TOKEN/);
   assert.match(localWorkflowText, /Upload claim debug screenshots/);

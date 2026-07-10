@@ -80,12 +80,12 @@ jobs:
       TELECOM_SKIP_ORIGIN_WARMUP: "true"
       TELECOM_CDP_PROFILE_MODE: "emulated"
       TELECOM_REQUIRE_REAL_CHROME: "true"
-      TELECOM_CHROME_PROFILE: "/tmp/telecom-claim-cdp"
+      TELECOM_FORCE_FRESH_CDP_SESSION: "true"
       TELECOM_SLIDER_MODE: "api"
       TELECOM_USE_DEFAULT_CHROME: "1"
       TELECOM_DISABLE_CHROME_EXTENSIONS: "false"
-      TELECOM_KEEP_VALIDATED_PAGE_OPEN: "true"
-      TELECOM_REUSE_VALIDATED_PAGE: "true"
+      TELECOM_KEEP_VALIDATED_PAGE_OPEN: "false"
+      TELECOM_REUSE_VALIDATED_PAGE: "false"
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
       FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
       FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}

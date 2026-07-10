@@ -10,12 +10,24 @@ HEADLESS="${TELECOM_CDP_HEADLESS:-false}"
 DISPLAY_VALUE="${DISPLAY:-${TELECOM_XVFB_DISPLAY:-:99}}"
 XVFB_SCREEN="${TELECOM_XVFB_SCREEN:-1366x768x24}"
 DISABLE_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-true}"
+FORCE_FRESH="${TELECOM_FORCE_FRESH_CDP_SESSION:-true}"
+PROFILE_TEMP=false
 
 if curl -sf "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then
-  echo "Chrome CDP already listening on ${PORT} (profile: ${PROFILE})"
-  exit 0
+  if [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; then
+    echo "Fresh Chrome session requested; stopping existing CDP session on ${PORT} ..."
+    pkill -f "remote-debugging-port=${PORT}" 2>/dev/null || true
+    sleep 1
+  else
+    echo "Chrome CDP already listening on ${PORT} (profile: ${PROFILE})"
+    exit 0
+  fi
 fi
 
+if [ -z "${TELECOM_CHROME_PROFILE:-}" ] && { [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; }; then
+  PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/telecom-claim-cdp.XXXXXX")"
+  PROFILE_TEMP=true
+fi
 mkdir -p "$PROFILE"
 
 ensure_xvfb() {
@@ -107,6 +119,8 @@ echo "Starting Chrome CDP via ${CHROME_BIN} on port ${PORT} (minimal flags)"
 "$CHROME_BIN" "${ARGS[@]}" >/tmp/telecom-chrome-cdp.log 2>&1 &
 CHROME_PID=$!
 echo "CHROME_CDP_PID=${CHROME_PID}"
+echo "CHROME_CDP_PROFILE_DIR=${PROFILE}"
+echo "CHROME_CDP_PROFILE_TEMP=${PROFILE_TEMP}"
 if [ -n "${GITHUB_ENV:-}" ]; then
   echo "CHROME_CDP_PID=${CHROME_PID}" >> "$GITHUB_ENV"
 fi

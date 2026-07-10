@@ -18,16 +18,24 @@ CHROME_BIN="${TELECOM_CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS
 REAL_COPY="${TELECOM_REAL_PROFILE_COPY:-$HOME/.telecom-claim-chrome-real}"
 SRC_PROFILE="${TELECOM_SRC_CHROME_PROFILE:-$HOME/Library/Application Support/Google/Chrome}"
 DISABLE_EXTENSIONS="${TELECOM_DISABLE_CHROME_EXTENSIONS:-true}"
+FORCE_FRESH="${TELECOM_FORCE_FRESH_CDP_SESSION:-true}"
+PROFILE_TEMP=false
 
 if [ -z "$USE_DEFAULT" ] && [ -z "$PROFILE" ]; then
   USE_DEFAULT=1
 fi
 
 if curl -sf "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then
-  echo "Chrome CDP already listening on ${PORT}"
-  curl -sf "http://127.0.0.1:${PORT}/json/version" | head -c 200; echo
-  pgrep -lf "remote-debugging-port=${PORT}" | head -1 || true
-  exit 0
+  if [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; then
+    echo "Fresh Chrome session requested; stopping existing CDP session on ${PORT} ..."
+    pkill -f "remote-debugging-port=${PORT}" 2>/dev/null || true
+    sleep 1
+  else
+    echo "Chrome CDP already listening on ${PORT}"
+    curl -sf "http://127.0.0.1:${PORT}/json/version" | head -c 200; echo
+    pgrep -lf "remote-debugging-port=${PORT}" | head -1 || true
+    exit 0
+  fi
 fi
 
 if [ ! -x "$CHROME_BIN" ]; then
@@ -60,6 +68,10 @@ if [ "$DISABLE_EXTENSIONS" = "1" ] || [ "$DISABLE_EXTENSIONS" = "true" ]; then
 fi
 
 if [ "$USE_DEFAULT" = "1" ] || [ "$USE_DEFAULT" = "true" ]; then
+  if [ -z "${TELECOM_REAL_PROFILE_COPY:-}" ] && { [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; }; then
+    REAL_COPY="$(mktemp -d "${TMPDIR:-/tmp}/telecom-claim-chrome-real.XXXXXX")"
+    PROFILE_TEMP=true
+  fi
   echo "Syncing real Chrome profile into ${REAL_COPY} ..."
   mkdir -p "$REAL_COPY/Default"
   if [ -d "$SRC_PROFILE/Default" ]; then
@@ -74,6 +86,10 @@ if [ "$USE_DEFAULT" = "1" ] || [ "$USE_DEFAULT" = "true" ]; then
   ARGS+=(--user-data-dir="${REAL_COPY}")
   echo "Starting real-profile copy with CDP only: ${ARGS[*]}"
 else
+  if [ -z "${TELECOM_CHROME_PROFILE:-}" ] && { [ "$FORCE_FRESH" = "1" ] || [ "$FORCE_FRESH" = "true" ]; }; then
+    PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/telecom-claim-profile.XXXXXX")"
+    PROFILE_TEMP=true
+  fi
   mkdir -p "$PROFILE"
   ARGS+=(--user-data-dir="${PROFILE}")
   echo "Starting separate-profile Chrome with CDP only: ${ARGS[*]}"
@@ -81,6 +97,12 @@ fi
 
 nohup "$CHROME_BIN" "${ARGS[@]}" >/tmp/telecom-chrome-cdp.log 2>&1 &
 echo "CHROME_CDP_PID=$!"
+if [ "$USE_DEFAULT" = "1" ] || [ "$USE_DEFAULT" = "true" ]; then
+  echo "CHROME_CDP_PROFILE_DIR=${REAL_COPY}"
+else
+  echo "CHROME_CDP_PROFILE_DIR=${PROFILE}"
+fi
+echo "CHROME_CDP_PROFILE_TEMP=${PROFILE_TEMP}"
 if [ -n "${GITHUB_ENV:-}" ]; then
   echo "CHROME_CDP_PID=$!" >> "$GITHUB_ENV"
 fi
