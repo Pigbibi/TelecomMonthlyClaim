@@ -96,7 +96,7 @@ class CdpClient {
     if (method === 'Network.requestWillBeSent') {
       try {
         const url = new URL(params.request?.url);
-        if (url.hostname === 'wapbj.189.cn' && /slider|rand|send|code/i.test(url.pathname)) {
+        if (url.hostname === 'wapbj.189.cn' && /getSliderChallenge|validSlider|sendRand|sendCode|SecondConfirmation/i.test(url.pathname)) {
           this.networkRequests.set(params.requestId, { pathname: url.pathname, method: params.request?.method || '' });
         }
       } catch {}
@@ -231,13 +231,13 @@ async function openSliderChallenge(client, phone) {
   };
   client.on('Network.requestWillBeSent', event => {
     const pathname = describeUrl(event.request?.url);
-    if (pathname && /Slider|slider|send|code|check/i.test(pathname)) {
+    if (pathname && /getSliderChallenge|validSlider|sendRand|sendCode|SecondConfirmation/i.test(pathname)) {
       networkEvents.push({ phase: 'request', pathname });
     }
   });
   client.on('Network.responseReceived', event => {
     const pathname = describeUrl(event.response?.url);
-    if (pathname && /Slider|slider|send|code|check/i.test(pathname)) {
+    if (pathname && /getSliderChallenge|validSlider|sendRand|sendCode|SecondConfirmation/i.test(pathname)) {
       networkEvents.push({ phase: 'response', pathname, status: event.response?.status });
     }
   });
@@ -286,6 +286,21 @@ async function openSliderChallenge(client, phone) {
   await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
   await wait(120);
   await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await wait(1500);
+  if (!networkEvents.some(event => event.pathname.includes('getSliderChallenge'))) {
+    await client.evaluate(`(() => {
+      const selectors = ['.checknum-button.slider-sms-btn','.checknum-button','.slider-sms-btn','.content_send_unlog','#sendCode'];
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const button = selectors.map(selector => document.querySelector(selector)).find(visible);
+      button?.click();
+      return !!button;
+    })()`);
+  }
 
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
