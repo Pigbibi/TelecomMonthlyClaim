@@ -154,7 +154,7 @@ class CdpClient {
     return new CdpClient(socket);
   }
 
-  send(method, params = {}, timeoutMs = method.startsWith('Input.') ? 30000 : 10000) {
+  send(method, params = {}, timeoutMs = method.startsWith('Input.') ? 15000 : 10000) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -266,7 +266,7 @@ async function openSliderChallenge(client, phone) {
   }
   await wait(900 + Math.floor(Math.random() * 900));
   const point = await client.evaluate(`(() => {
-    const selectors = ['.checknum-button.slider-sms-btn','.checknum-button','.slider-sms-btn','.content_send_unlog','#sendCode'];
+    const selectors = ['.content_send_unlog','#sendCode','.slider-sms-btn','.checknum-button.slider-sms-btn','.checknum-button'];
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
