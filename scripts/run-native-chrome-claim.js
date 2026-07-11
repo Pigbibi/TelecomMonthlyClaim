@@ -361,6 +361,8 @@ async function clickPageElement(client, selectors, textPattern = '') {
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   })()`);
   if (!point) return false;
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
+  await wait(200);
   await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
   await wait(100);
   await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
@@ -449,18 +451,23 @@ async function selectTargetPackage(client, productName) {
 }
 
 async function openConfirmationSlider(client) {
-  if (!await clickPageElement(client, ['#payConfirm'])) throw new Error('Native Chrome pay confirm button missing');
-  await waitForPageState(
-    client,
-    `(() => {
-      const popup = document.querySelector('#secondPopCombo');
-      if (!popup) return false;
-      const rect = popup.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    })()`,
-    15000,
-    'Native Chrome second confirmation popup missing',
-  );
+  let popupReady = false;
+  for (let attempt = 1; attempt <= 2 && !popupReady; attempt += 1) {
+    await wait(attempt === 1 ? 1200 : 800);
+    if (!await clickPageElement(client, ['#payConfirm'])) throw new Error('Native Chrome pay confirm button missing');
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      popupReady = await client.evaluate(`(() => {
+        const popup = document.querySelector('#secondPopCombo');
+        if (!popup) return false;
+        const rect = popup.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })()`);
+      if (popupReady) break;
+      await wait(500);
+    }
+  }
+  if (!popupReady) throw new Error('Native Chrome second confirmation popup missing');
   if (!await clickPageElement(client, ['#SecondConfirmationSms'])) {
     throw new Error('Native Chrome confirmation SMS button missing');
   }
