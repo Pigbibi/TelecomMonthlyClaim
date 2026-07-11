@@ -74,9 +74,12 @@ class CdpClient {
     this.nextId = 1;
     this.pending = new Map();
     this.listeners = new Map();
+    this.networkRequests = new Map();
+    this.networkEvents = [];
     socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data || '{}'));
       if (!message.id) {
+        this.trackNetworkEvent(message.method, message.params || {});
         for (const listener of this.listeners.get(message.method) || []) listener(message.params || {});
         return;
       }
@@ -87,6 +90,46 @@ class CdpClient {
       if (message.error) reject(new Error(message.error.message || 'CDP command failed'));
       else resolve(message.result || {});
     });
+  }
+
+  trackNetworkEvent(method, params) {
+    if (method === 'Network.requestWillBeSent') {
+      try {
+        const url = new URL(params.request?.url);
+        if (url.hostname === 'wapbj.189.cn' && /slider|rand|send|code/i.test(url.pathname)) {
+          this.networkRequests.set(params.requestId, { pathname: url.pathname, method: params.request?.method || '' });
+        }
+      } catch {}
+      return;
+    }
+    const request = this.networkRequests.get(params.requestId);
+    if (!request) return;
+    if (method === 'Network.responseReceived') {
+      this.networkEvents.push({ ...request, status: params.response?.status || 0 });
+    } else if (method === 'Network.loadingFailed') {
+      this.networkEvents.push({ ...request, failed: true, error: String(params.errorText || '').slice(0, 80) });
+    } else if (method === 'Network.loadingFinished') {
+      const event = [...this.networkEvents].reverse().find(item => item.pathname === request.pathname && item.bodyBytes == null);
+      this.send('Network.getResponseBody', { requestId: params.requestId }).then(result => {
+        if (!event) return;
+        const body = String(result?.body || '');
+        event.bodyBytes = body.length;
+        try {
+          const payload = JSON.parse(body);
+          for (const key of ['code', 'status', 'resultCode', 'success']) {
+            const value = payload?.[key];
+            if (['string', 'number', 'boolean'].includes(typeof value) && String(value).length <= 24) {
+              event[key] = value;
+            }
+          }
+        } catch {}
+      }).catch(() => {});
+    }
+    if (this.networkEvents.length > 20) this.networkEvents.splice(0, this.networkEvents.length - 20);
+  }
+
+  recentNetworkEvents() {
+    return this.networkEvents.slice(-10);
   }
 
   on(method, listener) {
@@ -549,6 +592,7 @@ async function solveConfirmationSlider(client) {
     clickCount: 1,
   });
   const deadline = Date.now() + 25000;
+  let hiddenSince = 0;
   while (Date.now() < deadline) {
     const state = await client.evaluate(`(() => {
       const text = document.body?.innerText || '';
@@ -557,12 +601,22 @@ async function solveConfirmationSlider(client) {
       const visible = !!(popup && rect.width > 0 && rect.height > 0 && getComputedStyle(popup).display !== 'none');
       return {
         sent: /验证码已下发|请注意查收/.test(text),
-        failed: /服务繁忙|验证失败|请稍后再试/.test(text),
+        failed: /服务繁忙|验证失败|操作失败|请稍后再试/.test(text),
         visible,
       };
     })()`);
-    if (state?.sent || (!state?.visible && !state?.failed)) return info.naturalX;
-    if (state?.failed) throw new Error('Native Chrome confirmation slider validation failed');
+    if (state?.sent) return info.naturalX;
+    if (state?.failed) {
+      await wait(500);
+      console.log('Native Chrome confirmation network diagnostics', client.recentNetworkEvents());
+      throw new Error('Native Chrome confirmation slider or SMS operation failed');
+    }
+    if (!state?.visible) {
+      if (!hiddenSince) hiddenSince = Date.now();
+      if (Date.now() - hiddenSince >= 5000) return info.naturalX;
+    } else {
+      hiddenSince = 0;
+    }
     await wait(500);
   }
   throw new Error('Native Chrome confirmation slider validation timed out');
