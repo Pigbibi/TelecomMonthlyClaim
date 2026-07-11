@@ -349,26 +349,24 @@ async function dragSlider(client, { startX, startY, moveX }) {
   await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
   await wait(250);
   await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
-  const pending = [];
-  for (let step = 1; step <= 40; step += 1) {
-    const t = step / 40;
+  for (let step = 1; step <= 30; step += 1) {
+    const t = step / 30;
     const ease = 1 - Math.pow(1 - t, 2.4);
-    pending.push(client.send('Input.dispatchMouseEvent', {
+    await client.send('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x: startX + moveX * ease,
       y: startY + Math.sin(t * Math.PI * 3) * 2,
       button: 'left',
-    }));
+    });
     await wait(24 + (step % 5) * 8);
   }
-  pending.push(client.send('Input.dispatchMouseEvent', {
+  await client.send('Input.dispatchMouseEvent', {
     type: 'mouseReleased',
     x: startX + moveX,
     y: startY,
     button: 'left',
     clickCount: 1,
-  }));
-  await Promise.all(pending);
+  });
 }
 
 async function solveSliderChallenge(client) {
