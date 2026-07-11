@@ -346,7 +346,7 @@ async function openSliderChallenge(client, phone) {
 }
 
 async function dragSlider(client, { startX, startY, moveX }) {
-  await client.evaluate(`(async () => {
+  await client.evaluate(`(() => {
     const startX = ${JSON.stringify(startX)};
     const startY = ${JSON.stringify(startY)};
     const moveX = ${JSON.stringify(moveX)};
@@ -373,7 +373,6 @@ async function dragSlider(client, { startX, startY, moveX }) {
         startY + Math.sin(t * Math.PI * 3) * 2,
         1,
       ));
-      await new Promise(resolve => requestAnimationFrame(resolve));
     }
     document.dispatchEvent(event('mouseup', startX + moveX, startY, 0));
     return true;
