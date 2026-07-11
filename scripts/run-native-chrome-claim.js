@@ -55,17 +55,17 @@ async function waitForCdp(cdpUrl, timeoutMs = 30000) {
   throw new Error('Fresh system Chrome did not expose CDP');
 }
 
-async function waitForTelecomPage(cdpUrl, timeoutMs = 45000) {
+async function waitForPageTarget(cdpUrl, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const targets = await fetch(`${cdpUrl}/json`).then(response => response.json());
-      const target = targets.find(item => item.type === 'page' && item.url.startsWith('https://wapbj.189.cn/'));
+      const target = targets.find(item => item.type === 'page');
       if (target) return target;
     } catch {}
     await wait(500);
   }
-  throw new Error('Fresh system Chrome did not open the Telecom entry page');
+  throw new Error('Fresh system Chrome did not open a page target');
 }
 
 class CdpClient {
@@ -144,6 +144,36 @@ async function waitForPhoneInput(client, timeoutMs = 30000) {
     await wait(500);
   }
   throw new Error('Native Chrome phone input did not become ready');
+}
+
+async function navigateToEntryPage(client) {
+  let documentStatus = null;
+  client.on('Network.responseReceived', event => {
+    try {
+      const url = new URL(event.response?.url);
+      if (event.type === 'Document' && url.hostname === 'wapbj.189.cn') {
+        documentStatus = event.response?.status;
+      }
+    } catch {}
+  });
+  await client.send('Page.enable');
+  await client.send('Network.enable');
+  const navigation = await client.send('Page.navigate', { url: entryUrl }, 30000);
+  if (navigation.errorText) throw new Error(`Native Chrome entry navigation failed: ${navigation.errorText}`);
+  const deadline = Date.now() + 45000;
+  while (Date.now() < deadline) {
+    const state = await client.evaluate(`(() => ({
+      readyState: document.readyState,
+      telecom: location.hostname === 'wapbj.189.cn',
+      hasPhone: !!document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]'),
+    }))()`);
+    if (state?.telecom && state?.hasPhone) return;
+    if (documentStatus != null && documentStatus >= 400 && state?.readyState === 'complete') {
+      throw new Error(`Native Chrome entry document returned HTTP ${documentStatus}`);
+    }
+    await wait(500);
+  }
+  throw new Error(`Native Chrome entry page did not render${documentStatus == null ? '' : ` (HTTP ${documentStatus})`}`);
 }
 
 async function openSliderChallenge(client, phone) {
@@ -562,16 +592,17 @@ async function main() {
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
-    entryUrl,
+    'about:blank',
   ], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
 
   try {
     const version = await waitForCdp(cdpUrl);
-    const target = await waitForTelecomPage(cdpUrl);
-    await wait(Number(process.env.TELECOM_NATIVE_CHROME_SETTLE_MS || 5000));
-    console.log(`Fresh headed system Chrome ready for delayed Playwright attachment (${version.Browser || 'Google Chrome'})`);
+    const target = await waitForPageTarget(cdpUrl);
     const cdp = await CdpClient.connect(target.webSocketDebuggerUrl);
     try {
+      await wait(Number(process.env.TELECOM_NATIVE_CHROME_SETTLE_MS || 3000));
+      await navigateToEntryPage(cdp);
+      console.log(`Fresh headed system Chrome ready for delayed Playwright attachment (${version.Browser || 'Google Chrome'})`);
       const smsSince = Date.now() - 10000;
       await openSliderChallenge(cdp, phone);
       const sliderDistance = await solveSliderChallenge(cdp);
