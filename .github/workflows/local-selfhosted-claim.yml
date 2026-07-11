@@ -1,25 +1,18 @@
-name: Monthly Beijing Telecom Claim
+name: Local Self-Hosted Telecom Claim
 
 on:
-  schedule:
-    # Beijing time 08:00 on day 1-3 each month.
-    - cron: "0 0 1-3 * *"
   workflow_dispatch:
     inputs:
       force_run:
         description: "Ignore monthly success state and run anyway"
         required: false
-        default: "false"
+        default: "true"
       dry_run:
         description: "Stop before the final telecom submit button"
         required: false
-        default: "false"
-      runner_target:
-        description: "Manual run target: github_hosted or local_selfhosted"
-        required: false
-        default: "local_selfhosted"
+        default: "true"
       connectivity_mode:
-        description: "Override connectivity mode for this manual run: direct, http_proxy, ssh_tunnel, or proxy_pool"
+        description: "Override connectivity mode for this local run: direct, http_proxy, ssh_tunnel, or proxy_pool"
         required: false
         default: ""
       probe_only:
@@ -28,13 +21,13 @@ on:
         default: "false"
 
 permissions:
-  contents: write
-  issues: write
+  contents: read
+  actions: read
 
 jobs:
   claim:
-    runs-on: ${{ fromJSON(((github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.runner_target != 'github_hosted')) && '["self-hosted","macOS","X64","telecom-claim-local"]' || '["ubuntu-latest"]') }}
-    timeout-minutes: 35
+    runs-on: [self-hosted, macOS, X64, telecom-claim-local]
+    timeout-minutes: 45
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
       TELECOM_ENTRY_URL: ${{ vars.TELECOM_ENTRY_URL || 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85' }}
@@ -43,7 +36,7 @@ jobs:
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
-      TELECOM_CONNECTIVITY_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'direct' }}
+      TELECOM_CONNECTIVITY_MODE: ${{ github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'direct' }}
       SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'pushplus' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
@@ -78,7 +71,7 @@ jobs:
       PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
-      TELECOM_BROWSER_TRANSPORT: "auto"
+      TELECOM_BROWSER_TRANSPORT: "native_playwright"
       TELECOM_BROWSER_PROFILE: "desktop"
       BROWSER_CDP_URL: "http://127.0.0.1:9222"
       TELECOM_STEALTH_MODE: "false"
@@ -96,19 +89,10 @@ jobs:
       TELECOM_REUSE_VALIDATED_PAGE: "true"
       TELECOM_PROBE_ONLY: ${{ github.event.inputs.probe_only || 'false' }}
       ALLOW_DIRECT_PROXY_FALLBACK: ${{ vars.ALLOW_DIRECT_PROXY_FALLBACK || 'false' }}
-      FAIL_ONLY_FINAL_DAY: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-      FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
-      DRY_RUN_BEFORE_FINAL_SUBMIT: ${{ github.event.inputs.dry_run || 'false' }}
+      FORCE_RUN: ${{ github.event.inputs.force_run || 'true' }}
+      DRY_RUN_BEFORE_FINAL_SUBMIT: ${{ github.event.inputs.dry_run || 'true' }}
 
     steps:
-      - name: Cleanup stale self-hosted git refs
-        if: runner.environment == 'self-hosted'
-        run: |
-          set -euo pipefail
-          if [ -d "$GITHUB_WORKSPACE/.git/refs" ]; then
-            find "$GITHUB_WORKSPACE/.git/refs" -type f -name '* *' -print -delete || true
-          fi
-
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -122,67 +106,7 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-      - name: Decide whether claim is needed
-        id: claim_plan
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-
-          const forceRun = /^true$/i.test(process.env.FORCE_RUN || '');
-          const parts = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'Asia/Shanghai',
-            year: 'numeric',
-            month: '2-digit',
-          }).formatToParts(new Date());
-          const year = parts.find(part => part.type === 'year')?.value;
-          const month = parts.find(part => part.type === 'month')?.value;
-          const stateFile = `state/${year}-${month}.json`;
-
-          let alreadySuccessful = false;
-          if (fs.existsSync(stateFile)) {
-            try {
-              alreadySuccessful = JSON.parse(fs.readFileSync(stateFile, 'utf8')).status === 'success';
-            } catch {
-              alreadySuccessful = false;
-            }
-          }
-
-          const shouldRun = forceRun || !alreadySuccessful;
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `should_run=${shouldRun ? 'true' : 'false'}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `state_file=${stateFile}\n`);
-
-          if (!shouldRun) {
-            console.log(`State ${stateFile} already records success; skip external tunnel. Set FORCE_RUN=true to override.`);
-          } else if (forceRun) {
-            console.log('FORCE_RUN=true; claim will run even if state already records success.');
-          } else {
-            console.log(`No successful state found in ${stateFile}; claim will run.`);
-          }
-          NODE
-
-      - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'Linux'
-        name: Install Google Chrome for real-browser CDP
-        run: |
-          set -euo pipefail
-          # Prefer real Google Chrome over Playwright-bundled Chromium.
-          if command -v google-chrome-stable >/dev/null 2>&1 || command -v google-chrome >/dev/null 2>&1; then
-            echo "Google Chrome already installed"
-          else
-            wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-            sudo apt-get update
-            sudo apt-get install -y /tmp/chrome.deb
-          fi
-          google-chrome --version || google-chrome-stable --version
-
-      - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'macOS'
-        name: Verify local Google Chrome for real-browser CDP
-        run: |
-          set -euo pipefail
-          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
-
       - name: Validate connectivity
-        if: steps.claim_plan.outputs.should_run == 'true'
         run: |
           set -euo pipefail
           case "${TELECOM_CONNECTIVITY_MODE:-direct}" in
@@ -203,18 +127,6 @@ jobs:
             echo "Workflow will read SMS from PushPlus; skipping SMS inbox health check."
           else
             : "${SMS_INBOX_TOKEN:?Missing SMS_INBOX_TOKEN secret}"
-            case "$SMS_INBOX_URL" in
-              http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
-                echo "SMS_INBOX_URL must be reachable from the GitHub-hosted runner, not the default loopback URL."
-                exit 1
-                ;;
-            esac
-            case "$SMS_INBOX_HEALTH_URL" in
-              http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
-                echo "SMS_INBOX_HEALTH_URL must be reachable from the GitHub-hosted runner, not the default loopback URL."
-                exit 1
-                ;;
-            esac
             curl -fsS --connect-timeout 8 --max-time 20 --retry 2 --retry-delay 3 --retry-all-errors \
               -H "Authorization: Bearer $SMS_INBOX_TOKEN" "$SMS_INBOX_HEALTH_URL" >/dev/null
           fi
@@ -224,12 +136,6 @@ jobs:
               ;;
             http_proxy)
               : "${OPENWRT_HTTP_PROXY:?Missing OPENWRT_HTTP_PROXY, HOME_HTTP_PROXY, PUBLIC_HTTP_PROXY, SCHWAB_PROXY_URL, or BROWSER_PROXY_SERVER secret for http_proxy mode}"
-              case "$OPENWRT_HTTP_PROXY" in
-                http://127.0.0.1:*|http://localhost:*)
-                  echo "http_proxy mode requires a proxy reachable from the runner, not a loopback URL. Use ssh_tunnel mode for SSH forwarding."
-                  exit 1
-                  ;;
-              esac
               curl -sSI --proxy "$OPENWRT_HTTP_PROXY" --connect-timeout 8 --max-time 20 "$PROXY_HEALTH_URL" >/dev/null
               ;;
             ssh_tunnel)
@@ -257,7 +163,6 @@ jobs:
                 ssh-keyscan -p "${PROXY_SSH_PORT:-22}" "$PROXY_SSH_HOST" > "$known_hosts_file" 2>/dev/null
               fi
               chmod 600 "$known_hosts_file"
-              control_path="$ssh_dir/control-%C"
               ssh -i "$key_file" \
                 -p "${PROXY_SSH_PORT:-22}" \
                 -o BatchMode=yes \
@@ -269,9 +174,6 @@ jobs:
                 -o TCPKeepAlive=yes \
                 -o IPQoS=none \
                 -o Compression=no \
-                -o ControlMaster=auto \
-                -o ControlPath="$control_path" \
-                -o ControlPersist=300 \
                 -N -L "127.0.0.1:${PROXY_TUNNEL_LOCAL_PORT}:${PROXY_TUNNEL_REMOTE_ENDPOINT}" \
                 "${PROXY_SSH_USER:-root}@${PROXY_SSH_HOST}" &
               tunnel_pid="$!"
@@ -312,16 +214,20 @@ jobs:
               ;;
           esac
 
+      - name: Verify local Chrome
+        run: |
+          set -euo pipefail
+          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
+
       - name: Run claim via real Chrome CDP
-        id: claim
-        if: steps.claim_plan.outputs.should_run == 'true'
         run: bash scripts/run-real-chrome-claim.sh
 
       - name: Upload claim debug screenshots
-        if: always() && steps.claim_plan.outputs.should_run == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: claim-debug-${{ github.run_id }}
+          name: local-claim-debug-${{ github.run_id }}
           path: artifacts/claim-debug/
           if-no-files-found: ignore
 
@@ -332,52 +238,7 @@ jobs:
           if [ -n "${CHROME_CDP_PID:-}" ]; then
             kill "$CHROME_CDP_PID" 2>/dev/null || true
           fi
-          if [ -n "${XVFB_PID:-}" ]; then
-            kill "$XVFB_PID" 2>/dev/null || true
-          fi
           if [ -n "${PROXY_TUNNEL_PID:-}" ]; then
             kill "$PROXY_TUNNEL_PID" 2>/dev/null || true
           fi
-          if [ "${TELECOM_BROWSER_TRANSPORT:-auto}" != "playwright" ] && [ "$(uname -s)" != "Darwin" ]; then
-            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
-          fi
-          pkill -x Xvfb 2>/dev/null || true
-
-      - name: Commit monthly state
-        if: always() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state || true
-          if git diff --cached --quiet; then
-            echo "No state changes"
-          else
-            git commit -m "Record telecom monthly claim state"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
-
-      - name: Create issue on final failure
-        if: failure() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/create-failure-issue.js
-
-      - name: Resolve run log outcome
-        id: run_log
-        if: always()
-        env:
-          SHOULD_RUN: ${{ steps.claim_plan.outputs.should_run || 'false' }}
-          STATE_FILE: ${{ steps.claim_plan.outputs.state_file || '' }}
-          STEP_OUTCOME: ${{ steps.claim.outcome || 'skipped' }}
-        run: node scripts/resolve-run-log-outcome.js
-
-      - name: Record run log on logs branch
-        if: always()
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          RUN_LOG_STATUS: ${{ job.status }}
-          RUN_LOG_CLAIM_OUTCOME: ${{ steps.run_log.outputs.claim_outcome || steps.claim.outcome || 'skipped' }}
-          RUN_LOG_FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
-          RUN_LOG_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-        run: bash scripts/write-run-log-branch.sh
+          pkill -f "remote-debugging-port=9222" 2>/dev/null || true

@@ -5,6 +5,7 @@ node_modules/
 .sms-inbox.jsonl
 playwright-report/
 test-results/
+artifacts/
 .DS_Store
 __pycache__/
 *.pyc

@@ -101,6 +101,21 @@ function summarizePushPlusDetail(text) {
   };
 }
 
+function extractSenderFromText(text) {
+  const normalized = String(text || '').replace(/\s+/g, '');
+  const match = normalized.match(/(?:发件(?:号码|人|号)?|发送号码|短信号码)[:：]?([A-Za-z0-9+_-]{5,20})/);
+  return match ? match[1] : '';
+}
+
+function normalizeSearchText(text) {
+  return String(text || '').replace(/\s+/g, '');
+}
+
+function matchesKeyword(text, keyword) {
+  if (!keyword) return true;
+  return normalizeSearchText(text).includes(normalizeSearchText(keyword));
+}
+
 function sortMessages(messages) {
   return messages.sort((a, b) => Number(b.receivedAt || 0) - Number(a.receivedAt || 0));
 }
@@ -217,10 +232,11 @@ class SmsInboxClient {
     if (!res.ok) throw new Error(`PushPlus message list HTTP ${res.status}`);
     const data = await res.json();
     if (data?.code !== 200) throw new Error(`PushPlus message list failed: ${data?.msg || 'unknown error'}`);
+    const keyword = this.config.pushPlusKeyword || '';
     const titleKeyword = this.config.pushPlusTitleKeyword || '';
     const list = data?.data?.list || [];
     if (this.config.pushPlusDebug) {
-      console.log(`PushPlus message list fetched ${JSON.stringify({ count: list.length, titleKeyword })}`);
+      console.log(`PushPlus message list fetched ${JSON.stringify({ count: list.length, titleKeyword, keyword })}`);
     }
     const messages = [];
     for (const item of list) {
@@ -238,16 +254,39 @@ class SmsInboxClient {
       }
       if (since && receivedAt && receivedAt < since) continue;
       const detail = await this.fetchPushPlusDetail(item.shortCode);
+      const combinedText = [item.title || '', detail].filter(Boolean).join('\n');
+      if (!matchesKeyword(combinedText, keyword)) {
+        if (this.config.pushPlusDebug) {
+          console.log(`PushPlus message ignored by keyword ${JSON.stringify({
+            shortCode: item.shortCode,
+            keyword,
+          })}`);
+        }
+        continue;
+      }
+      const sender = extractSenderFromText(detail)
+        || extractSenderFromText(item.title || '');
+      if (this.config.smsSender && sender && !String(sender).includes(this.config.smsSender)) {
+        if (this.config.pushPlusDebug) {
+          console.log(`PushPlus message ignored by sender ${JSON.stringify({
+            shortCode: item.shortCode,
+            sender,
+            expectedSender: this.config.smsSender,
+          })}`);
+        }
+        continue;
+      }
       if (this.config.pushPlusDebug) {
         console.log(`PushPlus message detail summary ${JSON.stringify({
           shortCode: item.shortCode,
+          sender,
           ...summarizePushPlusDetail(detail),
         })}`);
       }
       messages.push({
         id: item.shortCode,
-        sender: '',
-        text: [item.title || '', detail].filter(Boolean).join('\n'),
+        sender,
+        text: combinedText,
         receivedAt,
       });
     }
@@ -304,4 +343,6 @@ module.exports = {
   htmlToText,
   parsePushPlusUpdateTime,
   summarizePushPlusDetail,
+  extractSenderFromText,
+  matchesKeyword,
 };
