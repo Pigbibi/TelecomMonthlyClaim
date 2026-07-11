@@ -23,7 +23,7 @@ on:
         required: false
         default: ""
       probe_only:
-        description: "Validate browser and entry page without sending SMS"
+        description: "Load the entry page and login slider without submitting it or sending SMS"
         required: false
         default: "false"
 
@@ -78,7 +78,7 @@ jobs:
       PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
-      TELECOM_BROWSER_TRANSPORT: "auto"
+      TELECOM_BROWSER_TRANSPORT: "native_playwright"
       TELECOM_BROWSER_PROFILE: "desktop"
       BROWSER_CDP_URL: "http://127.0.0.1:9222"
       TELECOM_STEALTH_MODE: "false"
@@ -172,7 +172,12 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y /tmp/chrome.deb
           fi
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb xauth
+          fi
           google-chrome --version || google-chrome-stable --version
+          xvfb-run --help >/dev/null
 
       - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'macOS'
         name: Verify local Google Chrome for real-browser CDP
@@ -315,7 +320,12 @@ jobs:
       - name: Run claim via real Chrome CDP
         id: claim
         if: steps.claim_plan.outputs.should_run == 'true'
-        run: bash scripts/run-real-chrome-claim.sh
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a bash scripts/run-real-chrome-claim.sh
+          else
+            bash scripts/run-real-chrome-claim.sh
+          fi
 
       - name: Upload claim debug screenshots
         if: always() && steps.claim_plan.outputs.should_run == 'true'

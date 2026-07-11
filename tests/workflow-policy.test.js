@@ -56,7 +56,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /TELECOM_STEALTH_MODE: "false"/);
   assert.match(workflowText, /BROWSER_CHANNEL: chrome/);
   assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
-  assert.match(workflowText, /TELECOM_BROWSER_TRANSPORT: "auto"/);
+  assert.match(workflowText, /TELECOM_BROWSER_TRANSPORT: "native_playwright"/);
   assert.match(workflowText, /TELECOM_BROWSER_PROFILE: "desktop"/);
   assert.match(workflowText, /TELECOM_CDP_PROFILE_MODE: "native"/);
   assert.match(workflowText, /TELECOM_REQUIRE_REAL_CHROME: "true"/);
@@ -75,6 +75,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /runner_target != 'github_hosted'/);
   assert.match(workflowText, /telecom-claim-local/);
   assert.match(workflowText, /run-real-chrome-claim\.sh/);
+  assert.match(workflowText, /xvfb-run -a bash scripts\/run-real-chrome-claim\.sh/);
   assert.doesNotMatch(workflowText, /xvfb-run -a bash scripts\/start-chrome-cdp-linux\.sh/);
   assert.match(workflowText, /Install Google Chrome for real-browser CDP/);
   assert.match(workflowText, /Verify local Google Chrome for real-browser CDP/);
@@ -169,6 +170,10 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /login completed before Playwright attachment/);
   assert.match(script, /TELECOM_LOGIN_ALREADY_COMPLETE: 'true'/);
   assert.match(script, /TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true'/);
+  assert.match(script, /Network\.setBlockedURLs/);
+  assert.match(script, /sendRandByUnlog/);
+  assert.match(script, /Native Chrome slider-load probe passed without submitting the slider/);
+  assert.match(script, /--proxy-server=/);
   assert.match(script, /当日发送短信数量过多/);
   assert.match(script, /`--remote-debugging-port=\$\{cdpPort\}`/);
   assert.doesNotMatch(script, /--headless/);
