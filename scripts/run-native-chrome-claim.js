@@ -168,9 +168,9 @@ async function navigateToEntryPage(client) {
       hasPhone: !!document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]'),
     }))()`);
     if (state?.telecom && state?.hasPhone) return;
-    if (documentStatus != null && documentStatus >= 400 && state?.readyState === 'complete') {
-      throw new Error(`Native Chrome entry document returned HTTP ${documentStatus}`);
-    }
+    // HTTP 400/412 is also used by the site's JavaScript browser-check page.
+    // Keep the real browser alive so that challenge can set its cookie and
+    // navigate to the application instead of aborting on the intermediate URL.
     await wait(500);
   }
   throw new Error(`Native Chrome entry page did not render${documentStatus == null ? '' : ` (HTTP ${documentStatus})`}`);
