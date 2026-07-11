@@ -75,6 +75,7 @@ class CdpClient {
     this.pending = new Map();
     this.listeners = new Map();
     this.networkRequests = new Map();
+    this.networkResponseIds = new Map();
     this.networkEvents = [];
     socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data || '{}'));
@@ -106,30 +107,36 @@ class CdpClient {
     if (!request) return;
     if (method === 'Network.responseReceived') {
       this.networkEvents.push({ ...request, status: params.response?.status || 0 });
+      this.networkResponseIds.set(request.pathname, params.requestId);
     } else if (method === 'Network.loadingFailed') {
       this.networkEvents.push({ ...request, failed: true, error: String(params.errorText || '').slice(0, 80) });
-    } else if (method === 'Network.loadingFinished') {
-      const event = [...this.networkEvents].reverse().find(item => item.pathname === request.pathname && item.bodyBytes == null);
-      this.send('Network.getResponseBody', { requestId: params.requestId }).then(result => {
-        if (!event) return;
-        const body = String(result?.body || '');
-        event.bodyBytes = body.length;
-        try {
-          const payload = JSON.parse(body);
-          for (const key of ['code', 'status', 'resultCode', 'success']) {
-            const value = payload?.[key];
-            if (['string', 'number', 'boolean'].includes(typeof value) && String(value).length <= 24) {
-              event[key] = value;
-            }
-          }
-        } catch {}
-      }).catch(() => {});
     }
     if (this.networkEvents.length > 20) this.networkEvents.splice(0, this.networkEvents.length - 20);
   }
 
   recentNetworkEvents() {
     return this.networkEvents.slice(-10);
+  }
+
+  async recentNetworkDiagnostics() {
+    const events = this.recentNetworkEvents().map(event => ({ ...event }));
+    for (const event of events) {
+      const requestId = this.networkResponseIds.get(event.pathname);
+      if (!requestId || event.failed) continue;
+      try {
+        const result = await this.send('Network.getResponseBody', { requestId }, 5000);
+        const body = String(result?.body || '');
+        event.bodyBytes = body.length;
+        const payload = JSON.parse(body);
+        for (const key of ['code', 'status', 'resultCode', 'success']) {
+          const value = payload?.[key];
+          if (['string', 'number', 'boolean'].includes(typeof value) && String(value).length <= 24) {
+            event[key] = value;
+          }
+        }
+      } catch {}
+    }
+    return events;
   }
 
   on(method, listener) {
@@ -623,7 +630,7 @@ async function solveConfirmationSlider(client) {
     if (state?.sent) return info.naturalX;
     if (state?.failed) {
       await wait(500);
-      console.log('Native Chrome confirmation network diagnostics', client.recentNetworkEvents());
+      console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
       throw new Error('Native Chrome confirmation slider or SMS operation failed');
     }
     if (!state?.visible) {
