@@ -419,9 +419,10 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
 async function selectTargetPackage(client, productName) {
   await waitForPageState(
     client,
-    `(() => location.href.includes('preDepositCfg_list') && !!document.querySelector('#conduct'))()`,
-    20000,
-    'Native Chrome package list did not become ready',
+    `(() => location.href.includes('preDepositCfg_list')
+      && [...document.querySelectorAll('li')].some(node => (node.innerText || '').includes(${JSON.stringify(productName)})))()`,
+    30000,
+    'Native Chrome target package did not render',
   );
   const selected = await client.evaluate(`(() => {
     const name = ${JSON.stringify(productName)};
