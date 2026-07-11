@@ -154,7 +154,7 @@ class CdpClient {
     return new CdpClient(socket);
   }
 
-  send(method, params = {}, timeoutMs = 10000) {
+  send(method, params = {}, timeoutMs = method.startsWith('Input.') ? 30000 : 10000) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
