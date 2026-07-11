@@ -169,6 +169,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /login completed before Playwright attachment/);
   assert.match(script, /TELECOM_LOGIN_ALREADY_COMPLETE: 'true'/);
   assert.match(script, /TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true'/);
+  assert.match(script, /当日发送短信数量过多/);
   assert.match(script, /`--remote-debugging-port=\$\{cdpPort\}`/);
   assert.doesNotMatch(script, /--headless/);
   assert.doesNotMatch(script, /remote-debugging-port=0/);

@@ -625,7 +625,7 @@ async function solveConfirmationSlider(client) {
       const visible = !!(popup && rect.width > 0 && rect.height > 0 && getComputedStyle(popup).display !== 'none');
       return {
         sent: /验证码已下发|请注意查收/.test(text),
-        failed: /服务繁忙|验证失败|操作失败|请稍后再试/.test(text),
+        failed: /服务繁忙|验证失败|操作失败|请稍后再试|当日发送短信数量过多|无法继续发送/.test(text),
         visible,
       };
     })()`);
