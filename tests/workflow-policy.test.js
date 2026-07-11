@@ -163,7 +163,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /TELECOM_REUSE_VALIDATED_PAGE: 'true'/);
   assert.match(script, /new WebSocket/);
   assert.match(script, /Input\.insertText/);
-  assert.match(script, /Input\.dispatchMouseEvent/);
+  assert.match(script, /element\.click\(\)/);
   assert.match(script, /computeSliderImageMatchInPage/);
   assert.match(script, /SmsInboxClient/);
   assert.match(script, /login completed before Playwright attachment/);

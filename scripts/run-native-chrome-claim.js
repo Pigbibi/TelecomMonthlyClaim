@@ -423,7 +423,7 @@ async function solveSliderChallenge(client) {
 }
 
 async function clickPageElement(client, selectors, textPattern = '') {
-  const point = await client.evaluate(`(() => {
+  const clicked = await client.evaluate(`(() => {
     const selectors = ${JSON.stringify(selectors)};
     const pattern = ${JSON.stringify(textPattern)} ? new RegExp(${JSON.stringify(textPattern)}) : null;
     const visible = element => {
@@ -442,15 +442,10 @@ async function clickPageElement(client, selectors, textPattern = '') {
       })[0];
     if (!element) return null;
     element.scrollIntoView({ block: 'center', inline: 'center' });
-    const rect = element.getBoundingClientRect();
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    element.click();
+    return true;
   })()`);
-  if (!point) return false;
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
-  await wait(200);
-  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-  await wait(100);
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  if (!clicked) return false;
   return true;
 }
 
