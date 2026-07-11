@@ -593,9 +593,9 @@ async function solveConfirmationSlider(client) {
         }
       }
     }
-    const slider = [...root.querySelectorAll('#slider_track_btn,.slider-btn,.slider,[class*="slider" i]')]
-      .filter(visible)
-      .sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0];
+    const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+      .map(selector => root.querySelector(selector))
+      .find(visible);
     if (!slider || count < 500 || minx >= canvas.width) return null;
     const sliderRect = slider.getBoundingClientRect();
     const canvasRect = canvas.getBoundingClientRect();
@@ -604,9 +604,11 @@ async function solveConfirmationSlider(client) {
       moveX: Math.round(minx * canvasRect.width / canvas.width),
       startX: sliderRect.x + sliderRect.width / 2,
       startY: sliderRect.y + sliderRect.height / 2,
+      slider: { tag: slider.tagName, id: slider.id, className: String(slider.className || '').slice(0, 80) },
     };
   })()`, 30000);
   if (!info || info.moveX < 40) throw new Error('Native Chrome confirmation slider target missing');
+  console.log('Native Chrome confirmation slider match', info);
   await dragSlider(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
   const deadline = Date.now() + 25000;
   let hiddenSince = 0;
