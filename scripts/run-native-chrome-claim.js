@@ -345,6 +345,32 @@ async function openSliderChallenge(client, phone) {
   throw new Error('Native Chrome slider challenge did not become ready before Playwright attachment');
 }
 
+async function dragSlider(client, { startX, startY, moveX }) {
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
+  await wait(250);
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
+  const pending = [];
+  for (let step = 1; step <= 40; step += 1) {
+    const t = step / 40;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    pending.push(client.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: startX + moveX * ease,
+      y: startY + Math.sin(t * Math.PI * 3) * 2,
+      button: 'left',
+    }));
+    await wait(24 + (step % 5) * 8);
+  }
+  pending.push(client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: startX + moveX,
+    y: startY,
+    button: 'left',
+    clickCount: 1,
+  }));
+  await Promise.all(pending);
+}
+
 async function solveSliderChallenge(client) {
   const match = await client.evaluate(`(${computeSliderImageMatchInPage.toString()})({})`, 30000);
   if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
@@ -362,27 +388,7 @@ async function solveSliderChallenge(client) {
   });
   const startX = match.btn.cx;
   const startY = match.btn.cy;
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
-  await wait(250);
-  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
-  for (let step = 1; step <= 50; step += 1) {
-    const t = step / 50;
-    const ease = 1 - Math.pow(1 - t, 2.4);
-    await client.send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: startX + match.moveX * ease,
-      y: startY + Math.sin(t * Math.PI * 3) * 2,
-      button: 'left',
-    });
-    await wait(24 + (step % 5) * 8);
-  }
-  await client.send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: startX + match.moveX,
-    y: startY,
-    button: 'left',
-    clickCount: 1,
-  });
+  await dragSlider(client, { startX, startY, moveX: match.moveX });
 
   const deadline = Date.now() + 25000;
   while (Date.now() < deadline) {
@@ -598,27 +604,7 @@ async function solveConfirmationSlider(client) {
     };
   })()`, 30000);
   if (!info || info.moveX < 40) throw new Error('Native Chrome confirmation slider target missing');
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: info.startX, y: info.startY });
-  await wait(250);
-  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: info.startX, y: info.startY, button: 'left', clickCount: 1 });
-  for (let step = 1; step <= 50; step += 1) {
-    const t = step / 50;
-    const ease = 1 - Math.pow(1 - t, 2.4);
-    await client.send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: info.startX + info.moveX * ease,
-      y: info.startY + Math.sin(t * Math.PI * 3) * 2,
-      button: 'left',
-    });
-    await wait(24 + (step % 5) * 8);
-  }
-  await client.send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: info.startX + info.moveX,
-    y: info.startY,
-    button: 'left',
-    clickCount: 1,
-  });
+  await dragSlider(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
   const deadline = Date.now() + 25000;
   let hiddenSince = 0;
   while (Date.now() < deadline) {
