@@ -35,8 +35,7 @@ fi
 if [ "$TRANSPORT" = "native_playwright" ]; then
   unset BROWSER_CDP_URL
   if [ "$PROBE_ONLY" = "true" ]; then
-    node "$ROOT_DIR/scripts/validate-entry-page.js"
-    echo "Entry probe completed; skipping SMS send and claim."
+    node "$ROOT_DIR/scripts/run-native-chrome-claim.js"
     exit 0
   fi
   node "$ROOT_DIR/scripts/run-native-chrome-claim.js"

@@ -5,7 +5,7 @@
 默认流程：
 
 1. GitHub Actions 在北京时间每月 1-3 日 08:00 运行。
-2. 默认每月 schedule 走本地 self-hosted macOS runner；手动 `workflow_dispatch` 仍可切到 `github_hosted` 作为兜底。
+2. 默认每月 schedule 走本地 self-hosted macOS runner；手动 `workflow_dispatch` 可切到 `github_hosted`，两者都使用全新、有界面的真实 Chrome（Linux 通过 Xvfb 提供显示环境）。
 3. 脚本优先通过真实 Google Chrome CDP 打开 189 活动页，并按配置选择直连或代理访问。
 4. 北京电信手机号收到的 `10001` 短信默认进入 PushPlus；如果同时部署 `PushPlusSmsToTelegram`，脚本优先从其受保护 relay inbox 拉取被拦截的验证码，未配置 relay 时回退到 PushPlus OpenAPI；原 OpenWrt / 家里电脑 SMS inbox 方案仍保留为兼容选项。
 5. 脚本读取第一步登录验证码，根据 `TELECOM_TARGET_PACKAGE` 选中目标套餐。
@@ -149,6 +149,7 @@ npm run debug:pushplus
 2. 确认北京电信手机号收到的 `10001` 短信会进入 PushPlus。
 3. 在 GitHub Secrets / Variables 填好 PushPlus、电信活动和可选代理配置。
 4. 先手动触发 `Monthly Beijing Telecom Claim` workflow，保持默认 `runner_target=local_selfhosted`，并用 `dry_run=true` 跑到最终提交前。
+   测试 GitHub 托管 Runner 时，先设置 `runner_target=github_hosted`、`probe_only=true`、`dry_run=true`；该模式只加载登录滑块，不提交滑块，也不发送短信。
 5. 确认产品名、方案编号、PushPlus 短信读取都正常后，再手动触发一次 `dry_run=false`。
 6. 成功后检查 `state/YYYY-MM.json` 和 `logs` 分支。
 

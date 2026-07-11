@@ -12,6 +12,7 @@ const { SmsInboxClient } = require('../src/sms-inbox-client');
 const root = path.resolve(__dirname, '..');
 const entryUrl = process.env.TELECOM_ENTRY_URL;
 const phone = process.env.TELECOM_PHONE;
+const probeOnly = /^true$/i.test(process.env.TELECOM_PROBE_ONLY || '');
 
 if (!entryUrl) throw new Error('Missing TELECOM_ENTRY_URL');
 if (!phone) throw new Error('Missing TELECOM_PHONE');
@@ -671,7 +672,7 @@ async function main() {
   const cdpPort = await getFreeTcpPort();
   const cdpUrl = `http://127.0.0.1:${cdpPort}`;
   const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-native-chrome-'));
-  const chrome = spawn(chromeBin, [
+  const chromeArgs = [
     `--remote-debugging-port=${cdpPort}`,
     '--remote-allow-origins=*',
     `--user-data-dir=${profileDir}`,
@@ -679,7 +680,10 @@ async function main() {
     '--no-default-browser-check',
     '--disable-background-mode',
     'about:blank',
-  ], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
+  ];
+  const proxyServer = process.env.OPENWRT_HTTP_PROXY || '';
+  if (proxyServer) chromeArgs.splice(chromeArgs.length - 1, 0, `--proxy-server=${proxyServer}`);
+  const chrome = spawn(chromeBin, chromeArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
 
   try {
     const version = await waitForCdp(cdpUrl);
@@ -689,6 +693,16 @@ async function main() {
       await wait(Number(process.env.TELECOM_NATIVE_CHROME_SETTLE_MS || 3000));
       await navigateToEntryPage(cdp);
       console.log(`Fresh headed system Chrome ready for delayed Playwright attachment (${version.Browser || 'Google Chrome'})`);
+      if (probeOnly) {
+        await cdp.send('Network.setBlockedURLs', {
+          urls: ['*sendRandByUnlog*', '*sendRandProtocolV3*', '*sendCode*', '*SecondConfirmation*'],
+        });
+        await openSliderChallenge(cdp, phone);
+        console.log('Native Chrome slider-load probe passed without submitting the slider or sending SMS', {
+          networkEvents: cdp.recentNetworkEvents(),
+        });
+        return;
+      }
       const smsSince = Date.now() - 10000;
       await openSliderChallenge(cdp, phone);
       const sliderDistance = await solveSliderChallenge(cdp);
