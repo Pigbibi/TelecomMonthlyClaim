@@ -273,7 +273,14 @@ async function openSliderChallenge(client, phone) {
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
-    const button = selectors.map(selector => document.querySelector(selector)).find(visible);
+    const textButton = [...document.querySelectorAll('button,a,div,span')]
+      .filter(element => visible(element) && /^(获取验证码|点击获取)$/.test((element.innerText || '').replace(/\s+/g, '')))
+      .sort((left, right) => {
+        const a = left.getBoundingClientRect();
+        const b = right.getBoundingClientRect();
+        return a.width * a.height - b.width * b.height;
+      })[0];
+    const button = textButton || selectors.map(selector => document.querySelector(selector)).find(visible);
     if (!button) return null;
     const rect = button.getBoundingClientRect();
     const x = rect.x + rect.width / 2;
@@ -293,21 +300,6 @@ async function openSliderChallenge(client, phone) {
   await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
   await wait(120);
   await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-  await wait(1500);
-  if (!networkEvents.some(event => event.pathname.includes('getSliderChallenge'))) {
-    await client.evaluate(`(() => {
-      const selectors = ['.checknum-button.slider-sms-btn','.checknum-button','.slider-sms-btn','.content_send_unlog','#sendCode'];
-      const visible = element => {
-        if (!element) return false;
-        const rect = element.getBoundingClientRect();
-        const style = getComputedStyle(element);
-        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-      };
-      const button = selectors.map(selector => document.querySelector(selector)).find(visible);
-      button?.click();
-      return !!button;
-    })()`);
-  }
 
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
