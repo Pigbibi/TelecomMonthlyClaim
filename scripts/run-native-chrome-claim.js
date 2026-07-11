@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
+const { findFlatCanvasTarget } = require('../src/slider-canvas-match');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 
@@ -584,6 +585,7 @@ async function solveConfirmationSlider(client) {
       .find(item => visible(item) && item.width >= 100 && item.height >= 50);
     if (!canvas) return null;
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const flat = (${findFlatCanvasTarget.toString()})(data, canvas.width, canvas.height);
     let minx = canvas.width; let count = 0;
     for (let y = 0; y < canvas.height; y += 1) {
       for (let x = 0; x < canvas.width; x += 1) {
@@ -596,12 +598,15 @@ async function solveConfirmationSlider(client) {
     const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
       .map(selector => root.querySelector(selector))
       .find(visible);
-    if (!slider || count < 500 || minx >= canvas.width) return null;
+    const naturalX = flat.ok ? flat.x : minx;
+    if (!slider || (!flat.ok && count < 500) || naturalX >= canvas.width) return null;
     const sliderRect = slider.getBoundingClientRect();
     const canvasRect = canvas.getBoundingClientRect();
     return {
-      naturalX: minx,
-      moveX: Math.round(minx * canvasRect.width / canvas.width),
+      method: flat.ok ? 'flat-component' : 'transparent-fallback',
+      naturalX,
+      moveX: Math.round(naturalX * canvasRect.width / canvas.width),
+      flat,
       startX: sliderRect.x + sliderRect.width / 2,
       startY: sliderRect.y + sliderRect.height / 2,
       slider: { tag: slider.tagName, id: slider.id, className: String(slider.className || '').slice(0, 80) },
