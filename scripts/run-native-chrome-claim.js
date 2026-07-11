@@ -319,6 +319,23 @@ async function openSliderChallenge(client, phone) {
   const finalState = await client.evaluate(`(() => ({
     buttonText: (document.querySelector('.checknum-button.slider-sms-btn,.checknum-button,.slider-sms-btn,.content_send_unlog,#sendCode')?.innerText || '').trim(),
     sliderPresent: !!document.querySelector('#slider_bg_image,#slider_check,.slider-check-box'),
+    candidates: [...new Set([
+      ...document.querySelectorAll('.content_send_unlog,#sendCode,.slider-sms-btn,.checknum-button.slider-sms-btn,.checknum-button'),
+      ...document.elementsFromPoint(${JSON.stringify(point.x)}, ${JSON.stringify(point.y)}),
+    ])].slice(0, 12).map(element => {
+      const rect = element.getBoundingClientRect();
+      const parent = element.parentElement;
+      return {
+        tag: element.tagName,
+        id: element.id || '',
+        className: String(element.className || '').slice(0, 120),
+        text: (element.innerText || '').replace(/\s+/g, '').slice(0, 30),
+        onclick: !!element.onclick,
+        role: element.getAttribute('role') || '',
+        rect: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)],
+        parent: parent ? [parent.tagName, parent.id || '', String(parent.className || '').slice(0, 80)] : null,
+      };
+    }),
   }))()`);
   console.log('Native Chrome slider open diagnostics', {
     buttonText: point.text,
@@ -326,6 +343,7 @@ async function openSliderChallenge(client, phone) {
     hitInsideButton: point.hitInsideButton,
     finalButtonText: finalState?.buttonText,
     sliderPresent: finalState?.sliderPresent,
+    candidates: finalState?.candidates,
     networkEvents: networkEvents.slice(-8),
   });
   throw new Error('Native Chrome slider challenge did not become ready before Playwright attachment');
