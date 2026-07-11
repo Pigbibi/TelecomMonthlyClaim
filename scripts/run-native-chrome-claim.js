@@ -286,6 +286,7 @@ async function openSliderChallenge(client, phone) {
     const x = rect.x + rect.width / 2;
     const y = rect.y + rect.height / 2;
     const hit = document.elementFromPoint(x, y);
+    button.click();
     return {
       x,
       y,
@@ -295,11 +296,6 @@ async function openSliderChallenge(client, phone) {
     };
   })()`);
   if (!point) throw new Error('Native Chrome SMS button missing');
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
-  await wait(250);
-  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-  await wait(120);
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
 
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
