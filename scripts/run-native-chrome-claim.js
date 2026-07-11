@@ -346,27 +346,38 @@ async function openSliderChallenge(client, phone) {
 }
 
 async function dragSlider(client, { startX, startY, moveX }) {
-  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
-  await wait(250);
-  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
-  for (let step = 1; step <= 3; step += 1) {
-    const t = step / 3;
-    const ease = 1 - Math.pow(1 - t, 2.4);
-    await client.send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: startX + moveX * ease,
-      y: startY + Math.sin(t * Math.PI * 3) * 2,
-      button: 'left',
+  await client.evaluate(`(async () => {
+    const startX = ${JSON.stringify(startX)};
+    const startY = ${JSON.stringify(startY)};
+    const moveX = ${JSON.stringify(moveX)};
+    const button = document.elementFromPoint(startX, startY);
+    if (!button) return false;
+    const event = (type, x, y, buttons) => new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: x,
+      clientY: y,
+      screenX: window.screenX + x,
+      screenY: window.screenY + y,
+      button: 0,
+      buttons,
     });
-    await wait(80);
-  }
-  await client.send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: startX + moveX,
-    y: startY,
-    button: 'left',
-    clickCount: 1,
-  });
+    button.dispatchEvent(event('mousedown', startX, startY, 1));
+    for (let step = 1; step <= 30; step += 1) {
+      const t = step / 30;
+      const ease = 1 - Math.pow(1 - t, 2.4);
+      document.dispatchEvent(event(
+        'mousemove',
+        startX + moveX * ease,
+        startY + Math.sin(t * Math.PI * 3) * 2,
+        1,
+      ));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    document.dispatchEvent(event('mouseup', startX + moveX, startY, 0));
+    return true;
+  })()`, 30000);
 }
 
 async function solveSliderChallenge(client) {
