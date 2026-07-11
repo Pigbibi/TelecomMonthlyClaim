@@ -349,8 +349,8 @@ async function dragSlider(client, { startX, startY, moveX }) {
   await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
   await wait(250);
   await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
-  for (let step = 1; step <= 30; step += 1) {
-    const t = step / 30;
+  for (let step = 1; step <= 3; step += 1) {
+    const t = step / 3;
     const ease = 1 - Math.pow(1 - t, 2.4);
     await client.send('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
@@ -358,7 +358,7 @@ async function dragSlider(client, { startX, startY, moveX }) {
       y: startY + Math.sin(t * Math.PI * 3) * 2,
       button: 'left',
     });
-    await wait(24 + (step % 5) * 8);
+    await wait(80);
   }
   await client.send('Input.dispatchMouseEvent', {
     type: 'mouseReleased',
