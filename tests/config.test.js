@@ -42,6 +42,8 @@ test('defaults to the 200-minute voice package preset', () => withCleanTelecomEn
   assert.equal(config.expectedPlanId, '24BJ102053');
   assert.equal(config.actionDelayMs, 800);
   assert.equal(config.postSuccessWaitMs, 8000);
+  assert.equal(config.successSmsSender, '10000');
+  assert.equal(config.successSmsTimeoutMs, 30000);
 }));
 
 test('loads the 5GB data package preset by target package', () => withCleanTelecomEnv(() => {
@@ -201,6 +203,8 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   process.env.PUSHPLUS_RELAY_INBOX_URL = 'https://relay.example.test/messages';
   process.env.PUSHPLUS_RELAY_INBOX_TOKEN = 'relay-token-1';
   process.env.SMS_SENDER = '10001';
+  process.env.TELECOM_SUCCESS_SMS_SENDER = '10000';
+  process.env.TELECOM_SUCCESS_SMS_TIMEOUT_MS = '45000';
 
   const config = loadConfig();
 
@@ -214,6 +218,8 @@ test('loads PushPlus SMS inbox provider settings', () => withCleanTelecomEnv(() 
   assert.equal(config.pushPlusRelayInboxUrl, 'https://relay.example.test/messages');
   assert.equal(config.pushPlusRelayInboxToken, 'relay-token-1');
   assert.equal(config.smsSender, '10001');
+  assert.equal(config.successSmsSender, '10000');
+  assert.equal(config.successSmsTimeoutMs, 45000);
 }));
 
 test('loads Chrome extension preflight SMS handoff flag', () => withCleanTelecomEnv(() => {

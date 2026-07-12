@@ -96,7 +96,13 @@ PROXY_POOL_HTTP_PROXY=http://user:password@proxy-pool.example:port
 
 当前实际 workflow 默认从 PushPlus 拉取北京电信 `10001` 验证码，再复用现有的验证码解析逻辑。这个模式适合手机号已经配置成 PushPlus 收短信、且不再使用 SmsForwarder / 自建 SMS inbox 的部署。
 
-如果同时部署了 `PushPlusSmsToTelegram`，建议在那个仓库配置 `SMS_INTERCEPT_PRESETS=telecom-claim-silent`。这样 PushPlus webhook 仍会接收所有短信，但北京电信月度领取相关的登录/确认验证码会被通用拦截规则静默处理，不再通知到 Telegram，并临时写入受保护 relay inbox；本仓库配置 `PUSHPLUS_RELAY_INBOX_URL` 后会优先从该 inbox 获取验证码。
+如果同时部署了通用短信 relay（例如 `PushPlusSmsToTelegram`），本仓库只依赖它提供的标准消息列表接口，不要求 relay 内置电信业务逻辑。现有 `SMS_INTERCEPT_PRESETS=telecom-claim-silent` 可用于登录/确认验证码；如需让成功回执也进入 relay inbox，可使用 relay 已有的通用自定义规则能力，例如：
+
+```text
+SMS_INTERCEPT_RULES=[{"name":"telecom-success-receipt","action":"store","senderIncludes":"10000","textIncludesAll":["【办理提醒】","成功办理"]}]
+```
+
+`action=store` 只存入受保护 inbox，不会阻止消息继续通知 Telegram。未配置 relay 时，PushPlus OpenAPI 和通用 HTTP inbox 模式仍可独立工作。
 
 PushPlus 后台需要先做这些设置：
 
@@ -248,6 +254,8 @@ Variables：
 | `ALLOW_DIRECT_PROXY_FALLBACK` | `false` | 代理不可用时是否允许 runner 直接访问活动页；通常保持关闭。 |
 | `SMS_INBOX_PROVIDER` | `pushplus` | 短信来源。默认 `pushplus` 从 PushPlus 拉取消息；设为 `http` 可使用你自建的 SMS inbox。 |
 | `SMS_SENDER` | `10001` | PushPlus / HTTP inbox 的发件人过滤值。默认北京电信验证码用 `10001`。 |
+| `TELECOM_SUCCESS_SMS_SENDER` | `10000` | 办理成功回执的发件人过滤值，适用于 PushPlus、relay 和通用 HTTP inbox。 |
+| `TELECOM_SUCCESS_SMS_TIMEOUT_MS` | `30000` | 页面结果不明确时等待成功回执的最长时间；回执缺失不会覆盖已经确认的成功页面。 |
 | `PUSHPLUS_BASE_URL` | `https://www.pushplus.plus` | PushPlus OpenAPI 地址，通常不用改。 |
 | `PUSHPLUS_PAGE_SIZE` | `10` | PushPlus 模式每次拉取最近消息数量，最大 50。 |
 | `PUSHPLUS_KEYWORD` | 空 | PushPlus 模式按标题或详情正文做二次关键词过滤，适合只抓北京电信相关短信。 |
@@ -262,7 +270,7 @@ Variables：
 | `PROXY_TUNNEL_LOCAL_PORT` | `13128` | `ssh_tunnel` 可选，runner 本地监听端口。 |
 | `PROXY_HEALTH_URL` | `https://wapbj.189.cn/` | 代理健康检查 URL。 |
 
-脚本会用产品名选中页面套餐，并在二次确认短信里校验手机号、产品名和方案编号。`TELECOM_ACTION_DELAY_MS` 和 `TELECOM_POST_SUCCESS_WAIT_MS` 只是稳定性等待，不用于绕过验证码或风控。
+脚本会用产品名选中页面套餐，并在二次确认短信里校验手机号、产品名和方案编号。最终页面结果不明确时，还会按提交时间、成功回执发件人、产品名和方案编号做非强制兜底；不会保存短信正文，也不会因回执延迟覆盖已经确认的成功页面。`TELECOM_ACTION_DELAY_MS` 和 `TELECOM_POST_SUCCESS_WAIT_MS` 只是稳定性等待，不用于绕过验证码或风控。
 
 不要把私钥、手机号、短信 token、PushPlus token 或 secretKey 写进仓库文件。
 

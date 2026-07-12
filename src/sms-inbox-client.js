@@ -145,12 +145,13 @@ class SmsInboxClient {
     return String(this.config.smsInboxProvider || 'http').toLowerCase();
   }
 
-  async fetchMessages(since) {
-    if (this.provider === 'pushplus') return this.fetchPushPlusMessages(since);
+  async fetchMessages(since, options = {}) {
+    if (this.provider === 'pushplus') return this.fetchPushPlusMessages(since, options);
     if (!this.config.smsInboxUrl) return [];
+    const expectedSender = options.sender ?? this.config.smsSender ?? '';
     const url = new URL(this.config.smsInboxUrl);
     url.searchParams.set('since', String(since));
-    url.searchParams.set('sender', this.config.smsSender);
+    url.searchParams.set('sender', expectedSender);
     url.searchParams.set('limit', '30');
     const headers = { accept: 'application/json' };
     if (this.config.smsInboxToken) headers.authorization = `Bearer ${this.config.smsInboxToken}`;
@@ -197,11 +198,12 @@ class SmsInboxClient {
     return text;
   }
 
-  async fetchPushPlusRelayMessages(since) {
+  async fetchPushPlusRelayMessages(since, options = {}) {
     if (!this.config.pushPlusRelayInboxUrl) return [];
+    const sender = options.sender ?? this.config.smsSender ?? '10001';
     const url = new URL(this.config.pushPlusRelayInboxUrl);
     url.searchParams.set('since', String(since || 0));
-    url.searchParams.set('sender', this.config.smsSender || '10001');
+    url.searchParams.set('sender', sender);
     url.searchParams.set('limit', '30');
     const headers = { accept: 'application/json' };
     if (this.config.pushPlusRelayInboxToken) {
@@ -217,7 +219,7 @@ class SmsInboxClient {
     return sortMessages(items.map(normalizeMessage));
   }
 
-  async fetchPushPlusOpenApiMessages(since) {
+  async fetchPushPlusOpenApiMessages(since, options = {}) {
     const accessKey = await this.getPushPlusAccessKey();
     const pageSize = Math.max(1, Math.min(Number(this.config.pushPlusPageSize || 10), 50));
     const res = await fetch(pushPlusUrl(this.config.pushPlusBaseUrl, '/api/open/message/list'), {
@@ -232,8 +234,9 @@ class SmsInboxClient {
     if (!res.ok) throw new Error(`PushPlus message list HTTP ${res.status}`);
     const data = await res.json();
     if (data?.code !== 200) throw new Error(`PushPlus message list failed: ${data?.msg || 'unknown error'}`);
-    const keyword = this.config.pushPlusKeyword || '';
-    const titleKeyword = this.config.pushPlusTitleKeyword || '';
+    const expectedSender = options.sender ?? this.config.smsSender ?? '';
+    const keyword = options.keyword ?? this.config.pushPlusKeyword ?? '';
+    const titleKeyword = options.titleKeyword ?? this.config.pushPlusTitleKeyword ?? '';
     const list = data?.data?.list || [];
     if (this.config.pushPlusDebug) {
       console.log(`PushPlus message list fetched ${JSON.stringify({ count: list.length, titleKeyword, keyword })}`);
@@ -266,12 +269,12 @@ class SmsInboxClient {
       }
       const sender = extractSenderFromText(detail)
         || extractSenderFromText(item.title || '');
-      if (this.config.smsSender && sender && !String(sender).includes(this.config.smsSender)) {
+      if (expectedSender && sender && !String(sender).includes(expectedSender)) {
         if (this.config.pushPlusDebug) {
           console.log(`PushPlus message ignored by sender ${JSON.stringify({
             shortCode: item.shortCode,
             sender,
-            expectedSender: this.config.smsSender,
+            expectedSender,
           })}`);
         }
         continue;
@@ -293,11 +296,11 @@ class SmsInboxClient {
     return sortMessages(messages);
   }
 
-  async fetchPushPlusMessages(since) {
+  async fetchPushPlusMessages(since, options = {}) {
     if (this.config.pushPlusRelayInboxUrl) {
-      return dedupeMessages(await this.fetchPushPlusRelayMessages(since));
+      return dedupeMessages(await this.fetchPushPlusRelayMessages(since, options));
     }
-    return dedupeMessages(await this.fetchPushPlusOpenApiMessages(since));
+    return dedupeMessages(await this.fetchPushPlusOpenApiMessages(since, options));
   }
 
   async waitForCode({ stage, since, timeoutMs, pollMs }) {
@@ -331,6 +334,34 @@ class SmsInboxClient {
       rl.close();
       const code = String(answer || '').trim();
       if (/^\d{4,8}$/.test(code)) return { code, stage, source: 'manual' };
+    }
+    return null;
+  }
+
+  async waitForReceipt({ since, timeoutMs, pollMs }) {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (Date.now() < deadline) {
+      const messages = await this.fetchMessages(since, {
+        sender: this.config.successSmsSender || '10000',
+        keyword: '',
+        titleKeyword: '',
+      });
+      for (const msg of messages) {
+        const key = msg.id || `${msg.sender}:${msg.receivedAt}:${msg.text}`;
+        if (this.seen.has(key)) continue;
+        const parsed = parseTelecomSms(msg, {
+          stage: 'receipt',
+          sender: this.config.successSmsSender || '10000',
+          product: this.config.productName,
+          planId: this.config.expectedPlanId,
+        });
+        if (parsed) {
+          this.seen.add(key);
+          console.log(`Matched success receipt SMS ${JSON.stringify(describeMessage(msg))}`);
+          return { ...parsed, source: this.provider === 'pushplus' ? 'pushplus' : 'inbox' };
+        }
+      }
+      await sleep(pollMs);
     }
     return null;
   }

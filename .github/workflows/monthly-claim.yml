@@ -49,6 +49,8 @@ jobs:
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
       SMS_INBOX_TOKEN: ${{ secrets.SMS_INBOX_TOKEN }}
       SMS_SENDER: ${{ vars.SMS_SENDER || '10001' }}
+      TELECOM_SUCCESS_SMS_SENDER: ${{ vars.TELECOM_SUCCESS_SMS_SENDER || '10000' }}
+      TELECOM_SUCCESS_SMS_TIMEOUT_MS: ${{ vars.TELECOM_SUCCESS_SMS_TIMEOUT_MS || '30000' }}
       PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
       PUSHPLUS_SECRET_KEY: ${{ secrets.PUSHPLUS_SECRET_KEY }}
       PUSHPLUS_BASE_URL: ${{ vars.PUSHPLUS_BASE_URL || 'https://www.pushplus.plus' }}

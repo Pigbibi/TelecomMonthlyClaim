@@ -50,6 +50,8 @@ function loadConfig() {
     smsInboxUrl: process.env.SMS_INBOX_URL || '',
     smsInboxToken: process.env.SMS_INBOX_TOKEN || '',
     smsSender: process.env.SMS_SENDER || '10001',
+    successSmsSender: optionalEnv('TELECOM_SUCCESS_SMS_SENDER', '10000'),
+    successSmsTimeoutMs: numberEnv('TELECOM_SUCCESS_SMS_TIMEOUT_MS', 30000),
     smsTimeoutMs: numberEnv('SMS_TIMEOUT_MS', 90000),
     smsPollMs: numberEnv('SMS_POLL_MS', 5000),
     pushPlusToken: process.env.PUSHPLUS_TOKEN || '',

@@ -39,6 +39,42 @@ test('rejects confirmation code for wrong phone', () => {
   assert.equal(parseTelecomSms({ sender: '10001', text }, { stage: 'confirm', expectedPhone: '18511112222' }), null);
 });
 
+test('parses 200-minute success receipt from service sender', () => {
+  const text = '【办理提醒】尊敬的客户，您于2026年07月13日在【中国电信】wap电子渠道成功办理互联网卡网龄享200分钟国内语音（方案编号24BJ102053），立即生效，当月有效';
+  assert.deepEqual(parseTelecomSms({ sender: '10000', text }, {
+    stage: 'receipt', product: '互联网卡网龄享200分钟国内语音', planId: '24BJ102053',
+  }), {
+    stage: 'receipt',
+    product: '互联网卡网龄享200分钟国内语音',
+    planId: '24BJ102053',
+  });
+});
+
+test('parses 5GB success receipt despite carrier channel wording difference', () => {
+  const text = '【办理提醒】尊敬的客户，您于2026年04月06日在【北京电信】wap电子渠道成功办理互联网卡网龄享5GB国内通用流量（方案编号24BJ100433），立即生效，当月有效';
+  assert.deepEqual(parseTelecomSms({ sender: '10000', text }, {
+    stage: 'receipt', product: '互联网卡网龄享5GB国内通用流量', planId: '24BJ100433',
+  }), {
+    stage: 'receipt',
+    product: '互联网卡网龄享5GB国内通用流量',
+    planId: '24BJ100433',
+  });
+});
+
+test('rejects success receipt from wrong sender or for wrong plan', () => {
+  const text = '【办理提醒】成功办理互联网卡网龄享200分钟国内语音（方案编号24BJ102053）';
+  const options = { stage: 'receipt', product: '互联网卡网龄享200分钟国内语音', planId: '24BJ102053' };
+  assert.equal(parseTelecomSms({ sender: '10001', text }, options), null);
+  assert.equal(parseTelecomSms({ sender: '10000', text }, { ...options, planId: '24BJ999999' }), null);
+});
+
+test('supports a configured success receipt sender', () => {
+  const text = '【办理提醒】成功办理互联网卡网龄享200分钟国内语音（方案编号24BJ102053）';
+  assert.equal(parseTelecomSms({ sender: 'carrier-service', text }, {
+    stage: 'receipt', sender: 'carrier-service', product: '互联网卡网龄享200分钟国内语音', planId: '24BJ102053',
+  })?.stage, 'receipt');
+});
+
 test('computes Beijing retry month/day', () => {
   assert.equal(stateMonth(new Date('2026-05-02T00:00:00+08:00')), '2026-05');
   assert.equal(isFinalRetryDay(new Date('2026-05-03T00:00:00+08:00'), 3), true);

@@ -2518,6 +2518,7 @@ async function openSecondPopup(page, config) {
 }
 
 async function confirmWithRetry(page, smsInbox, config) {
+  const receiptContext = { smsInbox, since: Date.now(), matched: null };
   if (!config.confirmationSmsAlreadySent) await openSecondPopup(page, config);
   for (let attempt = 1; attempt <= config.sendCodeAttempts; attempt += 1) {
     log(`Sending confirmation SMS attempt ${attempt}/${config.sendCodeAttempts}`);
@@ -2564,7 +2565,9 @@ async function confirmWithRetry(page, smsInbox, config) {
       const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
       throw new Error(`Planner could not submit final confirmation: ${submitResult.plan.reason}; page summary: ${mask(JSON.stringify(summary))}`);
     }
-    if (await waitForSuccess(page, 20000, config)) return;
+    if (await waitForSuccess(page, 20000, config, receiptContext)) {
+      return { successEvidence: receiptContext.matched ? 'sms_receipt' : 'page' };
+    }
     const text = await visibleText(page);
     if (/验证码.*错误|验证码.*过期|随机短信输入错误/.test(text)) {
       log('Confirmation code rejected, retrying');
@@ -2575,7 +2578,9 @@ async function confirmWithRetry(page, smsInbox, config) {
       afterSecondConfirmation: true,
     });
     if (agreementResult.plan?.action === 'click_final_agreement' || agreementResult.observed?.hasFinalAgreementBtn) {
-      if (await waitForSuccess(page, 20000, config)) return;
+      if (await waitForSuccess(page, 20000, config, receiptContext)) {
+        return { successEvidence: receiptContext.matched ? 'sms_receipt' : 'page' };
+      }
     }
   }
   throw new Error('Confirmation SMS verification failed after retries');
@@ -2593,7 +2598,7 @@ async function clickFinalAgreementIfPresent(page, config) {
   return true;
 }
 
-async function waitForSuccess(page, timeoutMs, config) {
+async function waitForSuccess(page, timeoutMs, config, receiptContext = null) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const observed = await detectClaimPageState(page);
@@ -2605,6 +2610,26 @@ async function waitForSuccess(page, timeoutMs, config) {
       || page.url().includes('preDeposit_result')
     ) return true;
     await sleep(2000);
+  }
+  if (receiptContext && config?.successSmsTimeoutMs > 0) {
+    try {
+      const receipt = await receiptContext.smsInbox.waitForReceipt({
+        since: receiptContext.since,
+        timeoutMs: config.successSmsTimeoutMs,
+        pollMs: config.smsPollMs,
+      });
+      if (receipt) {
+        receiptContext.matched = receipt;
+        log('Success receipt matched after browser result remained ambiguous', {
+          source: receipt.source,
+        });
+        return true;
+      }
+    } catch (err) {
+      log('Success receipt fallback unavailable; keeping browser result', {
+        error: mask(err.message),
+      });
+    }
   }
   return false;
 }
@@ -2645,13 +2670,17 @@ async function runClaim(config) {
     await choosePackage(activePage, config);
     const result = await confirmWithRetry(activePage, smsInbox, config);
     if (result === 'dry-run') return;
-    if (!await waitForSuccess(activePage, 5000, config)) throw new Error('No success page after final submit');
+    const successEvidence = result?.successEvidence || 'page';
+    if (successEvidence !== 'sms_receipt' && !await waitForSuccess(activePage, 5000, config)) {
+      throw new Error('No success page after final submit');
+    }
     const summary = await getPageSummary(activePage);
     log('Claim succeeded', summary);
     writeState('success', {
       targetPackage: config.targetPackage,
       productName: config.productName,
       expectedPlanId: config.expectedPlanId,
+      successEvidence,
     });
     if (config.postSuccessWaitMs > 0) {
       log('Keeping success page open before closing browser', { waitMs: config.postSuccessWaitMs });
