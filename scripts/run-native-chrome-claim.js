@@ -510,13 +510,18 @@ async function submitLoginCode(client, code) {
   while (Date.now() < deadline) {
     const state = await client.evaluate(`(() => ({
       complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
-      failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙/.test(document.body?.innerText || ''),
+      failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙|操作失败|当日发送短信数量过多|无法继续发送/.test(document.body?.innerText || ''),
     }))()`);
     if (state?.complete) return;
     if (state?.failed) throw new Error('Native Chrome login verification failed before Playwright attachment');
     await wait(500);
   }
-  throw new Error('Native Chrome login verification timed out before Playwright attachment');
+  const snapshot = await client.evaluate(`(() => ({
+    url: location.href,
+    dialogText: (document.body?.innerText || '').slice(0, 1200),
+  }))()`).catch(() => ({}));
+  const diagnostic = summarizePackageGate({ ...snapshot, state: 'login_pending' });
+  throw new Error(`Native Chrome login verification timed out before Playwright attachment: ${JSON.stringify(diagnostic)}`);
 }
 
 async function waitForPageState(client, expression, timeoutMs, errorMessage) {
@@ -829,9 +834,28 @@ async function solveConfirmationSlider(client) {
   throw new Error('Native Chrome confirmation slider validation timed out');
 }
 
+async function redactSensitivePageFields(client) {
+  await client.evaluate(`(() => {
+    for (const element of document.querySelectorAll('input,textarea,[contenteditable="true"]')) {
+      if ('value' in element) {
+        element.value = '';
+        element.setAttribute('value', '');
+      }
+      if (element.isContentEditable) element.textContent = '';
+      element.setAttribute('data-debug-redacted', 'true');
+    }
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      walker.currentNode.data = walker.currentNode.data.replace(/[0-9]{4,11}/g, '***');
+    }
+    return true;
+  })()`).catch(() => false);
+}
+
 async function captureCdpScreenshot(client) {
   try {
     await client.send('Page.enable');
+    await redactSensitivePageFields(client);
     const screenshot = await client.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
     if (!screenshot?.data) return;
     const artifactDir = path.join(root, 'artifacts', 'claim-debug');
