@@ -1,13 +1,14 @@
 {
-  "status": "failed",
+  "status": "success",
   "month": "2026-07",
   "beijing": {
     "year": "2026",
     "month": "07",
-    "day": 4,
-    "hour": 5,
-    "minute": 16
+    "day": 13,
+    "hour": 4,
+    "minute": 1
   },
-  "error": "Telecom slider challenge rejected with blank HTTP 400; ERR_TUNNEL_CONNECTION_FAILED, getSliderChallenge HTTP 400",
-  "finalRetryDay": true
+  "targetPackage": "voice200",
+  "productName": "互联网卡网龄享200分钟国内语音",
+  "expectedPlanId": "24BJ102053"
 }
