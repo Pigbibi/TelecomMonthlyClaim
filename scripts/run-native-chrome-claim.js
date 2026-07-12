@@ -573,8 +573,8 @@ async function openConfirmationSlider(client) {
   throw new Error('Native Chrome confirmation slider did not become ready');
 }
 
-async function solveConfirmationSlider(client) {
-  const info = await client.evaluate(`(() => {
+async function readConfirmationSliderInfo(client) {
+  return client.evaluate(`(() => {
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
@@ -613,7 +613,27 @@ async function solveConfirmationSlider(client) {
       slider: { tag: slider.tagName, id: slider.id, className: String(slider.className || '').slice(0, 80) },
     };
   })()`, 30000);
-  if (!info || info.moveX < 40) throw new Error('Native Chrome confirmation slider target missing');
+}
+
+async function solveConfirmationSlider(client) {
+  const matchDeadline = Date.now() + 20000;
+  let info = null;
+  let refreshed = false;
+  while (Date.now() < matchDeadline) {
+    info = await readConfirmationSliderInfo(client);
+    if (info?.moveX >= 40) break;
+    if (!refreshed && Date.now() >= matchDeadline - 12000) {
+      refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
+      console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
+      await wait(refreshed ? 2000 : 500);
+      continue;
+    }
+    await wait(500);
+  }
+  if (!info || info.moveX < 40) {
+    console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
+    throw new Error('Native Chrome confirmation slider target missing after asset wait');
+  }
   console.log('Native Chrome confirmation slider match', info);
   await dragSlider(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
   const deadline = Date.now() + 25000;

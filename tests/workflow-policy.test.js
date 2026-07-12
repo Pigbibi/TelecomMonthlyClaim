@@ -174,6 +174,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /sendRandByUnlog/);
   assert.match(script, /Native Chrome slider-load probe passed without submitting the slider/);
   assert.match(script, /--proxy-server=/);
+  assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
+  assert.match(script, /\.refreshIcon.*#slider_refresh_icon.*\.slider-refresh-icon/);
   assert.match(script, /当日发送短信数量过多/);
   assert.match(script, /`--remote-debugging-port=\$\{cdpPort\}`/);
   assert.doesNotMatch(script, /--headless/);
