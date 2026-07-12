@@ -57,5 +57,5 @@ test('prefers a puzzle-shaped component over a larger flat stripe', () => {
 });
 
 test('converts a rendered target into slider-track movement', () => {
-  assert.equal(renderedPuzzleMoveX(210, 382, 1, 105), 487);
+  assert.equal(renderedPuzzleMoveX(210, 382, 1, 105, 840), 499);
 });

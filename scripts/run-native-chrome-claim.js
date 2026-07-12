@@ -687,7 +687,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
       const flat = (${findFlatCanvasTarget.toString()})(pixels, crop.width, crop.height);
       if (!flat.ok) return resolve(null);
       const targetX = sourceRect.x + flat.x / screenshotScaleX;
-      const moveX = (${renderedPuzzleMoveX.toString()})(sourceRect.x, flat.x, screenshotScaleX, sliderRect.x);
+      const moveX = (${renderedPuzzleMoveX.toString()})(sourceRect.x, flat.x, screenshotScaleX, sliderRect.x, source.width);
       resolve({
         method: 'rendered-flat-component',
         naturalX: moveX,
@@ -699,6 +699,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
         sourceX: sourceRect.x,
         screenshotScaleX,
         sliderX: sliderRect.x,
+        canvasWidth: source.width,
         raw: ${JSON.stringify(rawInfo)},
         startX: sliderRect.x + sliderRect.width / 2,
         startY: sliderRect.y + sliderRect.height / 2,
@@ -715,6 +716,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
     sourceX,
     screenshotScaleX,
     sliderX,
+    canvasWidth,
     ...local
   } = rendered;
   local.localReliable = isFlatPuzzleCandidateReliable(local.flat);
@@ -726,7 +728,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
   if (!local.localReliable && visionKey && process.env.TELECOM_VISION_URL) {
     const vision = await estimateSliderDistanceWithVision({ bgPngBase64: cropPng, imageWidth });
     if (vision.ok && vision.confidence >= 0.55) {
-      const moveX = renderedPuzzleMoveX(sourceX, vision.naturalX, screenshotScaleX, sliderX);
+      const moveX = renderedPuzzleMoveX(sourceX, vision.naturalX, screenshotScaleX, sliderX, canvasWidth);
       return {
         ...local,
         method: 'vision-fallback',

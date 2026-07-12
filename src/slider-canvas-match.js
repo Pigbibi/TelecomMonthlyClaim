@@ -70,10 +70,13 @@ function findFlatCanvasTarget(data, width, height) {
   return best || { ok: false, reason: 'flat-component-not-found' };
 }
 
-function renderedPuzzleMoveX(sourceX, flatX, screenshotScaleX, sliderX) {
+function renderedPuzzleMoveX(sourceX, flatX, screenshotScaleX, sliderX, canvasWidth = 0) {
   const scale = Number(screenshotScaleX);
-  if (![sourceX, flatX, scale, sliderX].every(Number.isFinite) || scale <= 0) return null;
-  return Math.round(Number(sourceX) + Number(flatX) / scale - Number(sliderX));
+  const width = Number(canvasWidth);
+  if (![sourceX, flatX, scale, sliderX, width].every(Number.isFinite) || scale <= 0) return null;
+  const targetDistance = Number(sourceX) + Number(flatX) / scale - Number(sliderX);
+  const sliderRatio = width > 60 ? (width - 40) / (width - 60) : 1;
+  return Math.round(targetDistance * sliderRatio);
 }
 
 function isFlatPuzzleCandidateReliable(candidate) {
