@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
-const { findFlatCanvasTarget } = require('../src/slider-canvas-match');
+const { findFlatCanvasTarget, renderedPuzzleMoveX } = require('../src/slider-canvas-match');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 
@@ -659,10 +659,13 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
       const pixels = crop.getContext('2d').getImageData(0, 0, crop.width, crop.height).data;
       const flat = (${findFlatCanvasTarget.toString()})(pixels, crop.width, crop.height);
       if (!flat.ok) return resolve(null);
+      const targetX = sourceRect.x + flat.x / screenshotScaleX;
+      const moveX = (${renderedPuzzleMoveX.toString()})(sourceRect.x, flat.x, screenshotScaleX, sliderRect.x);
       resolve({
         method: 'rendered-flat-component',
-        naturalX: Math.round(flat.x / screenshotScaleX),
-        moveX: Math.round(flat.x / screenshotScaleX),
+        naturalX: moveX,
+        moveX,
+        targetX: Math.round(targetX),
         flat,
         raw: ${JSON.stringify(rawInfo)},
         startX: sliderRect.x + sliderRect.width / 2,

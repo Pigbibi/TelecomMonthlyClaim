@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { findFlatCanvasTarget } = require('../src/slider-canvas-match');
+const { findFlatCanvasTarget, renderedPuzzleMoveX } = require('../src/slider-canvas-match');
 
 test('finds the uniform gray puzzle target in a noisy canvas', () => {
   const width = 320;
@@ -27,4 +27,8 @@ test('finds the uniform gray puzzle target in a noisy canvas', () => {
   assert.equal(result.ok, true);
   assert.equal(result.x, 190);
   assert.equal(result.width, 55);
+});
+
+test('converts a rendered target into slider-track movement', () => {
+  assert.equal(renderedPuzzleMoveX(210, 382, 1, 105), 487);
 });

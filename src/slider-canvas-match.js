@@ -65,4 +65,10 @@ function findFlatCanvasTarget(data, width, height) {
   return best || { ok: false, reason: 'flat-component-not-found' };
 }
 
-module.exports = { findFlatCanvasTarget };
+function renderedPuzzleMoveX(sourceX, flatX, screenshotScaleX, sliderX) {
+  const scale = Number(screenshotScaleX);
+  if (![sourceX, flatX, scale, sliderX].every(Number.isFinite) || scale <= 0) return null;
+  return Math.round(Number(sourceX) + Number(flatX) / scale - Number(sliderX));
+}
+
+module.exports = { findFlatCanvasTarget, renderedPuzzleMoveX };
