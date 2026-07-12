@@ -11,7 +11,8 @@ function readStateStatus(stateFile) {
   }
 }
 
-function resolveClaimOutcome({ shouldRun, stepOutcome, stateStatus }) {
+function resolveClaimOutcome({ shouldRun, stepOutcome, stateStatus, dryRun = false }) {
+  if (dryRun) return stepOutcome || 'skipped';
   if (shouldRun && stateStatus) return stateStatus;
   return stepOutcome || 'skipped';
 }
@@ -29,6 +30,7 @@ function main() {
     shouldRun: process.env.SHOULD_RUN === 'true',
     stepOutcome: process.env.STEP_OUTCOME || 'skipped',
     stateStatus: readStateStatus(process.env.STATE_FILE || ''),
+    dryRun: process.env.DRY_RUN === 'true',
   });
   appendOutput('claim_outcome', outcome);
 }

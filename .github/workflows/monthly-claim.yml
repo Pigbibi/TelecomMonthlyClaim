@@ -393,6 +393,7 @@ jobs:
           SHOULD_RUN: ${{ steps.claim_plan.outputs.should_run || 'false' }}
           STATE_FILE: ${{ steps.claim_plan.outputs.state_file || '' }}
           STEP_OUTCOME: ${{ steps.claim.outcome || 'skipped' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: node scripts/resolve-run-log-outcome.js
 
       - name: Record run log on logs branch

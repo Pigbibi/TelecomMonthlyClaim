@@ -21,6 +21,15 @@ test('keeps skipped outcome when claim was not attempted', () => {
   }), 'skipped');
 });
 
+test('ignores stale monthly state during a successful dry run', () => {
+  assert.equal(resolveClaimOutcome({
+    shouldRun: true,
+    stepOutcome: 'success',
+    stateStatus: 'failed',
+    dryRun: true,
+  }), 'success');
+});
+
 test('reads status from monthly state file', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-state-'));
   const file = path.join(dir, '2026-07.json');
