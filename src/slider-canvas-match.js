@@ -58,11 +58,32 @@ function findFlatCanvasTarget(data, width, height) {
         const componentWidth = maxX - minX + 1;
         const componentHeight = maxY - minY + 1;
         if (count < 100 || componentWidth < 15 || componentHeight < 15 || componentWidth > width * 0.25) continue;
-        if (!best || count > best.count) best = { ok: true, x: minX, count, width: componentWidth, height: componentHeight };
+        const aspect = componentWidth / componentHeight;
+        const fill = count / (componentWidth * componentHeight);
+        const shapeScore = count * Math.pow(Math.min(aspect, 1 / aspect), 2);
+        if (!best || shapeScore > best.score) {
+          best = { ok: true, x: minX, count, width: componentWidth, height: componentHeight, aspect, fill, score: shapeScore };
+        }
       }
     }
   }
   return best || { ok: false, reason: 'flat-component-not-found' };
 }
 
-module.exports = { findFlatCanvasTarget };
+function renderedPuzzleMoveX(sourceX, flatX, screenshotScaleX, sliderX, canvasWidth = 0) {
+  const scale = Number(screenshotScaleX);
+  const width = Number(canvasWidth);
+  if (![sourceX, flatX, scale, sliderX, width].every(Number.isFinite) || scale <= 0) return null;
+  const targetDistance = Number(sourceX) + Number(flatX) / scale - Number(sliderX);
+  const sliderRatio = width > 60 ? (width - 40) / (width - 60) : 1;
+  return Math.round(targetDistance * sliderRatio);
+}
+
+function isFlatPuzzleCandidateReliable(candidate) {
+  return !!candidate?.ok
+    && Number(candidate.aspect) >= 0.7
+    && Number(candidate.aspect) <= 1.4
+    && Number(candidate.fill) >= 0.35;
+}
+
+module.exports = { findFlatCanvasTarget, renderedPuzzleMoveX, isFlatPuzzleCandidateReliable };

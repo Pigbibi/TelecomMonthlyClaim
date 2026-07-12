@@ -5,7 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
-const { findFlatCanvasTarget } = require('../src/slider-canvas-match');
+const {
+  findFlatCanvasTarget,
+  renderedPuzzleMoveX,
+  isFlatPuzzleCandidateReliable,
+} = require('../src/slider-canvas-match');
+const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 
@@ -381,6 +386,28 @@ async function dragSlider(client, { startX, startY, moveX }) {
   })()`, 30000);
 }
 
+async function dragSliderTrusted(client, { startX, startY, moveX }) {
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: startX, y: startY, button: 'left', buttons: 1, clickCount: 1,
+  });
+  for (let step = 1; step <= 24; step += 1) {
+    const t = step / 24;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    await client.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: startX + moveX * ease,
+      y: startY + Math.sin(t * Math.PI * 3) * 2,
+      button: 'left',
+      buttons: 1,
+    });
+    await wait(12);
+  }
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: startX + moveX, y: startY, button: 'left', buttons: 0, clickCount: 1,
+  });
+}
+
 async function solveSliderChallenge(client) {
   const match = await client.evaluate(`(${computeSliderImageMatchInPage.toString()})({})`, 30000);
   if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
@@ -573,8 +600,8 @@ async function openConfirmationSlider(client) {
   throw new Error('Native Chrome confirmation slider did not become ready');
 }
 
-async function solveConfirmationSlider(client) {
-  const info = await client.evaluate(`(() => {
+async function readConfirmationSliderInfo(client) {
+  return client.evaluate(`(() => {
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
@@ -613,9 +640,134 @@ async function solveConfirmationSlider(client) {
       slider: { tag: slider.tagName, id: slider.id, className: String(slider.className || '').slice(0, 80) },
     };
   })()`, 30000);
-  if (!info || info.moveX < 40) throw new Error('Native Chrome confirmation slider target missing');
+}
+
+async function readRenderedConfirmationSliderInfo(client, rawInfo) {
+  const screenshot = await client.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+  });
+  if (!screenshot?.data) return null;
+  const rendered = await client.evaluate(`new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => {
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const root = document.querySelector('#secondPop_puzzle_check') || document;
+      const source = [...root.querySelectorAll('canvas:not(.block),canvas')]
+        .find(item => visible(item) && item.width >= 100 && item.height >= 50);
+      const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+        .map(selector => root.querySelector(selector))
+        .find(visible);
+      if (!source || !slider) return resolve(null);
+      const sourceRect = source.getBoundingClientRect();
+      const sliderRect = slider.getBoundingClientRect();
+      const screenshotScaleX = image.naturalWidth / Math.max(1, window.innerWidth);
+      const screenshotScaleY = image.naturalHeight / Math.max(1, window.innerHeight);
+      const crop = document.createElement('canvas');
+      crop.width = Math.max(1, Math.round(Math.min(sourceRect.width, window.innerWidth - sourceRect.x) * screenshotScaleX));
+      crop.height = Math.max(1, Math.round(Math.min(sourceRect.height, window.innerHeight - sourceRect.y) * screenshotScaleY));
+      crop.getContext('2d').drawImage(
+        image,
+        Math.max(0, sourceRect.x * screenshotScaleX),
+        Math.max(0, sourceRect.y * screenshotScaleY),
+        crop.width,
+        crop.height,
+        0,
+        0,
+        crop.width,
+        crop.height,
+      );
+      const pixels = crop.getContext('2d').getImageData(0, 0, crop.width, crop.height).data;
+      const flat = (${findFlatCanvasTarget.toString()})(pixels, crop.width, crop.height);
+      if (!flat.ok) return resolve(null);
+      const targetX = sourceRect.x + flat.x / screenshotScaleX;
+      const moveX = (${renderedPuzzleMoveX.toString()})(sourceRect.x, flat.x, screenshotScaleX, sliderRect.x, source.width);
+      resolve({
+        method: 'rendered-flat-component',
+        naturalX: moveX,
+        moveX,
+        targetX: Math.round(targetX),
+        flat,
+        cropPng: crop.toDataURL('image/png'),
+        imageWidth: crop.width,
+        sourceX: sourceRect.x,
+        screenshotScaleX,
+        sliderX: sliderRect.x,
+        canvasWidth: source.width,
+        raw: ${JSON.stringify(rawInfo)},
+        startX: sliderRect.x + sliderRect.width / 2,
+        startY: sliderRect.y + sliderRect.height / 2,
+        slider: { tag: slider.tagName, id: slider.id, className: String(slider.className || '').slice(0, 80) },
+      });
+    };
+    image.onerror = () => resolve(null);
+    image.src = ${JSON.stringify(`data:image/png;base64,${screenshot.data}`)};
+  })`, 30000);
+  if (!rendered) return null;
+  const {
+    cropPng,
+    imageWidth,
+    sourceX,
+    screenshotScaleX,
+    sliderX,
+    canvasWidth,
+    ...local
+  } = rendered;
+  local.localReliable = isFlatPuzzleCandidateReliable(local.flat);
+  const visionKey = process.env.GEMINI_API_KEY
+    || process.env.TELECOM_VISION_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.ANTHROPIC_AUTH_TOKEN
+    || '';
+  if (!local.localReliable && visionKey && process.env.TELECOM_VISION_URL) {
+    const vision = await estimateSliderDistanceWithVision({ bgPngBase64: cropPng, imageWidth });
+    if (vision.ok && vision.confidence >= 0.55) {
+      const moveX = renderedPuzzleMoveX(sourceX, vision.naturalX, screenshotScaleX, sliderX, canvasWidth);
+      return {
+        ...local,
+        method: 'vision-fallback',
+        naturalX: moveX,
+        moveX,
+        targetX: Math.round(sourceX + vision.naturalX / screenshotScaleX),
+        vision: { confidence: vision.confidence, reason: vision.reason },
+      };
+    }
+    local.vision = { ok: false, reason: vision.reason || 'low-confidence', confidence: vision.confidence || 0 };
+  }
+  return local;
+}
+
+async function solveConfirmationSlider(client) {
+  const matchDeadline = Date.now() + 20000;
+  let info = null;
+  let refreshed = false;
+  while (Date.now() < matchDeadline) {
+    const rawInfo = await readConfirmationSliderInfo(client);
+    if (rawInfo?.moveX >= 40) {
+      info = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null) || rawInfo;
+      break;
+    }
+    if (!refreshed && Date.now() >= matchDeadline - 12000) {
+      refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
+      console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
+      await wait(refreshed ? 2000 : 500);
+      continue;
+    }
+    await wait(500);
+  }
+  if (!info || info.moveX < 40) {
+    console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
+    throw new Error('Native Chrome confirmation slider target missing after asset wait');
+  }
   console.log('Native Chrome confirmation slider match', info);
-  await dragSlider(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
+  const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
+  await drag(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
   const deadline = Date.now() + 25000;
   let hiddenSince = 0;
   while (Date.now() < deadline) {
@@ -644,6 +796,7 @@ async function solveConfirmationSlider(client) {
     }
     await wait(500);
   }
+  console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
   throw new Error('Native Chrome confirmation slider validation timed out');
 }
 

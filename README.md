@@ -20,7 +20,8 @@
 
 | 模式 | 适用场景 | 配置 |
 | --- | --- | --- |
-| `direct` | 本机运行，或接受 GitHub-hosted runner 直接访问活动页 | 默认模式，不使用代理 |
+| `auto` | 开源项目默认；按 `proxy_pool`、`ssh_tunnel`、`http_proxy` 顺序选择已配置代理，均未配置时直连 | 默认模式 |
+| `direct` | 显式强制 Runner 直接访问活动页 | 不使用代理 |
 | `http_proxy` | 你已经有一个 runner 可访问的 HTTP/SOCKS 代理 | 设置 `TELECOM_CONNECTIVITY_MODE=http_proxy`，并配置 `OPENWRT_HTTP_PROXY` / `HOME_HTTP_PROXY` / `PUBLIC_HTTP_PROXY` 等任一 secret |
 | `ssh_tunnel` | 你有一台 runner 可 SSH 登录的跳板机，跳板机能访问你的代理 | 设置 `TELECOM_CONNECTIVITY_MODE=ssh_tunnel`，并配置通用 `PROXY_SSH_*` / `PROXY_TUNNEL_*` |
 | `proxy_pool` | 需要使用你自己的可靠代理池出口 | 设置 `TELECOM_CONNECTIVITY_MODE=proxy_pool` 和 `PROXY_POOL_HTTP_PROXY` |
