@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { findFlatCanvasTarget, renderedPuzzleMoveX } = require('../src/slider-canvas-match');
+const {
+  findFlatCanvasTarget,
+  renderedPuzzleMoveX,
+  isFlatPuzzleCandidateReliable,
+} = require('../src/slider-canvas-match');
 
 test('finds the uniform gray puzzle target in a noisy canvas', () => {
   const width = 320;
@@ -27,6 +31,29 @@ test('finds the uniform gray puzzle target in a noisy canvas', () => {
   assert.equal(result.ok, true);
   assert.equal(result.x, 190);
   assert.equal(result.width, 55);
+  assert.equal(isFlatPuzzleCandidateReliable(result), true);
+});
+
+test('prefers a puzzle-shaped component over a larger flat stripe', () => {
+  const width = 320;
+  const height = 140;
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.fill(255);
+  const fill = (left, top, right, bottom, value) => {
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        const i = (y * width + x) * 4;
+        data[i] = value;
+        data[i + 1] = value;
+        data[i + 2] = value;
+      }
+    }
+  };
+  fill(70, 20, 190, 50, 120);
+  fill(220, 50, 275, 110, 96);
+  const result = findFlatCanvasTarget(data, width, height);
+  assert.equal(result.x, 220);
+  assert.equal(isFlatPuzzleCandidateReliable(result), true);
 });
 
 test('converts a rendered target into slider-track movement', () => {

@@ -5,7 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 const { computeSliderImageMatchInPage } = require('../src/slider-local-match');
-const { findFlatCanvasTarget, renderedPuzzleMoveX } = require('../src/slider-canvas-match');
+const {
+  findFlatCanvasTarget,
+  renderedPuzzleMoveX,
+  isFlatPuzzleCandidateReliable,
+} = require('../src/slider-canvas-match');
+const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 
@@ -381,6 +386,28 @@ async function dragSlider(client, { startX, startY, moveX }) {
   })()`, 30000);
 }
 
+async function dragSliderTrusted(client, { startX, startY, moveX }) {
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY });
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: startX, y: startY, button: 'left', buttons: 1, clickCount: 1,
+  });
+  for (let step = 1; step <= 24; step += 1) {
+    const t = step / 24;
+    const ease = 1 - Math.pow(1 - t, 2.4);
+    await client.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: startX + moveX * ease,
+      y: startY + Math.sin(t * Math.PI * 3) * 2,
+      button: 'left',
+      buttons: 1,
+    });
+    await wait(12);
+  }
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: startX + moveX, y: startY, button: 'left', buttons: 0, clickCount: 1,
+  });
+}
+
 async function solveSliderChallenge(client) {
   const match = await client.evaluate(`(${computeSliderImageMatchInPage.toString()})({})`, 30000);
   if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
@@ -622,7 +649,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
     captureBeyondViewport: false,
   });
   if (!screenshot?.data) return null;
-  return client.evaluate(`new Promise(resolve => {
+  const rendered = await client.evaluate(`new Promise(resolve => {
     const image = new Image();
     image.onload = () => {
       const visible = element => {
@@ -667,6 +694,11 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
         moveX,
         targetX: Math.round(targetX),
         flat,
+        cropPng: crop.toDataURL('image/png'),
+        imageWidth: crop.width,
+        sourceX: sourceRect.x,
+        screenshotScaleX,
+        sliderX: sliderRect.x,
         raw: ${JSON.stringify(rawInfo)},
         startX: sliderRect.x + sliderRect.width / 2,
         startY: sliderRect.y + sliderRect.height / 2,
@@ -676,6 +708,37 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
     image.onerror = () => resolve(null);
     image.src = ${JSON.stringify(`data:image/png;base64,${screenshot.data}`)};
   })`, 30000);
+  if (!rendered) return null;
+  const {
+    cropPng,
+    imageWidth,
+    sourceX,
+    screenshotScaleX,
+    sliderX,
+    ...local
+  } = rendered;
+  local.localReliable = isFlatPuzzleCandidateReliable(local.flat);
+  const visionKey = process.env.GEMINI_API_KEY
+    || process.env.TELECOM_VISION_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.ANTHROPIC_AUTH_TOKEN
+    || '';
+  if (!local.localReliable && visionKey && process.env.TELECOM_VISION_URL) {
+    const vision = await estimateSliderDistanceWithVision({ bgPngBase64: cropPng, imageWidth });
+    if (vision.ok && vision.confidence >= 0.55) {
+      const moveX = renderedPuzzleMoveX(sourceX, vision.naturalX, screenshotScaleX, sliderX);
+      return {
+        ...local,
+        method: 'vision-fallback',
+        naturalX: moveX,
+        moveX,
+        targetX: Math.round(sourceX + vision.naturalX / screenshotScaleX),
+        vision: { confidence: vision.confidence, reason: vision.reason },
+      };
+    }
+    local.vision = { ok: false, reason: vision.reason || 'low-confidence', confidence: vision.confidence || 0 };
+  }
+  return local;
 }
 
 async function solveConfirmationSlider(client) {
@@ -701,7 +764,8 @@ async function solveConfirmationSlider(client) {
     throw new Error('Native Chrome confirmation slider target missing after asset wait');
   }
   console.log('Native Chrome confirmation slider match', info);
-  await dragSlider(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
+  const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
+  await drag(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
   const deadline = Date.now() + 25000;
   let hiddenSince = 0;
   while (Date.now() < deadline) {
@@ -730,6 +794,7 @@ async function solveConfirmationSlider(client) {
     }
     await wait(500);
   }
+  console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
   throw new Error('Native Chrome confirmation slider validation timed out');
 }
 

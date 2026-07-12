@@ -19,9 +19,9 @@ on:
         required: false
         default: "local_selfhosted"
       connectivity_mode:
-        description: "Override connectivity mode for this manual run: direct, http_proxy, ssh_tunnel, or proxy_pool"
+        description: "Network mode: auto prefers configured proxy, otherwise direct"
         required: false
-        default: ""
+        default: "auto"
       probe_only:
         description: "Load the entry page and login slider without submitting it or sending SMS"
         required: false
@@ -43,7 +43,7 @@ jobs:
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}
       TELECOM_ACTION_DELAY_MS: ${{ vars.TELECOM_ACTION_DELAY_MS || '' }}
       TELECOM_POST_SUCCESS_WAIT_MS: ${{ vars.TELECOM_POST_SUCCESS_WAIT_MS || '' }}
-      TELECOM_CONNECTIVITY_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'direct' }}
+      TELECOM_CONNECTIVITY_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.connectivity_mode || vars.TELECOM_CONNECTIVITY_MODE || 'auto' }}
       SMS_INBOX_PROVIDER: ${{ vars.SMS_INBOX_PROVIDER || 'pushplus' }}
       SMS_INBOX_URL: ${{ secrets.SMS_INBOX_URL || 'http://127.0.0.1:18787/messages' }}
       SMS_INBOX_HEALTH_URL: ${{ secrets.SMS_INBOX_HEALTH_URL || 'http://127.0.0.1:18787/health' }}
@@ -190,10 +190,23 @@ jobs:
         if: steps.claim_plan.outputs.should_run == 'true'
         run: |
           set -euo pipefail
+          if [ "${TELECOM_CONNECTIVITY_MODE:-auto}" = "auto" ]; then
+            if [ -n "${PROXY_POOL_HTTP_PROXY:-}" ]; then
+              TELECOM_CONNECTIVITY_MODE=proxy_pool
+            elif [ -n "${PROXY_SSH_HOST:-}" ] && [ -n "${PROXY_SSH_PRIVATE_KEY:-}" ]; then
+              TELECOM_CONNECTIVITY_MODE=ssh_tunnel
+            elif [ -n "${OPENWRT_HTTP_PROXY:-}" ]; then
+              TELECOM_CONNECTIVITY_MODE=http_proxy
+            else
+              TELECOM_CONNECTIVITY_MODE=direct
+            fi
+            echo "Auto connectivity selected ${TELECOM_CONNECTIVITY_MODE}."
+            echo "TELECOM_CONNECTIVITY_MODE=${TELECOM_CONNECTIVITY_MODE}" >> "$GITHUB_ENV"
+          fi
           case "${TELECOM_CONNECTIVITY_MODE:-direct}" in
             direct|http_proxy|ssh_tunnel|proxy_pool) ;;
             *)
-              echo "::error::Unsupported TELECOM_CONNECTIVITY_MODE: ${TELECOM_CONNECTIVITY_MODE}. Use direct, http_proxy, ssh_tunnel, or proxy_pool."
+              echo "::error::Unsupported TELECOM_CONNECTIVITY_MODE: ${TELECOM_CONNECTIVITY_MODE}. Use auto, direct, http_proxy, ssh_tunnel, or proxy_pool."
               exit 1
               ;;
           esac
