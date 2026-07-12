@@ -195,6 +195,14 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.doesNotMatch(script, /remote-debugging-port=0/);
 });
 
+test('native Chrome redacts sensitive form fields before failure screenshots', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts/run-native-chrome-claim.js'), 'utf8');
+  assert.match(script, /redactSensitivePageFields/);
+  assert.match(script, /querySelectorAll\('input,textarea,\[contenteditable="true"\]'\)/);
+  assert.match(script, /createTreeWalker\(document\.body, NodeFilter\.SHOW_TEXT\)/);
+  assert.ok(script.indexOf('await redactSensitivePageFields(client)') < script.indexOf("Page.captureScreenshot', { format: 'png'"));
+});
+
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {
   const { loadConfig } = require('../src/config');
   const originalEnv = { ...process.env };
