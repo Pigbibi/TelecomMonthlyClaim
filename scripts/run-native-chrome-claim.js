@@ -615,13 +615,76 @@ async function readConfirmationSliderInfo(client) {
   })()`, 30000);
 }
 
+async function readRenderedConfirmationSliderInfo(client, rawInfo) {
+  const screenshot = await client.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+  });
+  if (!screenshot?.data) return null;
+  return client.evaluate(`new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => {
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const root = document.querySelector('#secondPop_puzzle_check') || document;
+      const source = [...root.querySelectorAll('canvas:not(.block),canvas')]
+        .find(item => visible(item) && item.width >= 100 && item.height >= 50);
+      const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+        .map(selector => root.querySelector(selector))
+        .find(visible);
+      if (!source || !slider) return resolve(null);
+      const sourceRect = source.getBoundingClientRect();
+      const sliderRect = slider.getBoundingClientRect();
+      const screenshotScaleX = image.naturalWidth / Math.max(1, window.innerWidth);
+      const screenshotScaleY = image.naturalHeight / Math.max(1, window.innerHeight);
+      const crop = document.createElement('canvas');
+      crop.width = Math.max(1, Math.round(Math.min(sourceRect.width, window.innerWidth - sourceRect.x) * screenshotScaleX));
+      crop.height = Math.max(1, Math.round(Math.min(sourceRect.height, window.innerHeight - sourceRect.y) * screenshotScaleY));
+      crop.getContext('2d').drawImage(
+        image,
+        Math.max(0, sourceRect.x * screenshotScaleX),
+        Math.max(0, sourceRect.y * screenshotScaleY),
+        crop.width,
+        crop.height,
+        0,
+        0,
+        crop.width,
+        crop.height,
+      );
+      const pixels = crop.getContext('2d').getImageData(0, 0, crop.width, crop.height).data;
+      const flat = (${findFlatCanvasTarget.toString()})(pixels, crop.width, crop.height);
+      if (!flat.ok) return resolve(null);
+      resolve({
+        method: 'rendered-flat-component',
+        naturalX: Math.round(flat.x / screenshotScaleX),
+        moveX: Math.round(flat.x / screenshotScaleX),
+        flat,
+        raw: ${JSON.stringify(rawInfo)},
+        startX: sliderRect.x + sliderRect.width / 2,
+        startY: sliderRect.y + sliderRect.height / 2,
+        slider: { tag: slider.tagName, id: slider.id, className: String(slider.className || '').slice(0, 80) },
+      });
+    };
+    image.onerror = () => resolve(null);
+    image.src = ${JSON.stringify(`data:image/png;base64,${screenshot.data}`)};
+  })`, 30000);
+}
+
 async function solveConfirmationSlider(client) {
   const matchDeadline = Date.now() + 20000;
   let info = null;
   let refreshed = false;
   while (Date.now() < matchDeadline) {
-    info = await readConfirmationSliderInfo(client);
-    if (info?.moveX >= 40) break;
+    const rawInfo = await readConfirmationSliderInfo(client);
+    if (rawInfo?.moveX >= 40) {
+      info = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null) || rawInfo;
+      break;
+    }
     if (!refreshed && Date.now() >= matchDeadline - 12000) {
       refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
       console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
