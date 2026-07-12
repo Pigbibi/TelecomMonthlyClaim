@@ -294,3 +294,120 @@ test('reads login code from PushPlus relay inbox without calling OpenAPI', async
     global.fetch = originalFetch;
   }
 });
+
+test('reads success receipt from PushPlus relay with a separate sender filter', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async url => {
+    const parsed = new URL(String(url));
+    assert.equal(parsed.searchParams.get('sender'), '10000');
+    return {
+      ok: true,
+      json: async () => ({
+        messages: [{
+          id: 'receipt-1',
+          sender: '10000',
+          receivedAt: Date.UTC(2026, 6, 13, 0, 1, 56),
+          text: '【办理提醒】成功办理互联网卡网龄享200分钟国内语音（方案编号24BJ102053）',
+        }],
+      }),
+    };
+  };
+
+  try {
+    const client = new SmsInboxClient({
+      smsInboxProvider: 'pushplus',
+      smsSender: '10001',
+      successSmsSender: '10000',
+      pushPlusRelayInboxUrl: 'https://relay.example.test/messages',
+      productName: '互联网卡网龄享200分钟国内语音',
+      expectedPlanId: '24BJ102053',
+    });
+    assert.deepEqual(await client.waitForReceipt({ since: 0, timeoutMs: 100, pollMs: 1 }), {
+      stage: 'receipt',
+      product: '互联网卡网龄享200分钟国内语音',
+      planId: '24BJ102053',
+      source: 'pushplus',
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('reads success receipt from direct PushPlus without login keyword coupling', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async url => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/api/common/openApi/getAccessKey') {
+      return { ok: true, json: async () => ({ code: 200, data: { accessKey: 'access-key-1', expiresIn: 7200 } }) };
+    }
+    if (parsed.pathname === '/api/open/message/list') {
+      return {
+        ok: true,
+        json: async () => ({
+          code: 200,
+          data: { list: [{ title: '短信转发', shortCode: 'receipt-direct-1', updateTime: '2026-07-13 04:01:56' }] },
+        }),
+      };
+    }
+    if (parsed.pathname === '/shortMessage/receipt-direct-1') {
+      return {
+        ok: true,
+        text: async () => '<div>发件人: 10000</div><div>【办理提醒】成功办理互联网卡网龄享200分钟国内语音（方案编号24BJ102053）</div>',
+      };
+    }
+    throw new Error(`unexpected fetch: ${parsed.pathname}`);
+  };
+
+  try {
+    const client = new SmsInboxClient({
+      smsInboxProvider: 'pushplus',
+      smsSender: '10001',
+      successSmsSender: '10000',
+      pushPlusToken: 'token-1',
+      pushPlusSecretKey: 'secret-1',
+      pushPlusBaseUrl: 'https://www.pushplus.plus',
+      pushPlusKeyword: '北京电信掌上营业厅',
+      pushPlusTitleKeyword: '验证码',
+      productName: '互联网卡网龄享200分钟国内语音',
+      expectedPlanId: '24BJ102053',
+    });
+    assert.equal((await client.waitForReceipt({ since: 0, timeoutMs: 100, pollMs: 1 }))?.source, 'pushplus');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('reads success receipt from generic HTTP inbox mode', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, options) => {
+    const parsed = new URL(String(url));
+    assert.equal(parsed.searchParams.get('sender'), '10000');
+    assert.equal(options.headers.authorization, 'Bearer inbox-token');
+    return {
+      ok: true,
+      json: async () => ({
+        messages: [{
+          id: 'receipt-http-1',
+          sender: '10000',
+          receivedAt: Date.UTC(2026, 3, 6, 0, 1, 56),
+          text: '【办理提醒】成功办理互联网卡网龄享5GB国内通用流量（方案编号24BJ100433）',
+        }],
+      }),
+    };
+  };
+
+  try {
+    const client = new SmsInboxClient({
+      smsInboxProvider: 'http',
+      smsInboxUrl: 'https://inbox.example.test/messages',
+      smsInboxToken: 'inbox-token',
+      smsSender: '10001',
+      successSmsSender: '10000',
+      productName: '互联网卡网龄享5GB国内通用流量',
+      expectedPlanId: '24BJ100433',
+    });
+    assert.equal((await client.waitForReceipt({ since: 0, timeoutMs: 100, pollMs: 1 }))?.source, 'inbox');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

@@ -19,6 +19,14 @@ function extractConfirmProduct(text) {
   return text.match(/办理([^，。]+?)(?:（|\(|,|，|。|立即生效|当月有效)/)?.[1] || '';
 }
 
+function extractReceiptProduct(text) {
+  return text.match(/成功办理([^，。]+?)(?:（|\(|,|，|。|立即生效|当月有效)/)?.[1] || '';
+}
+
+function extractPlanId(text) {
+  return text.match(/方案编号[:：]?([A-Za-z0-9_-]+)/)?.[1] || '';
+}
+
 function parseTelecomSms(input, options = {}) {
   const text = normalizeText(typeof input === 'string' ? input : input?.text || input?.content || input?.body || '');
   const sender = String(input?.sender || input?.from || input?.address || '');
@@ -26,6 +34,23 @@ function parseTelecomSms(input, options = {}) {
   const expectedPhone = options.expectedPhone ? String(options.expectedPhone) : '';
   const product = options.product || '';
   const planId = options.planId || '';
+
+  if (stage === 'receipt') {
+    const expectedSender = String(options.sender || '10000');
+    if (sender && expectedSender && !sender.includes(expectedSender)) return null;
+    if (!includesAll(text, ['【办理提醒】', '成功办理'])) return null;
+    const parsedProduct = extractReceiptProduct(text);
+    const parsedPlanId = extractPlanId(text);
+    if (product && !text.includes(normalizeText(product))) return null;
+    if (planId && !text.includes(normalizeText(planId))) return null;
+    if (!product && !parsedProduct) return null;
+    if (!planId && !parsedPlanId) return null;
+    return {
+      stage: 'receipt',
+      product: product || parsedProduct,
+      planId: planId || parsedPlanId,
+    };
+  }
 
   if (sender && !/10001/.test(sender)) return null;
 
