@@ -68,6 +68,7 @@ function loadConfig() {
     loginSmsAlreadySent: process.env.TELECOM_LOGIN_SMS_ALREADY_SENT === 'true',
     loginAlreadyComplete: process.env.TELECOM_LOGIN_ALREADY_COMPLETE === 'true',
     confirmationSmsAlreadySent: process.env.TELECOM_CONFIRM_SMS_ALREADY_SENT === 'true',
+    alreadyClaimed: process.env.TELECOM_ALREADY_CLAIMED === 'true',
     actionDelayMs: numberEnv('TELECOM_ACTION_DELAY_MS', 800),
     postSuccessWaitMs: numberEnv('TELECOM_POST_SUCCESS_WAIT_MS', 8000),
     openwrtProxy: process.env.OPENWRT_HTTP_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '',

@@ -13,6 +13,7 @@ const {
 const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
+const { classifyPackageGate, summarizePackageGate } = require('../src/package-gate');
 
 const root = path.resolve(__dirname, '..');
 const entryUrl = process.env.TELECOM_ENTRY_URL;
@@ -528,13 +529,40 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
 }
 
 async function selectTargetPackage(client, productName) {
-  await waitForPageState(
-    client,
-    `(() => location.href.includes('preDepositCfg_list')
-      && [...document.querySelectorAll('li')].some(node => (node.innerText || '').includes(${JSON.stringify(productName)})))()`,
-    30000,
-    'Native Chrome target package did not render',
-  );
+  const deadline = Date.now() + 30000;
+  let gate = { state: 'waiting' };
+  while (Date.now() < deadline) {
+    const snapshot = await client.evaluate(`(() => {
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const dialogSelectors = [
+        '[role="dialog"]', '.van-dialog', '.wap-dialog', '#wap-dialog', '#dialog-box',
+        '[class*="dialog" i]', '[class*="modal" i]', '[class*="popup" i]',
+      ];
+      const dialogs = [...new Set(dialogSelectors.flatMap(selector => [...document.querySelectorAll(selector)]))]
+        .filter(visible)
+        .map(element => element.innerText || '')
+        .filter(Boolean);
+      return {
+        url: location.href,
+        bodyText: (document.body?.innerText || '').slice(0, 2000),
+        dialogText: dialogs.join('\n').slice(0, 1000),
+      };
+    })()`);
+    gate = classifyPackageGate({ ...snapshot, productName });
+    if (gate.state === 'ready') break;
+    if (gate.state === 'already_claimed') {
+      return { alreadyClaimed: true, diagnostic: summarizePackageGate(gate) };
+    }
+    await wait(500);
+  }
+  if (gate.state !== 'ready') {
+    throw new Error(`Native Chrome target package did not render: ${JSON.stringify(summarizePackageGate(gate))}`);
+  }
   const selected = await client.evaluate(`(() => {
     const name = ${JSON.stringify(productName)};
     const visible = element => {
@@ -557,6 +585,7 @@ async function selectTargetPackage(client, productName) {
     20000,
     'Native Chrome confirm page did not become ready',
   );
+  return { alreadyClaimed: false };
 }
 
 async function openConfirmationSlider(client) {
@@ -837,6 +866,7 @@ async function main() {
   const proxyServer = process.env.OPENWRT_HTTP_PROXY || '';
   if (proxyServer) chromeArgs.splice(chromeArgs.length - 1, 0, `--proxy-server=${proxyServer}`);
   const chrome = spawn(chromeBin, chromeArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
+  let alreadyClaimed = false;
 
   try {
     const version = await waitForCdp(cdpUrl);
@@ -870,10 +900,15 @@ async function main() {
       if (!sms?.code) throw new Error('Native Chrome login SMS was not received');
       await submitLoginCode(cdp, sms.code);
       console.log('Native Chrome login completed before Playwright attachment');
-      await selectTargetPackage(cdp, config.productName);
-      await openConfirmationSlider(cdp);
-      const confirmationDistance = await solveConfirmationSlider(cdp);
-      console.log(`Native Chrome confirmation SMS sent before Playwright attachment (${confirmationDistance}px)`);
+      const packageResult = await selectTargetPackage(cdp, config.productName);
+      alreadyClaimed = packageResult.alreadyClaimed;
+      if (alreadyClaimed) {
+        console.log('Native Chrome detected an already-claimed package response', packageResult.diagnostic);
+      } else {
+        await openConfirmationSlider(cdp);
+        const confirmationDistance = await solveConfirmationSlider(cdp);
+        console.log(`Native Chrome confirmation SMS sent before Playwright attachment (${confirmationDistance}px)`);
+      }
     } catch (error) {
       await captureCdpScreenshot(cdp);
       throw error;
@@ -893,6 +928,7 @@ async function main() {
         TELECOM_REUSE_VALIDATED_PAGE: 'true',
         TELECOM_LOGIN_ALREADY_COMPLETE: 'true',
         TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true',
+        TELECOM_ALREADY_CLAIMED: alreadyClaimed ? 'true' : 'false',
       },
     });
     if (result.code !== 0) process.exitCode = result.code || 1;

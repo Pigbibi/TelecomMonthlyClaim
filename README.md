@@ -160,6 +160,8 @@ npm run debug:pushplus
 5. 确认产品名、方案编号、PushPlus 短信读取都正常后，再手动触发一次 `dry_run=false`。
 6. 成功后检查 `state/YYYY-MM.json` 和 `logs` 分支。
 
+`force_run=true` 只用于明确需要绕过当月成功状态的诊断或补跑。强制重跑失败时，脚本会保留已有的 `success` 状态；如果运营商页面明确提示“已办理 / 已领取 / 无需重复”，则记录 `successEvidence=already_claimed_page`，不会继续发送二次确认短信或重复提交。未知弹窗仍按失败处理，并仅输出脱敏后的路径和弹窗摘要。
+
 最小部署清单：
 
 ```bash

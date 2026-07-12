@@ -17,6 +17,7 @@ const { observeTelecomPage } = require('../src/page-observer');
 const { planTelecomPageAction } = require('../src/page-planner');
 const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { evaluateSliderImageMatch } = require('../src/slider-local-match');
+const { readClaimStateStatus, shouldWriteFailureState } = require('../src/claim-state');
 
 function loadChromium() {
   const { chromium } = require('playwright');
@@ -2639,9 +2640,7 @@ function stateFile(month = stateMonth()) { return path.join('state', `${month}.j
 
 function alreadySucceeded(config) {
   if (config.forceRun) return false;
-  const file = stateFile();
-  if (!fs.existsSync(file)) return false;
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')).status === 'success'; } catch { return false; }
+  return readClaimStateStatus(stateFile()) === 'success';
 }
 
 function writeState(status, details) {
@@ -2653,6 +2652,20 @@ function writeState(status, details) {
 async function runClaim(config) {
   if (alreadySucceeded(config)) {
     log(`State ${stateFile()} already records success; skip. Set FORCE_RUN=true to override.`);
+    return;
+  }
+  if (config.alreadyClaimed) {
+    if (config.dryRunBeforeFinalSubmit) {
+      log('Dry run observed an already-claimed package response; state file was not updated.');
+      return;
+    }
+    log('Telecom reports that the selected package is already claimed; recording success without resubmitting.');
+    writeState('success', {
+      targetPackage: config.targetPackage,
+      productName: config.productName,
+      expectedPlanId: config.expectedPlanId,
+      successEvidence: 'already_claimed_page',
+    });
     return;
   }
   log('Slider mode', { sliderMode: config.sliderMode || 'api' });
@@ -2727,12 +2740,18 @@ async function runClaimWithOptionalDirectFallback(config) {
 
 async function main() {
   const config = loadConfig();
+  const priorStateStatus = readClaimStateStatus(stateFile());
   try {
     await runClaimWithOptionalDirectFallback(config);
   } catch (err) {
     log('Claim failed', { message: err.message, stack: err.stack?.split('\n').slice(0, 4).join('\n') });
     if (config.dryRunBeforeFinalSubmit) {
       log('Dry run failed; state file was not updated.');
+      process.exitCode = 1;
+      return;
+    }
+    if (!shouldWriteFailureState(priorStateStatus)) {
+      log('Claim attempt failed, but the existing monthly success state was preserved.');
       process.exitCode = 1;
       return;
     }
