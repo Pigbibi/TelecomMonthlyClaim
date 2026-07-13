@@ -1,5 +1,18 @@
 # TelecomMonthlyClaim
 
+
+## 中文概览
+
+这是北京电信网龄权益自动办理仓库：按月运行并在流量包与语音包之间切换，优先使用真实浏览器与明确网络入口。
+
+## English Overview
+
+This repository automates the monthly Beijing Telecom benefit claim flow, switching between data and voice packages with a real browser and explicit network entry points.
+
+## 许可证 / License
+
+MIT.
+
 每月自动办理北京电信网龄权益，支持通过 GitHub Variables 在 5GB 国内通用流量和 200 分钟国内语音之间切换。
 
 默认流程：
