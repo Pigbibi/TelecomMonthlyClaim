@@ -14,10 +14,6 @@ on:
         description: "Stop before the final telecom submit button"
         required: false
         default: "false"
-      runner_target:
-        description: "Manual run target: github_hosted or local_selfhosted"
-        required: false
-        default: "local_selfhosted"
       connectivity_mode:
         description: "Network mode: auto prefers configured proxy, otherwise direct"
         required: false
@@ -33,7 +29,7 @@ permissions:
 
 jobs:
   claim:
-    runs-on: ${{ fromJSON(((github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.runner_target != 'github_hosted')) && '["self-hosted","macOS","X64","telecom-claim-local"]' || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
@@ -103,14 +99,6 @@ jobs:
       DRY_RUN_BEFORE_FINAL_SUBMIT: ${{ github.event.inputs.dry_run || 'false' }}
 
     steps:
-      - name: Cleanup stale self-hosted git refs
-        if: runner.environment == 'self-hosted'
-        run: |
-          set -euo pipefail
-          if [ -d "$GITHUB_WORKSPACE/.git/refs" ]; then
-            find "$GITHUB_WORKSPACE/.git/refs" -type f -name '* *' -print -delete || true
-          fi
-
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -162,7 +150,7 @@ jobs:
           }
           NODE
 
-      - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'Linux'
+      - if: steps.claim_plan.outputs.should_run == 'true'
         name: Install Google Chrome for real-browser CDP
         run: |
           set -euo pipefail
@@ -180,13 +168,6 @@ jobs:
           fi
           google-chrome --version || google-chrome-stable --version
           xvfb-run --help >/dev/null
-
-      - if: steps.claim_plan.outputs.should_run == 'true' && runner.os == 'macOS'
-        name: Verify local Google Chrome for real-browser CDP
-        run: |
-          set -euo pipefail
-          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
 
       - name: Validate connectivity
         if: steps.claim_plan.outputs.should_run == 'true'
@@ -331,12 +312,7 @@ jobs:
       - name: Run claim via real Chrome CDP
         id: claim
         if: steps.claim_plan.outputs.should_run == 'true'
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a bash scripts/run-real-chrome-claim.sh
-          else
-            bash scripts/run-real-chrome-claim.sh
-          fi
+        run: xvfb-run -a bash scripts/run-real-chrome-claim.sh
 
       - name: Upload claim debug screenshots
         if: always() && steps.claim_plan.outputs.should_run == 'true'

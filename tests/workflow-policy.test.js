@@ -14,10 +14,11 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
   assert.doesNotMatch(workflowText, /uses:\s\.\/actions\/setup-home-proxy/);
 });
 
-test('monthly workflow documents generic proxy modes instead of BWG-only execution', () => {
+test('monthly workflow uses GitHub-hosted Linux with generic proxy modes', () => {
   assert.match(workflowText, /connectivity_mode:/);
-  assert.match(workflowText, /runner_target:/);
-  assert.match(workflowText, /default:\s+"local_selfhosted"/);
+  assert.match(workflowText, /runs-on:\s+ubuntu-latest/);
+  assert.doesNotMatch(workflowText, /runner_target:/);
+  assert.doesNotMatch(workflowText, /self-hosted|macOS|telecom-claim-local/);
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE:/);
   assert.doesNotMatch(workflowText, /BWG_SSH_PRIVATE_KEY/);
   assert.match(workflowText, /Unsupported TELECOM_CONNECTIVITY_MODE/);
@@ -78,20 +79,12 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /SEND_CODE_ATTEMPTS: "1"/);
   assert.match(workflowText, /TELECOM_SUCCESS_SMS_SENDER/);
   assert.match(workflowText, /TELECOM_SUCCESS_SMS_TIMEOUT_MS/);
-  assert.match(workflowText, /local_selfhosted/);
-  assert.match(workflowText, /github\.event_name == 'schedule'/);
-  assert.match(workflowText, /runner_target != 'github_hosted'/);
-  assert.match(workflowText, /telecom-claim-local/);
   assert.match(workflowText, /run-real-chrome-claim\.sh/);
   assert.match(workflowText, /xvfb-run -a bash scripts\/run-real-chrome-claim\.sh/);
   assert.doesNotMatch(workflowText, /xvfb-run -a bash scripts\/start-chrome-cdp-linux\.sh/);
   assert.match(workflowText, /Install Google Chrome for real-browser CDP/);
-  assert.match(workflowText, /Verify local Google Chrome for real-browser CDP/);
-  assert.match(workflowText, /runner\.os == 'macOS'/);
-  assert.match(workflowText, /runner\.os == 'Linux'/);
-  assert.match(workflowText, /Cleanup stale self-hosted git refs/);
-  assert.match(workflowText, /runner\.environment == 'self-hosted'/);
-  assert.match(workflowText, /find "\$GITHUB_WORKSPACE\/\.git\/refs" -type f -name '\* \*' -print -delete/);
+  assert.doesNotMatch(workflowText, /Verify local Google Chrome for real-browser CDP/);
+  assert.doesNotMatch(workflowText, /runner\.os/);
   assert.match(workflowText, /XVFB_PID/);
   assert.doesNotMatch(workflowText, /playwright install/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
