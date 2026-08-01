@@ -674,7 +674,7 @@ async function selectTargetPackage(client, productName) {
   }
   if (gate.state !== 'ready') {
     const telecomApi = await client.recentTelecomApiDiagnostics(packageStartedAt);
-    console.log('Native Chrome package page evaluation remained busy', { evaluationTimeouts, telecomApi });
+    console.log('Native Chrome package page diagnostics', { evaluationTimeouts, telecomApi });
     throw new Error(`Native Chrome target package did not render: ${JSON.stringify(summarizePackageGate(gate))}`);
   }
   const selected = await client.evaluate(`(() => {
