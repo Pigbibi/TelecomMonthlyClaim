@@ -9,6 +9,7 @@ const {
   findFlatCanvasTarget,
   renderedPuzzleMoveX,
   isFlatPuzzleCandidateReliable,
+  preferCanvasTransparentMatch,
 } = require('../src/slider-canvas-match');
 const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
@@ -758,10 +759,19 @@ async function readConfirmationSliderInfo(client) {
     if (!slider || (!flat.ok && count < 500) || naturalX >= canvas.width) return null;
     const sliderRect = slider.getBoundingClientRect();
     const canvasRect = canvas.getBoundingClientRect();
+    const canvasScaleX = canvas.width / canvasRect.width;
+    const moveX = (${renderedPuzzleMoveX.toString()})(
+      canvasRect.x,
+      naturalX,
+      canvasScaleX,
+      sliderRect.x,
+      canvasRect.width,
+    );
     return {
       method: flat.ok ? 'flat-component' : 'transparent-fallback',
       naturalX,
-      moveX: Math.round(naturalX * canvasRect.width / canvas.width),
+      moveX,
+      targetX: Math.round(canvasRect.x + naturalX / canvasScaleX),
       flat,
       startX: sliderRect.x + sliderRect.width / 2,
       startY: sliderRect.y + sliderRect.height / 2,
@@ -868,7 +878,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
     }
     local.vision = { ok: false, reason: vision.reason || 'low-confidence', confidence: vision.confidence || 0 };
   }
-  return local;
+  return preferCanvasTransparentMatch(local, rawInfo);
 }
 
 async function solveConfirmationSlider(client) {

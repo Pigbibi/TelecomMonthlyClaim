@@ -86,4 +86,26 @@ function isFlatPuzzleCandidateReliable(candidate) {
     && Number(candidate.fill) >= 0.35;
 }
 
-module.exports = { findFlatCanvasTarget, renderedPuzzleMoveX, isFlatPuzzleCandidateReliable };
+function preferCanvasTransparentMatch(rendered, raw) {
+  if (raw?.method !== 'transparent-fallback' || !Number.isFinite(raw.moveX) || raw.moveX < 40) {
+    return rendered;
+  }
+  return {
+    ...rendered,
+    method: 'canvas-transparent-fallback',
+    naturalX: raw.moveX,
+    moveX: raw.moveX,
+    targetX: Number.isFinite(raw.targetX) ? raw.targetX : rendered?.targetX,
+    renderedCandidate: {
+      moveX: rendered?.moveX,
+      targetX: rendered?.targetX,
+    },
+  };
+}
+
+module.exports = {
+  findFlatCanvasTarget,
+  renderedPuzzleMoveX,
+  isFlatPuzzleCandidateReliable,
+  preferCanvasTransparentMatch,
+};

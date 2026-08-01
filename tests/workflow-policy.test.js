@@ -180,6 +180,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
   assert.match(script, /\.refreshIcon.*#slider_refresh_icon.*\.slider-refresh-icon/);
   assert.match(script, /rendered-flat-component/);
+  assert.match(script, /preferCanvasTransparentMatch\(local, rawInfo\)/);
   assert.match(script, /vision-fallback/);
   assert.match(script, /isFlatPuzzleCandidateReliable/);
   assert.match(script, /process\.platform === 'linux' \? dragSliderTrusted : dragSlider/);

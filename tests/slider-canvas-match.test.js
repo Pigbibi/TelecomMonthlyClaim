@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   findFlatCanvasTarget,
+  preferCanvasTransparentMatch,
   renderedPuzzleMoveX,
   isFlatPuzzleCandidateReliable,
 } = require('../src/slider-canvas-match');
@@ -58,4 +59,31 @@ test('prefers a puzzle-shaped component over a larger flat stripe', () => {
 
 test('converts a rendered target into slider-track movement', () => {
   assert.equal(renderedPuzzleMoveX(210, 382, 1, 105, 840), 499);
+});
+
+test('prefers the canvas transparent target over an overlaid screenshot candidate', () => {
+  const rendered = {
+    method: 'rendered-flat-component',
+    naturalX: 765,
+    moveX: 765,
+    targetX: 852,
+  };
+  const raw = {
+    method: 'transparent-fallback',
+    naturalX: 723,
+    moveX: 742,
+    targetX: 828,
+  };
+
+  assert.deepEqual(preferCanvasTransparentMatch(rendered, raw), {
+    ...rendered,
+    method: 'canvas-transparent-fallback',
+    naturalX: 742,
+    moveX: 742,
+    targetX: 828,
+    renderedCandidate: {
+      moveX: 765,
+      targetX: 852,
+    },
+  });
 });
