@@ -79,12 +79,24 @@ async function waitForPageTarget(cdpUrl, timeoutMs = 45000) {
 
 function sanitizeDiagnosticMessage(value) {
   return String(value || '')
+    .replace(/([?&](?:token|code|phone|accNo|wxopenid|campaignId)=)[^&\s]+/gi, '$1***')
+    .replace(/\b[a-f0-9]{24,}\b/gi, '***')
     .replace(/1\d{10}/g, '***')
     .replace(/(验证码(?:是|为)?[:：]?)\d{4,8}/g, '$1***')
     .replace(/\b\d{4,11}\b/g, '***')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 160);
+}
+
+function safeDiagnosticPath(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.hostname !== 'wapbj.189.cn') return '';
+    return url.pathname.replace(/\d{4,}/g, '***').slice(0, 200);
+  } catch {
+    return '';
+  }
 }
 
 class CdpClient {
@@ -98,10 +110,14 @@ class CdpClient {
     this.networkEvents = [];
     this.telecomApiRequests = new Map();
     this.telecomApiEvents = [];
+    this.resourceRequests = new Map();
+    this.resourceEvents = [];
+    this.runtimeEvents = [];
     socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data || '{}'));
       if (!message.id) {
         this.trackNetworkEvent(message.method, message.params || {});
+        this.trackRuntimeEvent(message.method, message.params || {});
         for (const listener of this.listeners.get(message.method) || []) listener(message.params || {});
         return;
       }
@@ -122,8 +138,12 @@ class CdpClient {
           const request = {
             pathname: url.pathname.replace(/\d{4,}/g, '***').slice(0, 200),
             method: params.request?.method || '',
+            type: params.type || '',
             at: Date.now(),
           };
+          if (['Document', 'Script', 'XHR', 'Fetch'].includes(request.type)) {
+            this.resourceRequests.set(params.requestId, request);
+          }
           if (request.method !== 'GET' || params.type === 'XHR' || params.type === 'Fetch') {
             this.telecomApiRequests.set(params.requestId, request);
           }
@@ -133,6 +153,27 @@ class CdpClient {
         }
       } catch {}
       return;
+    }
+    const resourceRequest = this.resourceRequests.get(params.requestId);
+    if (resourceRequest) {
+      if (method === 'Network.responseReceived') {
+        this.resourceRequests.set(params.requestId, {
+          ...resourceRequest,
+          status: params.response?.status || 0,
+        });
+      } else if (method === 'Network.loadingFinished') {
+        this.resourceEvents.push(resourceRequest);
+      } else if (method === 'Network.loadingFailed') {
+        this.resourceEvents.push({
+          ...resourceRequest,
+          failed: true,
+          error: sanitizeDiagnosticMessage(params.errorText),
+        });
+      }
+      if (method === 'Network.loadingFinished' || method === 'Network.loadingFailed') {
+        this.resourceRequests.delete(params.requestId);
+      }
+      if (this.resourceEvents.length > 60) this.resourceEvents.splice(0, this.resourceEvents.length - 60);
     }
     const telecomApiRequest = this.telecomApiRequests.get(params.requestId);
     if (telecomApiRequest) {
@@ -163,6 +204,38 @@ class CdpClient {
       this.networkEvents.push({ ...request, failed: true, error: String(params.errorText || '').slice(0, 80) });
     }
     if (this.networkEvents.length > 20) this.networkEvents.splice(0, this.networkEvents.length - 20);
+  }
+
+  trackRuntimeEvent(method, params) {
+    if (method !== 'Runtime.exceptionThrown') return;
+    const details = params.exceptionDetails || {};
+    const frames = (details.stackTrace?.callFrames || [])
+      .map(frame => ({
+        pathname: safeDiagnosticPath(frame.url),
+        line: Number(frame.lineNumber || 0),
+        column: Number(frame.columnNumber || 0),
+      }))
+      .filter(frame => frame.pathname)
+      .slice(0, 3);
+    this.runtimeEvents.push({
+      at: Date.now(),
+      message: sanitizeDiagnosticMessage(details.exception?.description || details.text || 'JavaScript exception'),
+      frames,
+    });
+    if (this.runtimeEvents.length > 20) this.runtimeEvents.splice(0, this.runtimeEvents.length - 20);
+  }
+
+  recentRuntimeDiagnostics(since) {
+    return this.runtimeEvents.filter(event => event.at >= since).slice(-10);
+  }
+
+  recentResourceDiagnostics(since) {
+    return [
+      ...this.resourceEvents.filter(event => event.at >= since),
+      ...[...this.resourceRequests.values()]
+        .filter(event => event.at >= since)
+        .map(event => ({ ...event, pending: true })),
+    ].sort((a, b) => a.at - b.at).slice(-20);
   }
 
   recentNetworkEvents() {
@@ -293,6 +366,7 @@ async function navigateToEntryPage(client) {
   });
   await client.send('Page.enable');
   await client.send('Network.enable');
+  await client.send('Runtime.enable');
   const navigation = await client.send('Page.navigate', { url: entryUrl }, 30000);
   if (navigation.errorText) throw new Error(`Native Chrome entry navigation failed: ${navigation.errorText}`);
   const deadline = Date.now() + 45000;
@@ -630,6 +704,7 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
 
 async function selectTargetPackage(client, productName) {
   const packageStartedAt = Date.now();
+  const packageDiagnosticsStartedAt = packageStartedAt - 10000;
   const deadline = packageStartedAt + 60000;
   let gate = { state: 'waiting' };
   let evaluationTimeouts = 0;
@@ -673,8 +748,45 @@ async function selectTargetPackage(client, productName) {
     await wait(500);
   }
   if (gate.state !== 'ready') {
-    const telecomApi = await client.recentTelecomApiDiagnostics(packageStartedAt);
-    console.log('Native Chrome package page diagnostics', { evaluationTimeouts, telecomApi });
+    const telecomApi = await client.recentTelecomApiDiagnostics(packageDiagnosticsStartedAt);
+    const runtimeState = await client.evaluate(`(() => {
+      const externalScriptPaths = [...document.scripts]
+        .map(script => script.src)
+        .filter(Boolean)
+        .map(src => {
+          try {
+            const url = new URL(src, location.href);
+            return url.hostname === location.hostname
+              ? url.pathname.replace(/\d{4,}/g, '***').slice(0, 200)
+              : '';
+          }
+          catch { return ''; }
+        })
+        .filter(Boolean)
+        .slice(-20);
+      const visible = element => {
+        const rect = element?.getBoundingClientRect();
+        return !!(rect && rect.width > 0 && rect.height > 0 && getComputedStyle(element).display !== 'none');
+      };
+      return {
+        path: location.pathname.replace(/\d{4,}/g, '***').slice(0, 200),
+        readyState: document.readyState,
+        hasSingleSignOnPhoneNo: typeof globalThis.singleSignOnPhoneNo === 'function',
+        scriptCount: document.scripts.length,
+        inlineScriptCount: [...document.scripts].filter(script => !script.src).length,
+        externalScriptPaths,
+        iframeCount: document.querySelectorAll('iframe').length,
+        visibleLoadingCount: [...document.querySelectorAll('.loading,.mask_loading,[class*="loading" i]')]
+          .filter(visible).length,
+      };
+    })()`, 5000).catch(error => ({ unavailable: sanitizeDiagnosticMessage(error.message) }));
+    console.log('Native Chrome package page diagnostics', {
+      evaluationTimeouts,
+      runtimeState,
+      runtime: client.recentRuntimeDiagnostics(packageDiagnosticsStartedAt),
+      resources: client.recentResourceDiagnostics(packageDiagnosticsStartedAt),
+      telecomApi,
+    });
     throw new Error(`Native Chrome target package did not render: ${JSON.stringify(summarizePackageGate(gate))}`);
   }
   const selected = await client.evaluate(`(() => {

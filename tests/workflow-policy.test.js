@@ -172,7 +172,14 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /SmsInboxClient/);
   assert.match(script, /login completed before Playwright attachment/);
   assert.match(script, /Native Chrome package page diagnostics/);
-  assert.match(script, /recentTelecomApiDiagnostics\(packageStartedAt\)/);
+  assert.match(script, /recentTelecomApiDiagnostics\(packageDiagnosticsStartedAt\)/);
+  assert.match(script, /packageDiagnosticsStartedAt = packageStartedAt - 10000/);
+  assert.match(script, /recentRuntimeDiagnostics\(packageDiagnosticsStartedAt\)/);
+  assert.match(script, /recentResourceDiagnostics\(packageDiagnosticsStartedAt\)/);
+  assert.match(script, /Network\.loadingFinished/);
+  assert.match(script, /pending: true/);
+  assert.match(script, /hasSingleSignOnPhoneNo/);
+  assert.match(script, /Runtime\.exceptionThrown/);
   assert.match(script, /Runtime\\\.evaluate timed out/);
   assert.match(script, /TELECOM_LOGIN_ALREADY_COMPLETE: 'true'/);
   assert.match(script, /TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true'/);
