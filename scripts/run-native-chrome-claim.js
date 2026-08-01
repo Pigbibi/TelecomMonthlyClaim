@@ -629,30 +629,42 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
 }
 
 async function selectTargetPackage(client, productName) {
-  const deadline = Date.now() + 30000;
+  const packageStartedAt = Date.now();
+  const deadline = packageStartedAt + 60000;
   let gate = { state: 'waiting' };
+  let evaluationTimeouts = 0;
   while (Date.now() < deadline) {
-    const snapshot = await client.evaluate(`(() => {
-      const visible = element => {
-        if (!element) return false;
-        const rect = element.getBoundingClientRect();
-        const style = getComputedStyle(element);
-        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-      };
-      const dialogSelectors = [
-        '[role="dialog"]', '.van-dialog', '.wap-dialog', '#wap-dialog', '#dialog-box',
-        '[class*="dialog" i]', '[class*="modal" i]', '[class*="popup" i]',
-      ];
-      const dialogs = [...new Set(dialogSelectors.flatMap(selector => [...document.querySelectorAll(selector)]))]
-        .filter(visible)
-        .map(element => element.innerText || '')
-        .filter(Boolean);
-      return {
-        url: location.href,
-        bodyText: (document.body?.innerText || '').slice(0, 2000),
-        dialogText: dialogs.join('\\n').slice(0, 1000),
-      };
-    })()`);
+    let snapshot;
+    try {
+      snapshot = await client.evaluate(`(() => {
+        const visible = element => {
+          if (!element) return false;
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const dialogSelectors = [
+          '[role="dialog"]', '.van-dialog', '.wap-dialog', '#wap-dialog', '#dialog-box',
+          '[class*="dialog" i]', '[class*="modal" i]', '[class*="popup" i]',
+        ];
+        const dialogs = [...new Set(dialogSelectors.flatMap(selector => [...document.querySelectorAll(selector)]))]
+          .filter(visible)
+          .map(element => element.innerText || '')
+          .filter(Boolean);
+        return {
+          url: location.href,
+          bodyText: (document.body?.innerText || '').slice(0, 2000),
+          dialogText: dialogs.join('\\n').slice(0, 1000),
+        };
+      })()`, 5000);
+    } catch (error) {
+      if (!/Runtime\.evaluate timed out|Execution context was destroyed|Cannot find context/.test(error.message)) {
+        throw error;
+      }
+      evaluationTimeouts += 1;
+      await wait(500);
+      continue;
+    }
     gate = classifyPackageGate({ ...snapshot, productName });
     if (gate.state === 'ready') break;
     if (gate.state === 'already_claimed') {
@@ -661,6 +673,8 @@ async function selectTargetPackage(client, productName) {
     await wait(500);
   }
   if (gate.state !== 'ready') {
+    const telecomApi = await client.recentTelecomApiDiagnostics(packageStartedAt);
+    console.log('Native Chrome package page evaluation remained busy', { evaluationTimeouts, telecomApi });
     throw new Error(`Native Chrome target package did not render: ${JSON.stringify(summarizePackageGate(gate))}`);
   }
   const selected = await client.evaluate(`(() => {
