@@ -76,6 +76,16 @@ async function waitForPageTarget(cdpUrl, timeoutMs = 45000) {
   throw new Error('Fresh system Chrome did not open a page target');
 }
 
+function sanitizeDiagnosticMessage(value) {
+  return String(value || '')
+    .replace(/1\d{10}/g, '***')
+    .replace(/(验证码(?:是|为)?[:：]?)\d{4,8}/g, '$1***')
+    .replace(/\b\d{4,11}\b/g, '***')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
 class CdpClient {
   constructor(socket) {
     this.socket = socket;
@@ -85,6 +95,8 @@ class CdpClient {
     this.networkRequests = new Map();
     this.networkResponseIds = new Map();
     this.networkEvents = [];
+    this.telecomApiRequests = new Map();
+    this.telecomApiEvents = [];
     socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data || '{}'));
       if (!message.id) {
@@ -105,11 +117,41 @@ class CdpClient {
     if (method === 'Network.requestWillBeSent') {
       try {
         const url = new URL(params.request?.url);
-        if (url.hostname === 'wapbj.189.cn' && /getSliderChallenge|validSlider|sendRand|sendCode|SecondConfirmation/i.test(url.pathname)) {
-          this.networkRequests.set(params.requestId, { pathname: url.pathname, method: params.request?.method || '' });
+        if (url.hostname === 'wapbj.189.cn') {
+          const request = {
+            pathname: url.pathname.replace(/\d{4,}/g, '***').slice(0, 200),
+            method: params.request?.method || '',
+            at: Date.now(),
+          };
+          if (request.method !== 'GET' || params.type === 'XHR' || params.type === 'Fetch') {
+            this.telecomApiRequests.set(params.requestId, request);
+          }
+          if (/getSliderChallenge|validSlider|sendRand|sendCode|SecondConfirmation/i.test(url.pathname)) {
+            this.networkRequests.set(params.requestId, request);
+          }
         }
       } catch {}
       return;
+    }
+    const telecomApiRequest = this.telecomApiRequests.get(params.requestId);
+    if (telecomApiRequest) {
+      if (method === 'Network.responseReceived') {
+        this.telecomApiEvents.push({
+          ...telecomApiRequest,
+          status: params.response?.status || 0,
+          requestId: params.requestId,
+        });
+      } else if (method === 'Network.loadingFailed') {
+        this.telecomApiEvents.push({
+          ...telecomApiRequest,
+          failed: true,
+          error: String(params.errorText || '').slice(0, 80),
+        });
+      }
+      if (method === 'Network.responseReceived' || method === 'Network.loadingFailed') {
+        this.telecomApiRequests.delete(params.requestId);
+      }
+      if (this.telecomApiEvents.length > 30) this.telecomApiEvents.splice(0, this.telecomApiEvents.length - 30);
     }
     const request = this.networkRequests.get(params.requestId);
     if (!request) return;
@@ -145,6 +187,40 @@ class CdpClient {
       } catch {}
     }
     return events;
+  }
+
+  async recentTelecomApiDiagnostics(since) {
+    const events = this.telecomApiEvents.filter(event => event.at >= since).slice(-12);
+    const diagnostics = [];
+    for (const event of events) {
+      const { requestId, ...diagnostic } = event;
+      if (requestId && !event.failed) {
+        try {
+          const result = await this.send('Network.getResponseBody', { requestId }, 5000);
+          const body = String(result?.body || '');
+          diagnostic.bodyBytes = body.length;
+          const payload = JSON.parse(body);
+          const candidates = [payload, payload?.data, payload?.result]
+            .filter(value => value && typeof value === 'object' && !Array.isArray(value));
+          for (const candidate of candidates) {
+            for (const key of ['status', 'resultCode', 'retCode', 'success']) {
+              const value = candidate[key];
+              if (diagnostic[key] == null
+                && ['string', 'number', 'boolean'].includes(typeof value)
+                && String(value).length <= 24) {
+                diagnostic[key] = value;
+              }
+            }
+            for (const key of ['message', 'msg', 'retMsg']) {
+              const value = sanitizeDiagnosticMessage(candidate[key]);
+              if (!diagnostic.message && value) diagnostic.message = value;
+            }
+          }
+        } catch {}
+      }
+      diagnostics.push(diagnostic);
+    }
+    return diagnostics;
   }
 
   on(method, listener) {
@@ -496,31 +572,49 @@ async function submitLoginCode(client, code) {
     await client.send('Input.insertText', { text: digit });
     await wait(80 + Math.floor(Math.random() * 80));
   }
-  await client.evaluate(`(() => {
+  const inputState = await client.evaluate(`(() => {
     const input = document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input');
     input?.dispatchEvent(new Event('change', { bubbles: true }));
     input?.blur();
-    return !!input;
+    const submit = document.querySelector('.know-box.button');
+    return {
+      hasInput: !!input,
+      inputLength: String(input?.value || '').length,
+      submitPresent: !!submit,
+      submitDisabled: !!submit?.disabled,
+    };
   })()`);
+  console.log('Native Chrome login submit preflight', {
+    ...inputState,
+    expectedLength: String(code || '').length,
+  });
   await wait(700);
+  const submitStartedAt = Date.now();
   if (!await clickPageElement(client, ['.know-box.button'], '^(立即领取|立即办理)$')) {
     throw new Error('Native Chrome login submit button missing');
   }
   const deadline = Date.now() + 20000;
+  let lastState = {};
   while (Date.now() < deadline) {
     const state = await client.evaluate(`(() => ({
       complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
       failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙|操作失败|当日发送短信数量过多|无法继续发送/.test(document.body?.innerText || ''),
+      path: location.pathname,
+      hasCodeInput: !!document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input'),
+      inputLength: String(document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input')?.value || '').length,
+      submitDisabled: !!document.querySelector('.know-box.button')?.disabled,
+      codeSentNotice: /验证码已下发|请注意查收/.test(document.body?.innerText || ''),
     }))()`);
+    lastState = state || {};
     if (state?.complete) return;
-    if (state?.failed) throw new Error('Native Chrome login verification failed before Playwright attachment');
+    if (state?.failed) {
+      const telecomApi = await client.recentTelecomApiDiagnostics(submitStartedAt);
+      throw new Error(`Native Chrome login verification failed before Playwright attachment: ${JSON.stringify({ ...lastState, telecomApi })}`);
+    }
     await wait(500);
   }
-  const snapshot = await client.evaluate(`(() => ({
-    url: location.href,
-    dialogText: (document.body?.innerText || '').slice(0, 1200),
-  }))()`).catch(() => ({}));
-  const diagnostic = summarizePackageGate({ ...snapshot, state: 'login_pending' });
+  const telecomApi = await client.recentTelecomApiDiagnostics(submitStartedAt);
+  const diagnostic = { ...lastState, telecomApi };
   throw new Error(`Native Chrome login verification timed out before Playwright attachment: ${JSON.stringify(diagnostic)}`);
 }
 

@@ -199,6 +199,15 @@ test('native Chrome redacts sensitive form fields before failure screenshots', (
   assert.ok(script.indexOf('await redactSensitivePageFields(client)') < script.indexOf("Page.captureScreenshot', { format: 'png'"));
 });
 
+test('native Chrome login timeout diagnostics stay metadata-only', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts/run-native-chrome-claim.js'), 'utf8');
+  assert.match(script, /recentTelecomApiDiagnostics/);
+  assert.match(script, /inputLength:/);
+  assert.match(script, /bodyBytes/);
+  assert.doesNotMatch(script, /postData/);
+  assert.doesNotMatch(script, /inputValue:/);
+});
+
 test('enables requireRealChrome when BROWSER_CDP_URL or TELECOM_REQUIRE_REAL_CHROME is set', () => {
   const { loadConfig } = require('../src/config');
   const originalEnv = { ...process.env };
