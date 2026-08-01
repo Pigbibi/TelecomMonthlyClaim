@@ -555,7 +555,7 @@ async function selectTargetPackage(client, productName) {
       return {
         url: location.href,
         bodyText: (document.body?.innerText || '').slice(0, 2000),
-        dialogText: dialogs.join('\n').slice(0, 1000),
+        dialogText: dialogs.join('\\n').slice(0, 1000),
       };
     })()`);
     gate = classifyPackageGate({ ...snapshot, productName });

@@ -185,6 +185,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /process\.platform === 'linux' \? dragSliderTrusted : dragSlider/);
   assert.match(script, /Input\.dispatchMouseEvent/);
   assert.match(script, /当日发送短信数量过多/);
+  assert.ok(script.includes("dialogs.join('\\\\n')"));
   assert.match(script, /`--remote-debugging-port=\$\{cdpPort\}`/);
   assert.doesNotMatch(script, /--headless/);
   assert.doesNotMatch(script, /remote-debugging-port=0/);
