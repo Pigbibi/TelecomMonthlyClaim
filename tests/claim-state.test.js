@@ -32,6 +32,7 @@ test('records an explicit already-claimed page as success without launching a br
       TELECOM_PHONE: '18500000000',
       TELECOM_ENTRY_URL: 'https://example.test/entry',
       TELECOM_ALREADY_CLAIMED: 'true',
+      DRY_RUN_BEFORE_FINAL_SUBMIT: 'false',
       FORCE_RUN: 'true',
     },
     stdio: 'pipe',
