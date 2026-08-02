@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "month": "2026-08",
+  "beijing": {
+    "year": "2026",
+    "month": "08",
+    "day": 2,
+    "hour": 12,
+    "minute": 5
+  },
+  "targetPackage": "voice200",
+  "productName": "互联网卡网龄享200分钟国内语音",
+  "expectedPlanId": "24BJ102053",
+  "successEvidence": "page"
+}
