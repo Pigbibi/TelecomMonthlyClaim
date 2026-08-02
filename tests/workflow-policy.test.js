@@ -60,6 +60,7 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /proxy stress check passed/);
   assert.match(workflowText, /Upload claim debug screenshots/);
   assert.match(workflowText, /artifacts\/claim-debug/);
+  assert.match(workflowText, /retention-days:\s*3/);
   assert.match(workflowText, /TELECOM_STEALTH_MODE: "false"/);
   assert.match(workflowText, /BROWSER_CHANNEL: chrome/);
   assert.match(workflowText, /BROWSER_CDP_URL: "http:\/\/127\.0\.0\.1:9222"/);
@@ -112,6 +113,7 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /TELECOM_SUCCESS_SMS_TIMEOUT_MS/);
   assert.match(localWorkflowText, /PUSHPLUS_RELAY_INBOX_TOKEN/);
   assert.match(localWorkflowText, /Upload claim debug screenshots/);
+  assert.match(localWorkflowText, /retention-days:\s*3/);
   assert.doesNotMatch(localWorkflowText, /git push origin HEAD:main/);
   assert.doesNotMatch(localWorkflowText, /Create issue on final failure/);
   assert.doesNotMatch(localWorkflowText, /Record run log on logs branch/);

@@ -321,6 +321,7 @@ jobs:
           name: claim-debug-${{ github.run_id }}
           path: artifacts/claim-debug/
           if-no-files-found: ignore
+          retention-days: 3
 
       - name: Cleanup Chrome CDP and SSH tunnel
         if: always()
