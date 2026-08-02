@@ -202,12 +202,21 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.doesNotMatch(script, /remote-debugging-port=0/);
 });
 
+test('native package clicks return before telecom click handlers run', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts/run-native-chrome-claim.js'), 'utf8');
+  assert.match(script, /setTimeout\(\(\) => item\.click\(\), 0\)/);
+  assert.match(script, /setTimeout\(\(\) => element\.click\(\), 0\)/);
+  assert.match(script, /Native Chrome target package click scheduled/);
+  assert.match(script, /isTransientPageEvaluationError/);
+});
+
 test('native Chrome redacts sensitive form fields before failure screenshots', () => {
   const script = fs.readFileSync(path.join(root, 'scripts/run-native-chrome-claim.js'), 'utf8');
   assert.match(script, /redactSensitivePageFields/);
   assert.match(script, /querySelectorAll\('input,textarea,\[contenteditable="true"\]'\)/);
   assert.match(script, /createTreeWalker\(document\.body, NodeFilter\.SHOW_TEXT\)/);
   assert.ok(script.indexOf('await redactSensitivePageFields(client)') < script.indexOf("Page.captureScreenshot', { format: 'png'"));
+  assert.match(script, /if \(!await redactSensitivePageFields\(client\)\) return/);
 });
 
 test('native Chrome login timeout diagnostics stay metadata-only', () => {

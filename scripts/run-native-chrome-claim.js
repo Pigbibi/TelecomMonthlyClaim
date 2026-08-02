@@ -89,6 +89,11 @@ function sanitizeDiagnosticMessage(value) {
     .slice(0, 160);
 }
 
+function isTransientPageEvaluationError(error) {
+  return /Runtime\.evaluate timed out|Execution context was destroyed|Cannot find (?:default )?(?:execution )?context/
+    .test(String(error?.message || ''));
+}
+
 function safeDiagnosticPath(value) {
   try {
     const url = new URL(String(value || ''));
@@ -630,6 +635,22 @@ async function clickPageElement(client, selectors, textPattern = '') {
   return true;
 }
 
+async function schedulePageElementClick(client, selectors) {
+  return !!await client.evaluate(`(() => {
+    const selectors = ${JSON.stringify(selectors)};
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const element = selectors.map(selector => document.querySelector(selector)).find(visible);
+    if (!element) return false;
+    setTimeout(() => element.click(), 0);
+    return true;
+  })()`, 5000);
+}
+
 async function submitLoginCode(client, code) {
   await clickPageElement(client, [], '^(我知道了|知道了|确定)$').catch(() => false);
   await wait(500);
@@ -695,11 +716,17 @@ async function submitLoginCode(client, code) {
 
 async function waitForPageState(client, expression, timeoutMs, errorMessage) {
   const deadline = Date.now() + timeoutMs;
+  let evaluationTimeouts = 0;
   while (Date.now() < deadline) {
-    if (await client.evaluate(expression)) return;
+    try {
+      if (await client.evaluate(expression, 5000)) return;
+    } catch (error) {
+      if (!isTransientPageEvaluationError(error)) throw error;
+      evaluationTimeouts += 1;
+    }
     await wait(500);
   }
-  throw new Error(errorMessage);
+  throw new Error(`${errorMessage} (evaluationTimeouts=${evaluationTimeouts})`);
 }
 
 async function selectTargetPackage(client, productName) {
@@ -733,7 +760,7 @@ async function selectTargetPackage(client, productName) {
         };
       })()`, 5000);
     } catch (error) {
-      if (!/Runtime\.evaluate timed out|Execution context was destroyed|Cannot find context/.test(error.message)) {
+      if (!isTransientPageEvaluationError(error)) {
         throw error;
       }
       evaluationTimeouts += 1;
@@ -799,16 +826,29 @@ async function selectTargetPackage(client, productName) {
     };
     const item = [...document.querySelectorAll('li')].find(node => visible(node) && (node.innerText || '').includes(name));
     if (!item) return false;
-    item.click();
+    setTimeout(() => item.click(), 0);
     return true;
-  })()`);
+  })()`, 5000);
   if (!selected) throw new Error('Native Chrome target package missing');
-  await wait(1000);
-  if (!await clickPageElement(client, ['#conduct'])) throw new Error('Native Chrome package submit button missing');
+  console.log('Native Chrome target package click scheduled');
+  await waitForPageState(
+    client,
+    `(() => {
+      const element = document.querySelector('#conduct');
+      const rect = element?.getBoundingClientRect();
+      return !!(rect && rect.width > 0 && rect.height > 0 && getComputedStyle(element).display !== 'none');
+    })()`,
+    30000,
+    'Native Chrome package submit button did not become ready',
+  );
+  if (!await schedulePageElementClick(client, ['#conduct'])) {
+    throw new Error('Native Chrome package submit button missing');
+  }
+  console.log('Native Chrome package submit click scheduled');
   await waitForPageState(
     client,
     `(() => !!document.querySelector('#activeName') && !!document.querySelector('#payConfirm'))()`,
-    20000,
+    30000,
     'Native Chrome confirm page did not become ready',
   );
   return { alreadyClaimed: false };
@@ -1085,7 +1125,7 @@ async function redactSensitivePageFields(client) {
 async function captureCdpScreenshot(client) {
   try {
     await client.send('Page.enable');
-    await redactSensitivePageFields(client);
+    if (!await redactSensitivePageFields(client)) return;
     const screenshot = await client.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
     if (!screenshot?.data) return;
     const artifactDir = path.join(root, 'artifacts', 'claim-debug');
