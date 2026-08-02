@@ -2599,6 +2599,27 @@ async function clickFinalAgreementIfPresent(page, config) {
   return true;
 }
 
+async function matchSuccessReceipt(receiptContext, config, matchedMessage) {
+  if (!receiptContext || !(config?.successSmsTimeoutMs > 0)) return false;
+  if (receiptContext.matched) return true;
+  try {
+    const receipt = await receiptContext.smsInbox.waitForReceipt({
+      since: receiptContext.since,
+      timeoutMs: config.successSmsTimeoutMs,
+      pollMs: config.smsPollMs,
+    });
+    if (!receipt) return false;
+    receiptContext.matched = receipt;
+    log(matchedMessage, { source: receipt.source });
+    return true;
+  } catch (err) {
+    log('Success receipt lookup unavailable; keeping browser result', {
+      error: mask(err.message),
+    });
+    return false;
+  }
+}
+
 async function waitForSuccess(page, timeoutMs, config, receiptContext = null) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -2609,30 +2630,17 @@ async function waitForSuccess(page, timeoutMs, config, receiptContext = null) {
       || /已办理成功|支付成功/.test(body)
       || (config?.productName && body.includes('业务名称') && body.includes(config.productName))
       || page.url().includes('preDeposit_result')
-    ) return true;
+    ) {
+      await matchSuccessReceipt(receiptContext, config, 'Success receipt matched after browser success');
+      return true;
+    }
     await sleep(2000);
   }
-  if (receiptContext && config?.successSmsTimeoutMs > 0) {
-    try {
-      const receipt = await receiptContext.smsInbox.waitForReceipt({
-        since: receiptContext.since,
-        timeoutMs: config.successSmsTimeoutMs,
-        pollMs: config.smsPollMs,
-      });
-      if (receipt) {
-        receiptContext.matched = receipt;
-        log('Success receipt matched after browser result remained ambiguous', {
-          source: receipt.source,
-        });
-        return true;
-      }
-    } catch (err) {
-      log('Success receipt fallback unavailable; keeping browser result', {
-        error: mask(err.message),
-      });
-    }
-  }
-  return false;
+  return matchSuccessReceipt(
+    receiptContext,
+    config,
+    'Success receipt matched after browser result remained ambiguous',
+  );
 }
 
 function ensureStateDir() { fs.mkdirSync('state', { recursive: true }); }
@@ -2794,4 +2802,5 @@ module.exports = {
   summarizePostDataForLog,
   summarizeResponseHeadersForLog,
   waitForTelecomApiReady,
+  waitForSuccess,
 };
