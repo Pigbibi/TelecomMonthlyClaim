@@ -1,0 +1,23 @@
+name: Usage question
+description: Ask for help with a sanitized configuration
+title: "[Question]: "
+labels: [question]
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I read the relevant guide and searched existing issues.
+          required: true
+        - label: I removed phone numbers, OTPs, URLs, credentials, endpoints, and screenshots.
+          required: true
+  - type: textarea
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Run mode, connectivity, SMS provider, and checks already performed
+    validations:
+      required: true

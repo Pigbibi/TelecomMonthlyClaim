@@ -89,7 +89,8 @@ test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
   assert.match(workflowText, /XVFB_PID/);
   assert.doesNotMatch(workflowText, /playwright install/);
   assert.doesNotMatch(workflowText, /BWG_SSH/);
-  assert.match(workflowText, /https:\/\/wapbj\.189\.cn\/wap2017\/index\/preDepositHighPic_check\.html\?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=43178673fef1756c9db3fd4216bf911454dffc23a55b56ca538af38fc915ad85/);
+  assert.match(workflowText, /TELECOM_ENTRY_URL: \$\{\{ secrets\.TELECOM_ENTRY_URL \|\| vars\.TELECOM_ENTRY_URL \|\| '' \}\}/);
+  assert.doesNotMatch(workflowText, /wxopenid=|campaignId=\d+/);
 });
 
 test('local self-hosted workflow targets mac runner and does not mutate repo state', () => {
@@ -112,6 +113,8 @@ test('local self-hosted workflow targets mac runner and does not mutate repo sta
   assert.match(localWorkflowText, /TELECOM_SUCCESS_SMS_SENDER/);
   assert.match(localWorkflowText, /TELECOM_SUCCESS_SMS_TIMEOUT_MS/);
   assert.match(localWorkflowText, /PUSHPLUS_RELAY_INBOX_TOKEN/);
+  assert.match(localWorkflowText, /TELECOM_ENTRY_URL: \$\{\{ secrets\.TELECOM_ENTRY_URL \|\| vars\.TELECOM_ENTRY_URL \|\| '' \}\}/);
+  assert.doesNotMatch(localWorkflowText, /wxopenid=|campaignId=\d+/);
   assert.match(localWorkflowText, /Upload claim debug screenshots/);
   assert.match(localWorkflowText, /retention-days:\s*3/);
   assert.doesNotMatch(localWorkflowText, /git push origin HEAD:main/);
