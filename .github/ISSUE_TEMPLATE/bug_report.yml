@@ -1,0 +1,53 @@
+name: Bug report
+description: Report reproducible behavior with sanitized details
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and read the relevant guide.
+          required: true
+        - label: I reproduced with probe or dry-run before considering a live submit.
+          required: true
+        - label: I removed phone numbers, OTPs, URLs, credentials, endpoints, and screenshots.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+  - type: textarea
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Run mode
+      options: [Probe, Dry-run, Live submit, Local tests]
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Connectivity mode and SMS provider
+      placeholder: "direct + pushplus"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Redacted output
+      render: text
+  - type: input
+    attributes:
+      label: Commit
+    validations:
+      required: true
