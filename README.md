@@ -48,6 +48,10 @@ The scheduled workflow starts at 08:00 Asia/Shanghai on days 1–3 of each month
 (`00:00 UTC`). Scheduled failures before the final retry day are recorded
 without raising a failure issue. A final-day failure may create a GitHub issue.
 
+Monthly runs are serialized so a delayed schedule or manual dispatch cannot
+submit the same claim concurrently. The independent log heartbeat is also
+serialized and capped at 10 minutes.
+
 ## Features
 
 - GitHub-hosted Chrome workflow and a separate manual self-hosted macOS workflow
