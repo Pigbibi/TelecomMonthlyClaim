@@ -6,6 +6,16 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const workflowText = fs.readFileSync(path.join(root, '.github/workflows/monthly-claim.yml'), 'utf8');
 const localWorkflowText = fs.readFileSync(path.join(root, '.github/workflows/local-selfhosted-claim.yml'), 'utf8');
+const heartbeatWorkflowText = fs.readFileSync(path.join(root, '.github/workflows/log-heartbeat.yml'), 'utf8');
+
+test('scheduled hosted workflows are serialized and bounded', () => {
+  assert.match(workflowText, /group:\s+monthly-beijing-telecom-claim/);
+  assert.match(workflowText, /cancel-in-progress:\s+false/);
+  assert.match(workflowText, /timeout-minutes:\s+35/);
+  assert.match(heartbeatWorkflowText, /group:\s+repository-log-heartbeat/);
+  assert.match(heartbeatWorkflowText, /cancel-in-progress:\s+false/);
+  assert.match(heartbeatWorkflowText, /timeout-minutes:\s+10/);
+});
 
 test('monthly workflow does not depend on Pigbibi private home proxy actions', () => {
   assert.doesNotMatch(workflowText, /Pigbibi\/HomeProxyActions/);
