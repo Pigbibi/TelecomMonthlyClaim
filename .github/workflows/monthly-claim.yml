@@ -313,10 +313,20 @@ jobs:
               ;;
           esac
 
+      - name: Acquire workflow-scoped SMS intercept lease
+        id: intercept_lease
+        if: steps.claim_plan.outputs.should_run == 'true' && github.event.inputs.probe_only != 'true'
+        run: node scripts/manage-intercept-lease.js acquire telecom-claim-silent
+
       - name: Run claim via real Chrome CDP
         id: claim
         if: steps.claim_plan.outputs.should_run == 'true'
         run: xvfb-run -a bash scripts/run-real-chrome-claim.sh
+
+      - name: Release workflow-scoped SMS intercept lease
+        if: always() && steps.intercept_lease.outcome == 'success'
+        continue-on-error: true
+        run: node scripts/manage-intercept-lease.js release telecom-claim-silent
 
       - name: Upload claim debug screenshots
         if: always() && steps.claim_plan.outputs.should_run == 'true'

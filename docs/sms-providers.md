@@ -49,8 +49,14 @@ PUSHPLUS_RELAY_INBOX_TOKEN=<shared inbox bearer token>
 ```
 
 The relay inbox is preferred over direct PushPlus Open API access when both are
-configured. Use the `telecom-claim-silent` intercept preset on the relay only
-after verifying its sender, product, and plan filters.
+configured. The included workflows acquire a bounded `telecom-claim-silent`
+lease immediately before the claim step and release it afterward. Do not keep
+that preset enabled statically on the relay: static interception would continue
+silencing verification messages after the claim workflow ends.
+
+The workflow run ID and attempt form a unique lease ID. A one-hour KV TTL is a
+fallback for cancellation or runner loss when the always-run release step does
+not execute.
 
 ## HTTP inbox
 

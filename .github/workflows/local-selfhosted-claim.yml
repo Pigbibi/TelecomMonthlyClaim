@@ -222,8 +222,18 @@ jobs:
           test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
 
+      - name: Acquire workflow-scoped SMS intercept lease
+        id: intercept_lease
+        if: github.event.inputs.probe_only != 'true'
+        run: node scripts/manage-intercept-lease.js acquire telecom-claim-silent
+
       - name: Run claim via real Chrome CDP
         run: bash scripts/run-real-chrome-claim.sh
+
+      - name: Release workflow-scoped SMS intercept lease
+        if: always() && steps.intercept_lease.outcome == 'success'
+        continue-on-error: true
+        run: node scripts/manage-intercept-lease.js release telecom-claim-silent
 
       - name: Upload claim debug screenshots
         if: always()
