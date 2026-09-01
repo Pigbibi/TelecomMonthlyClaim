@@ -1137,6 +1137,7 @@ function chooseVisionMoveX({
   startX,
   canvasWidth,
   imageWidth,
+  visionMoveX,
 }) {
   const scale = Number(screenshotScaleX) > 0 ? Number(screenshotScaleX) : 1;
   const gapCssX = Number(sourceX) + Number(naturalX) / scale;
@@ -1144,16 +1145,15 @@ function chooseVisionMoveX({
   const width = Number(canvasWidth) || Number(imageWidth) / scale;
   const ratio = Number.isFinite(width) && width > 60 ? (width - 40) / (width - 60) : 1;
   const ranked = [
-    // Prefer geometry grounded in the cropped puzzle image.
-    cssFromCrop,
+    Number(visionMoveX),
     gapCssX - Number(sliderX),
     gapCssX - Number(startX),
+    cssFromCrop,
     renderedPuzzleMoveX(sourceX, naturalX, scale, sliderX, width),
-    cssFromCrop * ratio,
     (gapCssX - Number(sliderX)) * ratio,
   ]
     .map(value => Math.round(Number(value)))
-    .filter((value, index, all) => Number.isFinite(value) && value >= 40 && value <= 360 && all.indexOf(value) === index);
+    .filter((value, index, all) => Number.isFinite(value) && value >= 40 && value <= 280 && all.indexOf(value) === index);
 
   if (!ranked.length) {
     return {
@@ -1492,6 +1492,7 @@ async function solvePuzzleWithVisionFallback(client) {
     startX: crop.startX,
     canvasWidth: crop.canvasWidth,
     imageWidth: crop.imageWidth,
+    visionMoveX: vision.moveX,
   });
   if (!(chosen.moveX >= 40)) {
     return {
@@ -1637,8 +1638,8 @@ async function solveConfirmationSlider(client) {
       info = next;
     }
 
-    // Always drag the distance for THIS challenge. Prefer crop-relative geometry.
-    const moveX = Math.round(Number(info.cssFromCrop >= 40 ? info.cssFromCrop : info.moveX));
+    // Always drag the distance for THIS challenge. Prefer model-reported move.
+    const moveX = Math.round(Number(info.moveX));
     console.log('Native Chrome confirmation slider match', {
       method: info.method,
       moveX,

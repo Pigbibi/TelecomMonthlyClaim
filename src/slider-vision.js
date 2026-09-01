@@ -38,9 +38,10 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
   const prompt = [
     `这是北京电信滑块验证码截图。图片宽度为 ${imageWidth} 像素。`,
     correctY != null ? `缺口大致纵坐标 correctY=${correctY}。` : '',
-    '请找出拼图缺口左边缘相对本图左边缘的水平像素坐标 X（整数）。',
-    'X 必须落在约 40 到 图片宽度-40 之间，表示缺口在图中的位置，不是拖动距离。',
-    '只输出 JSON：{"x":number,"confidence":number,"reason":string}',
+    '请同时给出：',
+    '1) x：拼图缺口左边缘相对本图左边缘的水平像素坐标；',
+    '2) move：底部滑块按钮需要向右拖动的像素距离（通常约 40-260）。',
+    '只输出 JSON：{"x":number,"move":number,"confidence":number,"reason":string}',
   ].filter(Boolean).join('');
 
   let body;
@@ -155,12 +156,16 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
     return { ok: false, reason: 'vision-bad-json', body: outText.slice(0, 300) };
   }
   const x = Math.round(Number(parsed.x));
-  if (!Number.isFinite(x) || x < 40 || x > Math.max(80, imageWidth - 20)) {
+  const move = Math.round(Number(parsed.move ?? parsed.distance ?? parsed.sliderDistance));
+  const hasMove = Number.isFinite(move) && move >= 40 && move <= 280;
+  const hasX = Number.isFinite(x) && x >= 40 && x <= Math.max(80, imageWidth - 20);
+  if (!hasMove && !hasX) {
     return { ok: false, reason: 'vision-x-out-of-range', parsed, imageWidth };
   }
   return {
     ok: true,
-    naturalX: x,
+    naturalX: hasX ? x : move,
+    moveX: hasMove ? move : undefined,
     confidence: Number(parsed.confidence) || 0,
     reason: parsed.reason || '',
     method: 'vision',
