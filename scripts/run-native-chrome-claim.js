@@ -679,10 +679,10 @@ async function openSliderChallenge(client, phone) {
     })()`);
     if (state?.ready) return;
     if (state?.busy) throw new Error('Native Chrome getSliderChallenge was rejected before Playwright attachment');
-    // Probe mode deliberately blocks the SMS endpoints and never submits the
-    // challenge. A visible challenge paired with the successful challenge API
-    // response is therefore the complete, side-effect-free assertion.
-    if (probeOnly && state?.challengeVisible && networkEvents.some(event => (
+    // Redesigned telecom login shows a visible puzzle popup after getSliderChallenge
+    // succeeds, before legacy image IDs or canvas/handle nodes settle. Production
+    // continues into the canvas solver from that point; probe-only stops afterward.
+    if (state?.challengeVisible && networkEvents.some(event => (
       event.phase === 'response'
       && /getSliderChallenge/i.test(event.pathname)
       && event.status >= 200
