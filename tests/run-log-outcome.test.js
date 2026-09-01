@@ -13,6 +13,14 @@ test('uses state status for attempted claim even when workflow step is green', (
   }), 'failed');
 });
 
+test('surfaces skipped_unavailable from monthly state', () => {
+  assert.equal(resolveClaimOutcome({
+    shouldRun: true,
+    stepOutcome: 'success',
+    stateStatus: 'skipped_unavailable',
+  }), 'skipped_unavailable');
+});
+
 test('keeps skipped outcome when claim was not attempted', () => {
   assert.equal(resolveClaimOutcome({
     shouldRun: false,

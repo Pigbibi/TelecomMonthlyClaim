@@ -70,3 +70,26 @@ test('marks non-matching offers as unavailable instead of claiming them', () => 
   assert.equal(gate.state, 'unavailable');
   assert.deepEqual(gate.packageLabels, ['3GB通用流量-网龄活动专用']);
 });
+
+test('uses preActiveMeta offers when DOM labels are incomplete', () => {
+  const gate = classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '加载中',
+    packageLabels: [],
+    metaOffers: ['3GB通用流量-网龄活动专用'],
+    productName: '互联网卡网龄享200分钟国内语音',
+  });
+  assert.equal(gate.state, 'unavailable');
+  assert.deepEqual(gate.packageLabels, ['3GB通用流量-网龄活动专用']);
+});
+
+test('summary includes page family', () => {
+  const summary = summarizePackageGate(classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '互联网卡网龄享200分钟国内语音',
+    packageLabels: ['互联网卡网龄享200分钟国内语音'],
+    productName: '互联网卡网龄享200分钟国内语音',
+  }));
+  assert.equal(summary.state, 'ready');
+  assert.equal(summary.pageFamily, 'echnwap');
+});
