@@ -646,11 +646,27 @@ async function openSliderChallenge(client, phone) {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     const state = await client.evaluate(`(() => {
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0
+          && style.display !== 'none' && style.visibility !== 'hidden';
+      };
       const bg = document.querySelector('#slider_bg_image');
       const block = document.querySelector('#slider_block_image');
+      const root = document.querySelector('.puzzle-verify-popup,.captcha-wrapper') || document;
+      const canvas = [...root.querySelectorAll('canvas')]
+        .find(element => visible(element) && element.width >= 100 && element.height >= 50);
+      const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+        .map(selector => root.querySelector(selector))
+        .find(visible);
       const message = document.querySelector('#slider_check_msg,.slider-check-msg,.puzzle-msg')?.innerText?.trim() || '';
       return {
-        ready: !!(bg?.complete && bg.naturalWidth > 40 && block?.complete && block.naturalWidth > 10),
+        ready: !!(
+          (bg?.complete && bg.naturalWidth > 40 && block?.complete && block.naturalWidth > 10)
+          || (canvas && slider)
+        ),
         busy: /服务繁忙|请稍后再试/.test(message),
       };
     })()`);
@@ -750,6 +766,10 @@ async function dragSliderTrusted(client, { startX, startY, moveX }) {
 async function solveSliderChallenge(client) {
   const match = await client.evaluate(`(${computeSliderImageMatchInPage.toString()})({})`, 30000);
   if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
+    if (match?.reason === 'images-not-ready') {
+      console.log('Native Chrome legacy login slider images unavailable; using canvas solver.');
+      return solveConfirmationSlider(client);
+    }
     throw new Error(`Native Chrome slider match failed: ${match?.reason || 'invalid-result'}`);
   }
   console.log('Native Chrome slider match', {
