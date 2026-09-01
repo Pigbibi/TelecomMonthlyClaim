@@ -1,16 +1,17 @@
 # Configuration
 
-Use GitHub Actions secrets for credentials and account data. Use repository
-variables only for non-secret behavior. A private deployment repository is
-recommended because campaign URLs and workflow metadata may still reveal
-account-specific context.
+Use GitHub Actions **secrets** for credentials and account-bound data. Use
+repository **variables** only for non-secret behavior.
+
+This repository is open-source. Do **not** commit personal campaign links,
+`wxopenid` values, phone numbers, or provider tokens. Prefer a private
+deployment fork/repo for live secrets, or keep secrets only in GitHub Actions /
+local `.env` files that stay untracked.
 
 The local [`.env.example`](../.env.example) uses placeholders and safe dry-run
 defaults.
 
 ## Workflow inputs
-
-The monthly and manual workflows expose these controls:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
@@ -25,13 +26,15 @@ The self-hosted diagnostic workflow defaults to `dry_run=true` and
 Probe mode is the safest first check. Dry-run may still request and process SMS
 verification codes.
 
-## Required account settings
+## Account and package settings
 
 | Name | Storage | Purpose |
 | --- | --- | --- |
 | `TELECOM_PHONE` | secret | Authorized Beijing Telecom phone number |
-| `TELECOM_ENTRY_URL` | secret preferred; variable fallback | Current HTTPS campaign entry URL |
+| `TELECOM_ENTRY_URL` | **secret** (variable fallback only if non-sensitive) | Current HTTPS campaign entry URL |
 | `TELECOM_TARGET_PACKAGE` | variable | `voice200` or `5g`; defaults to `voice200` |
+| `TELECOM_PRODUCT_NAME` | variable | Override product label; otherwise taken from package preset |
+| `TELECOM_EXPECTED_PLAN_ID` | variable | Override plan id; otherwise taken from package preset |
 
 Package presets:
 
@@ -40,7 +43,7 @@ Package presets:
 | `voice200` | 互联网卡网龄享200分钟国内语音 | `24BJ102053` |
 | `5g` | 互联网卡网龄享5GB国内通用流量 | `24BJ100433` |
 
-To use another package, set all of:
+Custom package:
 
 ```text
 TELECOM_TARGET_PACKAGE=custom
@@ -48,8 +51,54 @@ TELECOM_PRODUCT_NAME=exact product name shown by the carrier
 TELECOM_EXPECTED_PLAN_ID=exact plan identifier
 ```
 
-The script validates the selected product and confirmation SMS against these
-values before final submission.
+## Entry URL: open-source vs deployment
+
+Open-source code ships **gates and recipes**, not personal campaign values.
+
+### What belongs in code
+
+For the stock `voice200` recipe the runner expects:
+
+1. Entry path family `wap2017` + `preDepositHighPic_check.html`
+2. After SMS login, stay on `wap2017` (typically `preDepositCfg_*`)
+3. Treat `echnwap/preDepositCfq_*` (and other echnwap package shells) as
+   `wrong_activity` hard failure — never soft-skip into unconfigured data packs
+
+### What belongs in each deployment
+
+| Name | Storage | Default | Purpose |
+| --- | --- | --- | --- |
+| `TELECOM_ENTRY_URL` | secret | required | Full share link for **your** eligible account |
+| `TELECOM_ENTRY_REQUIRED_PARAMS` | variable | `campaignId,channelId,wxopenid` | Query **keys** that must be present. Values are never compared. Set empty to disable. |
+| `TELECOM_EXPECTED_CHANNEL_ID` | variable | unset | Optional exact `channelId` pin for **your** fork |
+
+Before navigation the runner:
+
+1. Logs a redacted entry fingerprint (`hasWxopenid`, `channelId`, `campaignIdHint`, …)
+2. Asserts required query keys from `TELECOM_ENTRY_REQUIRED_PARAMS`
+3. Optionally pins `channelId` when `TELECOM_EXPECTED_CHANNEL_ID` is set
+4. Asserts the HighPic path/family hard gate
+
+Placeholder shape (safe to document; **do not** commit real openids):
+
+```text
+https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=<id>&version=V1&channelId=<channel>&wxopenid=<openid>
+```
+
+Notes:
+
+- `http://wapbj.189.cn/...` is normalized to `https://` automatically.
+- Put the real share link only in `TELECOM_ENTRY_URL`.
+- Forks that always use one channel (for example `dx531`) should set
+  `TELECOM_EXPECTED_CHANNEL_ID` as a repository variable — not in source.
+
+### Monthly operator checklist
+
+1. Confirm `TELECOM_ENTRY_URL` still matches the placeholder shape and required keys.
+2. Prefer a private-window check of the **same** URL before relying on a warm browser.
+3. Run `dry_run=true` once near month start if the campaign may have rotated.
+4. On `wrong_activity` or missing keys: refresh the WeChat/official share link and
+   update the secret — do not claim unconfigured alternate packs.
 
 ## Timing and retry settings
 
@@ -64,13 +113,7 @@ values before final submission.
 | `FAIL_ONLY_FINAL_DAY` | scheduled runs set `true` | Suppress scheduled failure before the final retry day |
 | `FINAL_RETRY_DAY` | `3` | Day of month considered the final retry |
 
-Increasing attempts or shortening polling intervals can request more OTPs or
-increase provider traffic. Change them only after reviewing the failure mode.
-
 ## Browser settings
-
-The included workflows start a real Chrome process and connect through CDP.
-Common operator-facing settings:
 
 | Variable | Workflow value | Purpose |
 | --- | --- | --- |
@@ -82,20 +125,14 @@ Common operator-facing settings:
 | `TELECOM_SKIP_ORIGIN_WARMUP` | `true` | Open the configured entry directly |
 | `TELECOM_SLIDER_MODE` | `api` | Use the supported current slider submission path |
 
-These settings describe the browser harness, not a promise that a carrier
-challenge will remain compatible.
+## Slider matching
 
-## Optional visual service
-
-The script can ask a configured visual API for a second opinion on the current
-slider challenge.
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
 Slider geometry defaults to **local canvas matching** (`flat-component` /
 rendered crop). Vision AI is off unless `TELECOM_VISION_FALLBACK=true`.
 CodexGateway is not injected by the monthly claim workflow.
 
+| Setting | Default | Purpose |
+| --- | --- | --- |
 | `GEMINI_API_KEY` | unset | Only used when vision fallback is explicitly enabled |
 | `TELECOM_VISION_FALLBACK` | unset/`false` | Set `true` to allow Gemini/HTTP after local match fails |
 | `TELECOM_VISION_URL` | Gemini generate-content endpoint | API endpoint for optional fallback |
@@ -113,7 +150,7 @@ The monthly workflow writes `state/YYYY-MM.json` to `main`.
 | --- | --- | --- |
 | `success` | Claimed or already claimed | Skip later ordinary runs |
 | `skipped_unavailable` | Logged in on the **expected** Cfg activity, but configured SKU not in offers | Soft skip; not an engineering failure issue |
-| `failed` | Login / slider / proxy / submit error, or **wrong activity page** (for example echnwap `preDepositCfq_*`) | Retry; issue only on final retry day |
+| `failed` | Login / slider / proxy / submit error, wrong entry shape, or **wrong activity page** | Retry; issue only on final retry day |
 
 A later engineering failure does not overwrite an existing `success` or
 `skipped_unavailable` state.
@@ -122,36 +159,23 @@ A later engineering failure does not overwrite an existing `success` or
 If the carrier page clearly reports an already-completed claim, the run records
 that page as success evidence instead of requesting another confirmation SMS.
 
-### Expected activity hard gate (`voice200`)
+## Warm browser vs cold automation
 
-Only continue when both are true:
+A personal browser often keeps WAF cookies and may show a fuller offer list
+without a slider. GitHub Actions uses a fresh Chrome profile
+(`TELECOM_CLEAR_BROWSER_DATA=true`) and the SMS unlog path.
 
-1. Entry URL is `wap2017` `preDepositHighPic_check.html` (orange 成长礼 shell).
-2. After SMS login the session stays on `wap2017` (typically `preDepositCfg_*`).
+Observed cold divert (2026-09) with an incomplete or wrong entry landed on
+`/echnwap/preDepositCfq_list` (data-only). With a complete HighPic share link
+(`campaignId` + `channelId` + `wxopenid`), cold CI reached `wap2017`
+`preDepositCfg_*` with `voice200`.
 
-Landing on `echnwap/preDepositCfq_*` (or any other echnwap package shell) is a
-**hard failure** (`wrong_activity`), not a soft skip. Do not claim alternate
-data packs from the diverted catalog.
+Recovery order:
 
-### Warm browser vs cold automation
-
-Your personal browser often keeps WAF cookies and may stay on the `wap2017`
-entry UI with a fuller offer list and no slider. GitHub Actions uses a fresh
-Chrome profile (`TELECOM_CLEAR_BROWSER_DATA=true`) and the SMS unlog path.
-
-Observed cold-login route (2026-09): after `validRandUnlog` succeeds the site
-calls `preDepositInitNew` / `preActiveMeta` and lands on
-`/echnwap/preDepositCfq_list` with data-only offers (1GB/2GB/3GB). August cold
-CI still reached `wap2017` `preDepositCfg_*` with `voice200`, so this is a
-carrier post-login catalog/routing change, not missing SSH tunnel.
-
-Recovery options, in order:
-1. Private-window check of the same entry (no existing cookies). If you also
-   only see data packs, the campaign cold catalog no longer includes voice.
-2. Fresh WeChat / official share entry for the September voice entitlement, then
-   update `TELECOM_ENTRY_URL` (keep secrets out of git).
-3. Do not claim unconfigured 3GB; leave the run failed on `wrong_activity` until
-   a correct Cfg entry/session is available.
+1. Private-window check of the same entry. Data-only there means the cold
+   catalog likely has no voice for that link.
+2. Refresh the official/WeChat share entry and update `TELECOM_ENTRY_URL`.
+3. Leave `wrong_activity` failed; do not claim unconfigured 3GB packs.
 
 Do not treat a warm local session as proof that CI will see the same packages.
 

@@ -55,7 +55,8 @@ main 保存月份状态 + logs 分支保存脱敏运行元数据
 - 直连、HTTP proxy、SSH tunnel 和 proxy pool 网络模式。
 - PushPlus Open API、受保护 relay inbox 和通用 HTTP SMS inbox。
 - 按发件人、手机号、产品和方案匹配登录及确认短信。
-- 可选对当前滑块 challenge 使用视觉二次判定。
+- 可选对当前滑块 challenge 使用视觉二次判定（默认关闭；本地 canvas 优先）。
+- 通过 env 校验入口 URL 形状（必填 query 键 + 可选 channel 钉扎），不把个人活动参数写进源码。
 - 按月成功状态，普通运行不会重复办理。
 - 脱敏运行日志，不记录手机号、验证码、token、私钥或页面正文。
 
@@ -85,7 +86,7 @@ Repository secrets：
 | Secret | 用途 |
 | --- | --- |
 | `TELECOM_PHONE` | 你有权管理的北京电信手机号 |
-| `TELECOM_ENTRY_URL` | 当前活动入口；URL 可能包含账号标识，建议保存为 secret |
+| `TELECOM_ENTRY_URL` | 完整活动分享链接（可能含 `wxopenid`）；勿写入 git |
 | `PUSHPLUS_TOKEN` | 直接读取 PushPlus Open API 时使用的用户 token |
 | `PUSHPLUS_SECRET_KEY` | PushPlus Open API secretKey |
 
@@ -94,11 +95,17 @@ Repository variables：
 | Variable | 示例 | 用途 |
 | --- | --- | --- |
 | `TELECOM_TARGET_PACKAGE` | `voice200` | `voice200` 或 `5g` preset |
+| `TELECOM_ENTRY_REQUIRED_PARAMS` | `campaignId,channelId,wxopenid` | 入口 URL 必须带有的 query **键名** |
+| `TELECOM_EXPECTED_CHANNEL_ID` | `dx531` | 可选：你的部署固定 `channelId` |
 | `SMS_INBOX_PROVIDER` | `pushplus` | `pushplus` 或 `http` |
 | `TELECOM_CONNECTIVITY_MODE` | `direct` | 网络入口模式 |
 
-活动 URL 可能包含账号或活动标识。账号专属部署应使用私有仓库，并把 URL 保存为
-secret。只有确认 URL 不含敏感值时，才使用 workflow 支持的 repository variable fallback。
+开源仓只校验路径族、必填 query **键名**，以及你在 fork 上可选配置的 channel
+钉扎；不会内置个人的 `campaignId` / `wxopenid` / channel。详见
+[Configuration](docs/configuration.md#entry-url-open-source-vs-deployment)。
+
+真实分享链接请只放在 secret。仅当 URL 不含账号标识时，才用 repository variable
+作为 `TELECOM_ENTRY_URL` 的 fallback。
 
 ### 3. 运行 probe
 

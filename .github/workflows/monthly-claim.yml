@@ -39,6 +39,8 @@ jobs:
     env:
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
       TELECOM_ENTRY_URL: ${{ secrets.TELECOM_ENTRY_URL || vars.TELECOM_ENTRY_URL || '' }}
+      TELECOM_ENTRY_REQUIRED_PARAMS: ${{ vars.TELECOM_ENTRY_REQUIRED_PARAMS || 'campaignId,channelId,wxopenid' }}
+      TELECOM_EXPECTED_CHANNEL_ID: ${{ vars.TELECOM_EXPECTED_CHANNEL_ID || '' }}
       TELECOM_TARGET_PACKAGE: ${{ vars.TELECOM_TARGET_PACKAGE || 'voice200' }}
       TELECOM_PRODUCT_NAME: ${{ vars.TELECOM_PRODUCT_NAME || '' }}
       TELECOM_EXPECTED_PLAN_ID: ${{ vars.TELECOM_EXPECTED_PLAN_ID || '' }}

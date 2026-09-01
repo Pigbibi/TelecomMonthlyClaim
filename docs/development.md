@@ -32,32 +32,38 @@ default:
 
 ```bash
 TELECOM_PHONE='test-number' \
-TELECOM_ENTRY_URL='https://wapbj.189.cn/current-entry' \
+TELECOM_ENTRY_URL='https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=replace&version=V1&channelId=replace&wxopenid=replace' \
 TELECOM_TARGET_PACKAGE=voice200 \
+TELECOM_ENTRY_REQUIRED_PARAMS='campaignId,channelId,wxopenid' \
 SMS_INBOX_PROVIDER=pushplus \
 PUSHPLUS_TOKEN='replace-me' \
 PUSHPLUS_SECRET_KEY='replace-me' \
 npm run claim:cdp
 ```
 
-This can still request real SMS messages and send challenge data to a configured
-visual provider. Use workflow probe mode when the goal is only to verify page
-loading without submitting the login challenge.
+This can still request real SMS messages. Vision fallback stays off unless you
+set `TELECOM_VISION_FALLBACK=true`. Use workflow probe mode when the goal is
+only to verify page loading without submitting the login challenge.
 
 ## Common failures
 
-### Entry page cannot be classified
+### Entry URL shape / activity rejected
 
-- Confirm `TELECOM_ENTRY_URL` is current and uses HTTPS.
-- Run probe mode and inspect the redacted page classification.
-- Check the effective connectivity mode and proxy health.
-- Treat an unknown page or popup as a failure; do not add a broad selector that
-  clicks through unrecognized content.
+- Confirm `TELECOM_ENTRY_URL` is HTTPS (or `http://wapbj.189.cn`, which is
+  normalized) and includes the keys in `TELECOM_ENTRY_REQUIRED_PARAMS`.
+- If you set `TELECOM_EXPECTED_CHANNEL_ID`, the entry `channelId` must match.
+- Stock `voice200` expects HighPic entry and post-login `wap2017` Cfg pages;
+  `echnwap/preDepositCfq_*` is a hard `wrong_activity` failure.
+- Run probe mode and inspect the redacted entry fingerprint / route diagnostics.
+- Refresh the official share link when the campaign rotates; do not claim
+  unconfigured alternate packs.
 
 ### Slider challenge fails
 
 - Confirm the workflow started real Chrome and connected to the expected CDP
   page.
+- Prefer local canvas match logs (`flat-component` / `canvas-transparent-*`)
+  before enabling vision fallback.
 - Compare the current challenge with local fixtures before changing matching
   thresholds.
 - Keep retry counts bounded to avoid repeated challenge or SMS requests.

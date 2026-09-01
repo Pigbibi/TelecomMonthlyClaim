@@ -13,6 +13,9 @@ function pageFamilyFromUrl(url) {
  * voice200 (and default) expect the orange HighPic entry and wap2017 Cfg
  * confirm/list after SMS login. The Sep cold divert into echnwap Cfq is the
  * wrong activity shell and must fail closed instead of soft-skipping.
+ *
+ * Query-shape pins (required params / exact channelId) stay out of this
+ * recipe — forks configure them via TELECOM_ENTRY_* env (see assertEntrySecretShape).
  */
 function expectedActivityForTarget(targetPackage = 'voice200') {
   void targetPackage;
@@ -22,6 +25,68 @@ function expectedActivityForTarget(targetPackage = 'voice200') {
     entryPathPattern: /preDepositHighPic_check\.html/i,
     postLoginPathPattern: /preDepositCfg_/i,
     forbiddenPostLoginPathPattern: /preDepositCfq_/i,
+  };
+}
+
+function parseCsvList(value) {
+  return String(value || '')
+    .split(/[,\s]+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Resolve entry-URL shape policy from env (open-source friendly).
+ * - TELECOM_ENTRY_REQUIRED_PARAMS: comma list of query keys that must be present
+ *   (default: campaignId,channelId,wxopenid — values never compared)
+ * - TELECOM_EXPECTED_CHANNEL_ID: optional exact channelId pin (unset = no pin)
+ * Set TELECOM_ENTRY_REQUIRED_PARAMS="" to disable presence checks.
+ */
+function resolveEntrySecretPolicy(env = process.env) {
+  const requiredRaw = env.TELECOM_ENTRY_REQUIRED_PARAMS;
+  const requiredParams = requiredRaw === undefined
+    ? ['campaignId', 'channelId', 'wxopenid']
+    : parseCsvList(requiredRaw);
+  return {
+    requiredParams,
+    expectedChannelId: String(env.TELECOM_EXPECTED_CHANNEL_ID || '').trim(),
+  };
+}
+
+/**
+ * Fail closed when TELECOM_ENTRY_URL drifts from configured query shape.
+ * Never compares secret values (campaignId / wxopenid contents).
+ */
+function assertEntrySecretShape(fingerprint = {}, policy = resolveEntrySecretPolicy()) {
+  const issues = [];
+  const keys = new Set(
+    Array.isArray(fingerprint.queryKeys)
+      ? fingerprint.queryKeys.map(key => String(key || ''))
+      : [],
+  );
+  // Fingerprint booleans cover common keys even if queryKeys is incomplete.
+  if (fingerprint.hasCampaignId) keys.add('campaignId');
+  if (fingerprint.hasWxopenid) keys.add('wxopenid');
+  if (fingerprint.channelId) keys.add('channelId');
+
+  for (const name of policy.requiredParams || []) {
+    if (!keys.has(name)) issues.push(`missing ${name}`);
+  }
+  if (policy.expectedChannelId
+    && String(fingerprint.channelId || '') !== policy.expectedChannelId) {
+    issues.push(
+      `channelId=${fingerprint.channelId || '(empty)'} expected ${policy.expectedChannelId}`,
+    );
+  }
+  if (issues.length === 0) {
+    return { ok: true, state: 'ok', issues: [], policy };
+  }
+  return {
+    ok: false,
+    state: 'wrong_entry_secret',
+    issues,
+    policy,
+    reason: `TELECOM_ENTRY_URL shape invalid: ${issues.join('; ')}`,
   };
 }
 
@@ -168,6 +233,8 @@ module.exports = {
   expectedActivityForTarget,
   classifyActivityRoute,
   summarizeEntryFingerprint,
+  resolveEntrySecretPolicy,
+  assertEntrySecretShape,
   looksLikeOfferLabel,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
