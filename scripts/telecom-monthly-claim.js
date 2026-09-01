@@ -18,6 +18,23 @@ const { planTelecomPageAction } = require('../src/page-planner');
 const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { evaluateSliderImageMatch } = require('../src/slider-local-match');
 const { readClaimStateStatus, shouldWriteFailureState } = require('../src/claim-state');
+const {
+  assertConfiguredEntryUrl,
+  classifyActivityRoute,
+} = require('../src/offer-inventory');
+const { classifyPackageGate, summarizePackageGate } = require('../src/package-gate');
+
+function assertLandedLoginEntryActivity(page, config) {
+  const activity = classifyActivityRoute({
+    url: page.url(),
+    phase: 'entry',
+    targetPackage: config.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  });
+  if (!activity.ok) {
+    throw new Error(`Wrong activity page after entry navigation: ${activity.reason}`);
+  }
+  return activity;
+}
 
 function loadChromium() {
   const { chromium } = require('playwright');
@@ -1055,10 +1072,11 @@ async function executeTargetPackageSelection(page, config) {
   const { pageFamilyFromUrl } = require('../src/offer-inventory');
   const aliases = productMatchAliases(config.productName);
   const pageFamily = pageFamilyFromUrl(page.url());
+  if (pageFamily === 'echnwap' || /preDepositCfq_/i.test(page.url())) {
+    throw new Error(`Wrong activity shell before package select: ${pageFamily} ${page.url()}`);
+  }
   log('Selecting target package', { pageFamily, productName: config.productName, aliases });
-  const rowSelectors = pageFamily === 'echnwap'
-    ? ['li', '[class*="card"]', '[class*="package"]', '[class*="plan"]', 'button']
-    : ['li'];
+  const rowSelectors = ['li'];
   let matched = null;
   for (const alias of aliases) {
     for (const selector of rowSelectors) {
@@ -1078,7 +1096,6 @@ async function executeTargetPackageSelection(page, config) {
   const checked = await page.locator('li.checked').innerText().catch(() => '');
   const compactChecked = String(checked || '').replace(/\s+/g, '');
   if (aliases.length && !aliases.some(alias => compactChecked.includes(alias))) {
-    // echnwap may not use li.checked; continue if click landed.
     const stillVisible = await matched.isVisible().catch(() => false);
     if (!stillVisible && !compactChecked) throw new Error(`Target package not selected: ${checked}`);
   }
@@ -1626,6 +1643,12 @@ function withCacheBuster(rawUrl) {
 }
 
 async function gotoLoginEntryPage(page, config, reason) {
+  const configured = assertConfiguredEntryUrl(config.entryUrl, {
+    targetPackage: config.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  });
+  if (!configured.ok) {
+    throw new Error(`Wrong entry URL before login navigation: ${configured.reason}`);
+  }
   // June baseline: go straight to entry. Origin warmup / cache-bust reloads look more automated
   // and can burn WAF sessions before the slider challenge is even requested.
   if (!config.skipOriginWarmup && !config.minimalLogin && (/attempt-1$/i.test(reason) || reason === 'entry')) {
@@ -1642,6 +1665,7 @@ async function gotoLoginEntryPage(page, config, reason) {
         const form = await detectLoginFormState(page);
         if (entryReady) {
           await warmupTelecomBehavior(page, config);
+          assertLandedLoginEntryActivity(page, config);
           log('Reused validated login entry page', {
             reason,
             strategy: `${candidate.label}-reuse`,
@@ -1685,6 +1709,7 @@ async function gotoLoginEntryPage(page, config, reason) {
       const form = await detectLoginFormState(page);
       if (entryReady) {
         await warmupTelecomBehavior(page, config);
+        assertLandedLoginEntryActivity(page, config);
         log('Login entry ready', {
           reason,
           strategy: candidate.label,
@@ -1730,6 +1755,7 @@ async function gotoLoginEntryPage(page, config, reason) {
     }
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     if (await waitForLoginEntry(page, entryTimeoutMs)) {
+      assertLandedLoginEntryActivity(page, config);
       log('Login entry ready', { reason, strategy: candidate.label, status: response?.status?.() || null, url: page.url() });
       return;
     }
@@ -1738,6 +1764,7 @@ async function gotoLoginEntryPage(page, config, reason) {
     await waitForWafPageReady(page, 20000);
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     if (await waitForLoginEntry(page, 20000)) {
+      assertLandedLoginEntryActivity(page, config);
       log('Login entry ready after WAF wait', { reason, strategy: candidate.label, url: page.url() });
       return;
     }
@@ -2188,6 +2215,17 @@ async function loginWithRetry(browser, page, smsInbox, config) {
 }
 
 async function choosePackage(page, config) {
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const gate = classifyPackageGate({
+    url: page.url(),
+    bodyText,
+    productName: config.productName,
+    targetPackage: config.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  });
+  if (gate.state === 'wrong_activity') {
+    log('Wrong activity page before package select', summarizePackageGate(gate));
+    throw new Error(`Wrong activity page before package select: ${JSON.stringify(summarizePackageGate(gate))}`);
+  }
   let goalResult = await advanceClaimGoal(page, config, 'reach_confirm_page_after_package_select', { maxSteps: 2 });
   if (goalResult.plan?.action === 'stop') {
     const summary = await getPageSummary(page).catch(err => ({ error: err.message }));
@@ -2376,7 +2414,9 @@ async function solvePuzzle(page, config, options = {}) {
     const localMatchStrong = holeStrong || edgeStrong;
     const forceVision = process.env.TELECOM_FORCE_VISION === 'true';
     let vision = null;
-    if (process.env.TELECOM_VISION_URL) {
+    const visionFallbackEnabled = /^true$/i.test(process.env.TELECOM_VISION_FALLBACK || '')
+      || forceVision;
+    if (visionFallbackEnabled && process.env.TELECOM_VISION_URL) {
       const pngs = await page.evaluate(() => {
         const bg = document.querySelector('#slider_bg_image');
         const block = document.querySelector('#slider_block_image');
