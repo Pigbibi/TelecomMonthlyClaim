@@ -222,6 +222,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /TELECOM_PACKAGE_UNAVAILABLE/);
   assert.match(script, /collectMetaOfferLabels/);
   assert.match(script, /pageFamily/);
+  assert.match(script, /package-unavailable/);
+  assert.match(script, /captureCdpScreenshot\(cdp, 'package-unavailable'\)/);
 
   assert.match(script, /recentTelecomApiDiagnostics\(packageDiagnosticsStartedAt\)/);
   assert.match(script, /packageDiagnosticsStartedAt = packageStartedAt - 10000/);
