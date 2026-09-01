@@ -121,11 +121,22 @@ that page as success evidence instead of requesting another confirmation SMS.
 
 Your personal browser often keeps WAF cookies and may stay on the `wap2017`
 entry UI with a fuller offer list and no slider. GitHub Actions uses a fresh
-Chrome profile (`TELECOM_CLEAR_BROWSER_DATA=true`) and the SMS unlog path, which
-commonly lands on `echnwap` and can show a different offer set. Do not treat a
-warm local session as proof that CI will see the same packages. Change
-`TELECOM_PRODUCT_NAME` / plan id only when you intentionally want to claim a
-different SKU; otherwise leave `skipped_unavailable` alone.
+Chrome profile (`TELECOM_CLEAR_BROWSER_DATA=true`) and the SMS unlog path.
+
+Observed cold-login route (2026-09): after `validRandUnlog` succeeds the site
+calls `preDepositInitNew` / `preActiveMeta` and lands on
+`/echnwap/preDepositCfq_list` with data-only offers (1GB/2GB/3GB). August cold
+CI still reached `wap2017` `preDepositCfg_*` with `voice200`, so this is a
+carrier post-login catalog/routing change, not missing SSH tunnel.
+
+Recovery options, in order:
+1. Private-window check of the same entry (no existing cookies). If you also
+   only see data packs, the campaign cold catalog no longer includes voice.
+2. Fresh WeChat / official share entry for the September voice entitlement, then
+   update `TELECOM_ENTRY_URL` (keep secrets out of git).
+3. Do not claim unconfigured 3GB; leave `skipped_unavailable`.
+
+Do not treat a warm local session as proof that CI will see the same packages.
 
 ## Additional guides
 
