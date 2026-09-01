@@ -187,8 +187,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /短信验证码登录/);
   assert.match(script, /其他登录方式/);
   assert.match(script, /clickedLoginSwitch/);
-  assert.match(script, /commitDeadline/);
-  assert.match(script, /focusDeadline = Date\.now\(\) \+ 15000/);
+  assert.match(script, /fillNativePhoneInput/);
+  assert.match(script, /phonePrimed:/);
   assert.doesNotMatch(script, /for \(const digit of String\(phone/);
   assert.match(script, /readNativePhoneState/);
   assert.match(script, /Native Chrome entry page did not render:.*JSON\.stringify\(diagnostics\)/);
