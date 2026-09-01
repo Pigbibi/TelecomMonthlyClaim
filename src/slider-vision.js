@@ -532,6 +532,18 @@ function visionProvidersConfigured() {
   return gateway || (key && url);
 }
 
+function isVisionPuzzleLoading(result = {}) {
+  const text = [
+    result.reason,
+    result.body,
+    result.gatewayReason,
+    result.httpReason,
+    result.gatewayBody,
+    result.parsed?.reason,
+  ].filter(Boolean).join(' ');
+  return /loading|spinner|not yet visible|加载中|请稍候|转圈/.test(text);
+}
+
 async function estimateSliderDistanceWithVision(options = {}) {
   const normalized = {
     imageWidth: 280,
@@ -576,18 +588,24 @@ async function estimateSliderDistanceWithVision(options = {}) {
     });
   }
   if (http.ok || !gatewayError) return http;
-  return {
+  const combined = {
     ok: false,
     reason: 'vision-gateway-and-http-failed',
     gatewayReason: gatewayError.reason,
     gatewayBody: gatewayError.body,
     httpReason: http.reason,
-    body: http.body,
+    body: http.body || gatewayError.body,
+    parsed: http.parsed || gatewayError.parsed,
     method: 'codex-gateway+http',
   };
+  if (isVisionPuzzleLoading(gatewayError) || isVisionPuzzleLoading(http) || isVisionPuzzleLoading(combined)) {
+    return { ...combined, reason: 'puzzle-still-loading' };
+  }
+  return combined;
 }
 
 module.exports = {
   estimateSliderDistanceWithVision,
   visionProvidersConfigured,
+  isVisionPuzzleLoading,
 };

@@ -236,7 +236,6 @@ test('falls back to TELECOM_VISION_API_KEY for non-Gemini providers', async () =
 });
 
 test('accepts fractional x from Codex-style ratios', async () => {
-  const { finalizeVisionParse } = require('../src/slider-vision');
   // finalize not exported - exercise via HTTP mock instead
   global.fetch = async () => ({
     ok: true,
@@ -255,4 +254,59 @@ test('accepts fractional x from Codex-style ratios', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.naturalX, 468);
   assert.equal(result.moveX, 162);
+});
+
+test('detects loading-spinner vision text as puzzle-still-loading', () => {
+  const { isVisionPuzzleLoading } = require('../src/slider-vision');
+  assert.equal(isVisionPuzzleLoading({
+    reason: 'vision-x-out-of-range',
+    parsed: { reason: '截图只显示加载中的弹窗和转圈，没有出现滑块' },
+    x: -1,
+    move: -1,
+  }), true);
+  assert.equal(isVisionPuzzleLoading({ reason: 'vision-x-out-of-range', parsed: { reason: 'gap at 156' } }), false);
+});
+
+test('maps dual-provider loading failures to puzzle-still-loading', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-fake-gateway-loading-'));
+  const scriptPath = path.join(tmpDir, 'fake-codex-gateway.sh');
+  fs.writeFileSync(scriptPath, `#!/bin/bash
+set -euo pipefail
+out=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\\n' '{"x":-1,"move":-1,"confidence":0.01,"reason":"截图只显示加载中的弹窗和转圈"}' > "$out"
+`);
+  fs.chmodSync(scriptPath, 0o755);
+
+  global.fetch = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({
+      candidates: [{
+        content: { parts: [{ text: '{"x":-1,"move":-1,"confidence":0.01,"reason":"loading spinner only"}' }] },
+      }],
+    }),
+  });
+
+  const result = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    TELECOM_VISION_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+    GEMINI_API_KEY: 'gemini-test-key',
+    TELECOM_VISION_MODE: 'gemini',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    imageWidth: 903,
+  }));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'puzzle-still-loading');
+  assert.match(String(result.parsed?.reason || ''), /加载中|loading/i);
 });
