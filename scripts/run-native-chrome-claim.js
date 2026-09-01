@@ -508,15 +508,21 @@ async function openSliderChallenge(client, phone) {
   });
   await client.send('Network.enable');
   await waitForPhoneInput(client);
-  const focused = await client.evaluate(`(() => {
-    const input = ${nativePhoneInputExpression()};
-    if (!input) return false;
-    input.focus();
-    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-    if (setter) setter.call(input, ''); else input.value = '';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
-  })()`);
+  let focused = false;
+  const focusDeadline = Date.now() + 15000;
+  while (!focused && Date.now() < focusDeadline) {
+    await readNativePhoneState(client, { clickSmsTab: true });
+    focused = await client.evaluate(`(() => {
+      const input = ${nativePhoneInputExpression()};
+      if (!input) return false;
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+      if (setter) setter.call(input, ''); else input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    if (!focused) await wait(300);
+  }
   if (!focused) throw new Error('Native Chrome phone input missing');
   for (const digit of String(phone || '')) {
     await client.send('Input.insertText', { text: digit });
