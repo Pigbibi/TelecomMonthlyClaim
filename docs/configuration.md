@@ -30,7 +30,9 @@ verification codes.
 | Name | Storage | Purpose |
 | --- | --- | --- |
 | `TELECOM_PHONE` | secret | Authorized Beijing Telecom phone number |
-| `TELECOM_ENTRY_URL` | secret preferred; variable fallback | Current HTTPS campaign entry URL |
+| `TELECOM_ENTRY_URL` | secret preferred; variable fallback | Current HTTPS campaign entry URL (keep full share link out of git) |
+| `TELECOM_ENTRY_REQUIRED_PARAMS` | `campaignId,channelId,wxopenid` | Query keys that must be present on the entry URL; empty disables presence checks. Values are never compared. |
+| `TELECOM_EXPECTED_CHANNEL_ID` | unset | Optional exact `channelId` pin for your deployment (example: `dx531`). Unset = any channelId allowed. |
 | `TELECOM_TARGET_PACKAGE` | variable | `voice200` or `5g`; defaults to `voice200` |
 
 Package presets:
@@ -132,6 +134,23 @@ Only continue when both are true:
 Landing on `echnwap/preDepositCfq_*` (or any other echnwap package shell) is a
 **hard failure** (`wrong_activity`), not a soft skip. Do not claim alternate
 data packs from the diverted catalog.
+
+### Entry URL shape (open-source deployments)
+
+Code never ships a personal `campaignId` / `wxopenid` / channel pin. Before
+navigation it only checks:
+
+1. Path/family hard gate above.
+2. Presence of keys listed in `TELECOM_ENTRY_REQUIRED_PARAMS` (default
+   `campaignId,channelId,wxopenid`).
+3. Exact `channelId` **only if** you set `TELECOM_EXPECTED_CHANNEL_ID` (repo
+   variable for your fork — not required for every consumer).
+
+Example placeholder (do not commit real openids):
+
+`https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=<id>&version=V1&channelId=<channel>&wxopenid=<openid>`
+
+Store the real share link only in `TELECOM_ENTRY_URL` (GitHub secret / local env).
 
 ### Warm browser vs cold automation
 

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const {
   pageFamilyFromUrl,
   summarizeEntryFingerprint,
+  resolveEntrySecretPolicy,
+  assertEntrySecretShape,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
   classifyActivityRoute,
@@ -48,6 +50,45 @@ test('summarizes entry fingerprint without raw secrets', () => {
   assert.equal(fingerprint.campaignIdHint, '1623***7085');
   assert.deepEqual(fingerprint.queryKeys, ['campaignId', 'channelId', 'version', 'wxopenid']);
   assert.doesNotMatch(JSON.stringify(fingerprint), /abcdef1234567890deadbeef/);
+});
+
+test('entry secret shape defaults require campaignId channelId wxopenid presence only', () => {
+  const policy = resolveEntrySecretPolicy({});
+  assert.deepEqual(policy.requiredParams, ['campaignId', 'channelId', 'wxopenid']);
+  assert.equal(policy.expectedChannelId, '');
+
+  const good = summarizeEntryFingerprint(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&channelId=other&wxopenid=x',
+  );
+  assert.equal(assertEntrySecretShape(good, policy).ok, true);
+
+  const missingOpenid = summarizeEntryFingerprint(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&channelId=dx531',
+  );
+  assert.equal(assertEntrySecretShape(missingOpenid, policy).ok, false);
+});
+
+test('entry secret shape pins channelId only when TELECOM_EXPECTED_CHANNEL_ID is set', () => {
+  const policy = resolveEntrySecretPolicy({
+    TELECOM_ENTRY_REQUIRED_PARAMS: 'campaignId,channelId,wxopenid',
+    TELECOM_EXPECTED_CHANNEL_ID: 'dx531',
+  });
+  const ok = summarizeEntryFingerprint(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&channelId=dx531&wxopenid=x',
+  );
+  const bad = summarizeEntryFingerprint(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&channelId=other&wxopenid=x',
+  );
+  assert.equal(assertEntrySecretShape(ok, policy).ok, true);
+  assert.match(assertEntrySecretShape(bad, policy).reason, /channelId=other expected dx531/);
+});
+
+test('entry secret shape can disable required params via empty env', () => {
+  const policy = resolveEntrySecretPolicy({ TELECOM_ENTRY_REQUIRED_PARAMS: '' });
+  const bare = summarizeEntryFingerprint(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html',
+  );
+  assert.equal(assertEntrySecretShape(bare, policy).ok, true);
 });
 
 test('extracts offer labels from preActiveMeta-like payloads', () => {

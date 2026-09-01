@@ -22,6 +22,7 @@ const { classifyPackageGate, summarizePackageGate, productMatchAliases } = requi
 const {
   pageFamilyFromUrl,
   summarizeEntryFingerprint,
+  assertEntrySecretShape,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
   classifyActivityRoute,
@@ -519,6 +520,10 @@ async function fillNativePhoneInput(client, phoneValue, timeoutMs = 15000) {
 async function navigateToEntryPage(client) {
   const entryFingerprint = summarizeEntryFingerprint(entryUrl);
   console.log('Native Chrome entry fingerprint', entryFingerprint);
+  const entrySecret = assertEntrySecretShape(entryFingerprint);
+  if (!entrySecret.ok) {
+    throw new Error(`Native Chrome wrong entry URL shape: ${entrySecret.reason}`);
+  }
   const entryActivity = classifyActivityRoute({
     url: entryUrl,
     phase: 'entry',
