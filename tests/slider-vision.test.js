@@ -26,7 +26,7 @@ test('uses Gemini API key and request format when configured', async () => {
       ok: true,
       text: async () => JSON.stringify({
         candidates: [{
-          content: { parts: [{ text: '{"x":156,"confidence":0.91,"reason":"ok"}' }] },
+          content: { parts: [{ text: '{"x":156,"move":118,"confidence":0.91,"reason":"ok"}' }] },
         }],
       }),
     };
@@ -45,6 +45,7 @@ test('uses Gemini API key and request format when configured', async () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.naturalX, 156);
+  assert.equal(result.moveX, 118);
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /key=gemini-test-key/);
   const body = JSON.parse(calls[0].init.body);
