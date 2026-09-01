@@ -36,9 +36,10 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
   }
 
   const prompt = [
-    `这是北京电信滑块验证码。背景图宽 ${imageWidth} 像素。`,
+    `这是北京电信滑块验证码截图。图片宽度为 ${imageWidth} 像素。`,
     correctY != null ? `缺口大致纵坐标 correctY=${correctY}。` : '',
-    '请找出拼图缺口左边缘的水平像素坐标 X（整数，约 40-220）。',
+    '请找出拼图缺口左边缘相对本图左边缘的水平像素坐标 X（整数）。',
+    'X 必须落在约 40 到 图片宽度-40 之间，表示缺口在图中的位置，不是拖动距离。',
     '只输出 JSON：{"x":number,"confidence":number,"reason":string}',
   ].filter(Boolean).join('');
 
@@ -154,8 +155,8 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
     return { ok: false, reason: 'vision-bad-json', body: outText.slice(0, 300) };
   }
   const x = Math.round(Number(parsed.x));
-  if (!Number.isFinite(x) || x < 40 || x > imageWidth - 40) {
-    return { ok: false, reason: 'vision-x-out-of-range', parsed };
+  if (!Number.isFinite(x) || x < 40 || x > Math.max(80, imageWidth - 20)) {
+    return { ok: false, reason: 'vision-x-out-of-range', parsed, imageWidth };
   }
   return {
     ok: true,

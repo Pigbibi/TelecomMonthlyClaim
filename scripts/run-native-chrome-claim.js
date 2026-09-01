@@ -1115,8 +1115,9 @@ async function openConfirmationSlider(client) {
 
 const puzzleRootSelector = '#secondPop_puzzle_check,.puzzle-verify-popup,.puzzle-verify-container,.captcha-wrapper,#slider_check,.slider-check-box';
 const puzzleSliderSelectors = [
-  '#slider_track_btn', '.slider-btn', '.slider', '[role="slider"]',
-  'input[type="range"]', '[class*="slider" i]', '[class*="drag" i]', '[class*="handle" i]',
+  '#slider_track_btn', '.slider-btn', '[role="slider"]',
+  'input[type="range"]', '[class*="handle" i]', '[class*="drag" i]',
+  '.slider', '[class*="slider" i]',
 ];
 
 function visionConfigured() {
@@ -1128,8 +1129,82 @@ function visionConfigured() {
   return !!(key && process.env.TELECOM_VISION_URL);
 }
 
+function chooseVisionMoveX({
+  sourceX,
+  naturalX,
+  screenshotScaleX,
+  sliderX,
+  startX,
+  canvasWidth,
+  imageWidth,
+}) {
+  const scale = Number(screenshotScaleX) > 0 ? Number(screenshotScaleX) : 1;
+  const gapCssX = Number(sourceX) + Number(naturalX) / scale;
+  const ratios = [];
+  const width = Number(canvasWidth) || Number(imageWidth) / scale;
+  if (Number.isFinite(width) && width > 60) ratios.push((width - 40) / (width - 60));
+  ratios.push(1);
+  const raw = [
+    gapCssX - Number(startX),
+    gapCssX - Number(sliderX),
+    Number(naturalX) / scale,
+    renderedPuzzleMoveX(sourceX, naturalX, scale, sliderX, width),
+  ];
+  const candidates = [];
+  for (const value of raw) {
+    if (!Number.isFinite(value)) continue;
+    for (const ratio of ratios) {
+      const moveX = Math.round(value * ratio);
+      if (moveX >= 40 && moveX <= 360) candidates.push(moveX);
+    }
+  }
+  if (!candidates.length) {
+    return {
+      moveX: null,
+      gapCssX,
+      raw,
+      reason: 'vision-move-out-of-range',
+    };
+  }
+  // Prefer a mid-track travel distance; extreme values are usually bad geometry.
+  candidates.sort((left, right) => Math.abs(left - 120) - Math.abs(right - 120));
+  return { moveX: candidates[0], gapCssX, raw, reason: 'ok' };
+}
+
+/** Browser-side helper string: pick the smallest handle-like control. */
+function findPuzzleSliderJs() {
+  return `function findPuzzleSlider(root, selectors) {
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const candidates = [];
+    for (const selector of selectors) {
+      for (const element of root.querySelectorAll(selector)) {
+        if (!visible(element)) continue;
+        const rect = element.getBoundingClientRect();
+        candidates.push({
+          element,
+          area: rect.width * rect.height,
+          width: rect.width,
+          height: rect.height,
+          rect,
+        });
+      }
+    }
+    candidates.sort((left, right) => left.area - right.area);
+    const handle = candidates.find(item => item.width >= 12 && item.width <= 96 && item.height >= 12 && item.height <= 96)
+      || candidates.find(item => item.width <= 120 && item.height <= 80)
+      || candidates[0];
+    return handle?.element || null;
+  }`;
+}
+
 async function readConfirmationSliderInfo(client) {
   return client.evaluate(`(() => {
+    ${findPuzzleSliderJs()}
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
@@ -1151,9 +1226,7 @@ async function readConfirmationSliderInfo(client) {
         }
       }
     }
-    const slider = ${JSON.stringify(puzzleSliderSelectors)}
-      .map(selector => root.querySelector(selector))
-      .find(visible);
+    const slider = findPuzzleSlider(root, ${JSON.stringify(puzzleSliderSelectors)});
     const naturalX = flat.ok ? flat.x : minx;
     if (!slider || (!flat.ok && count < 500) || naturalX >= canvas.width) return null;
     const sliderRect = slider.getBoundingClientRect();
@@ -1199,9 +1272,8 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
       const source = [...root.querySelectorAll('canvas:not(.block),canvas')]
         .find(item => visible(item) && item.width >= 100 && item.height >= 50)
         || (visible(root) && root !== document ? root : null);
-      const slider = ${JSON.stringify(puzzleSliderSelectors)}
-        .map(selector => root.querySelector(selector))
-        .find(visible);
+      ${findPuzzleSliderJs()}
+      const slider = findPuzzleSlider(root, ${JSON.stringify(puzzleSliderSelectors)});
       if (!source || !slider) return resolve(null);
       const sourceRect = source.getBoundingClientRect();
       const sliderRect = slider.getBoundingClientRect();
@@ -1290,6 +1362,7 @@ async function solvePuzzleWithVisionFallback(client) {
   const crop = await client.evaluate(`new Promise(resolve => {
     const image = new Image();
     image.onload = () => {
+      ${findPuzzleSliderJs()}
       const visible = element => {
         if (!element) return false;
         const rect = element.getBoundingClientRect();
@@ -1297,12 +1370,15 @@ async function solvePuzzleWithVisionFallback(client) {
         return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
       };
       const root = document.querySelector(${JSON.stringify(puzzleRootSelector)}) || document;
-      const source = [...root.querySelectorAll('canvas:not(.block),canvas')]
-        .find(item => visible(item) && item.width >= 80 && item.height >= 40)
-        || (visible(root) && root !== document ? root : null);
-      const slider = ${JSON.stringify(puzzleSliderSelectors)}
-        .map(selector => root.querySelector(selector))
-        .find(visible);
+      const canvases = [...root.querySelectorAll('canvas:not(.block),canvas')]
+        .filter(item => visible(item) && item.getBoundingClientRect().width >= 80 && item.getBoundingClientRect().height >= 40)
+        .sort((left, right) => {
+          const a = left.getBoundingClientRect();
+          const b = right.getBoundingClientRect();
+          return (b.width * b.height) - (a.width * a.height);
+        });
+      const source = canvases[0] || (visible(root) && root !== document ? root : null);
+      const slider = findPuzzleSlider(root, ${JSON.stringify(puzzleSliderSelectors)});
       if (!source || !slider) {
         return resolve({
           ok: false,
@@ -1310,6 +1386,7 @@ async function solvePuzzleWithVisionFallback(client) {
           rootClass: root === document ? '' : String(root.className || '').slice(0, 120),
           hasSource: !!source,
           hasSlider: !!slider,
+          canvasCount: canvases.length,
         });
       }
       const sourceRect = source.getBoundingClientRect();
@@ -1335,12 +1412,21 @@ async function solvePuzzleWithVisionFallback(client) {
         cropPng: cropCanvas.toDataURL('image/png'),
         imageWidth: cropCanvas.width,
         sourceX: sourceRect.x,
+        sourceY: sourceRect.y,
+        sourceWidth: sourceRect.width,
+        sourceHeight: sourceRect.height,
         screenshotScaleX,
         sliderX: sliderRect.x,
         canvasWidth: source.width || Math.round(sourceRect.width),
         startX: sliderRect.x + sliderRect.width / 2,
         startY: sliderRect.y + sliderRect.height / 2,
-        slider: { tag: slider.tagName, id: slider.id || '', className: String(slider.className || '').slice(0, 80) },
+        slider: {
+          tag: slider.tagName,
+          id: slider.id || '',
+          className: String(slider.className || '').slice(0, 80),
+          width: Math.round(sliderRect.width),
+          height: Math.round(sliderRect.height),
+        },
       });
     };
     image.onerror = () => resolve({ ok: false, reason: 'screenshot-decode-failed' });
@@ -1357,28 +1443,44 @@ async function solvePuzzleWithVisionFallback(client) {
       reason: vision.reason || 'low-confidence',
       confidence: vision.confidence || 0,
       slider: crop.slider,
+      imageWidth: crop.imageWidth,
     };
   }
-  const moveX = renderedPuzzleMoveX(
-    crop.sourceX,
-    vision.naturalX,
-    crop.screenshotScaleX,
-    crop.sliderX,
-    crop.canvasWidth,
-  );
-  if (!(moveX >= 40)) {
-    return { ok: false, reason: 'vision-move-too-small', moveX, vision };
+  const chosen = chooseVisionMoveX({
+    sourceX: crop.sourceX,
+    naturalX: vision.naturalX,
+    screenshotScaleX: crop.screenshotScaleX,
+    sliderX: crop.sliderX,
+    startX: crop.startX,
+    canvasWidth: crop.canvasWidth,
+    imageWidth: crop.imageWidth,
+  });
+  if (!(chosen.moveX >= 40)) {
+    return {
+      ok: false,
+      reason: chosen.reason || 'vision-move-too-small',
+      moveX: chosen.moveX,
+      gapCssX: chosen.gapCssX,
+      raw: chosen.raw,
+      vision,
+      slider: crop.slider,
+      sourceX: crop.sourceX,
+      sliderX: crop.sliderX,
+      startX: crop.startX,
+      screenshotScaleX: crop.screenshotScaleX,
+      imageWidth: crop.imageWidth,
+    };
   }
   return {
     ok: true,
     method: 'vision-direct',
-    naturalX: moveX,
-    moveX,
-    targetX: Math.round(crop.sourceX + vision.naturalX / crop.screenshotScaleX),
+    naturalX: chosen.moveX,
+    moveX: chosen.moveX,
+    targetX: Math.round(chosen.gapCssX),
     startX: crop.startX,
     startY: crop.startY,
     slider: crop.slider,
-    vision: { confidence: vision.confidence, reason: vision.reason },
+    vision: { confidence: vision.confidence, reason: vision.reason, naturalX: vision.naturalX },
   };
 }
 
