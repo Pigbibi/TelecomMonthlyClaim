@@ -200,7 +200,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /visibleActions:/);
   assert.match(script, /inputs: \[\.\.\.document\.querySelectorAll\('input'\)\]/);
   assert.match(script, /computeSliderImageMatchInPage/);
-  assert.match(script, /legacy login slider images unavailable; using canvas solver/);
+  assert.match(script, /legacy login slider images unavailable; using vision-first puzzle solver/);
   assert.match(script, /return solveConfirmationSlider\(client\)/);
   assert.match(script, /SmsInboxClient/);
   assert.match(script, /login completed before Playwright attachment/);
@@ -224,7 +224,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /input\[type="range"\]/);
   assert.match(script, /--proxy-server=/);
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
-  assert.match(script, /Native Chrome local slider match unavailable; using vision fallback/);
+  assert.match(script, /Native Chrome vision-first slider attempt/);
+  assert.match(script, /vision solver skipped: set GEMINI_API_KEY/);
   assert.match(script, /solvePuzzleWithVisionFallback/);
   assert.match(script, /vision-direct/);
   assert.match(script, /puzzle-verify-popup/);

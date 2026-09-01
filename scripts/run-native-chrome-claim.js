@@ -781,49 +781,49 @@ async function dragSliderTrusted(client, { startX, startY, moveX }) {
 
 async function solveSliderChallenge(client) {
   const match = await client.evaluate(`(${computeSliderImageMatchInPage.toString()})({})`, 30000);
-  if (!match?.ok || !match.btn || !Number.isFinite(match.moveX) || match.moveX < 40) {
-    if (match?.reason === 'images-not-ready') {
-      console.log('Native Chrome legacy login slider images unavailable; using canvas solver.');
-      return solveConfirmationSlider(client);
-    }
-    throw new Error(`Native Chrome slider match failed: ${match?.reason || 'invalid-result'}`);
-  }
-  console.log('Native Chrome slider match', {
-    method: match.method,
-    naturalX: match.naturalX,
-    flatX: match.flat?.naturalX,
-    flatRun: match.flat?.run,
-    holeX: match.hole?.naturalX,
-    textureX: match.texture?.naturalX,
-    edgeX: match.edge?.naturalX,
-    edgeScore: match.edge?.score,
-  });
-  const startX = match.btn.cx;
-  const startY = match.btn.cy;
-  await dragSlider(client, { startX, startY, moveX: match.moveX });
+  if (match?.ok && match.btn && Number.isFinite(match.moveX) && match.moveX >= 40) {
+    console.log('Native Chrome slider match', {
+      method: match.method,
+      naturalX: match.naturalX,
+      flatX: match.flat?.naturalX,
+      flatRun: match.flat?.run,
+      holeX: match.hole?.naturalX,
+      textureX: match.texture?.naturalX,
+      edgeX: match.edge?.naturalX,
+      edgeScore: match.edge?.score,
+    });
+    const startX = match.btn.cx;
+    const startY = match.btn.cy;
+    await dragSlider(client, { startX, startY, moveX: match.moveX });
 
-  const deadline = Date.now() + 25000;
-  while (Date.now() < deadline) {
-    const state = await client.evaluate(`(() => {
-      const text = document.body?.innerText || '';
-      const slider = document.querySelector('#slider_check,.slider-check-box');
-      const visible = element => {
-        if (!element) return false;
-        const rect = element.getBoundingClientRect();
-        const style = getComputedStyle(element);
-        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-      };
-      return {
-        sent: /验证码已下发|请注意查收/.test(text),
-        failed: /服务繁忙|验证失败|请稍后再试/.test(text),
-        sliderVisible: visible(slider),
-      };
-    })()`);
-    if (state?.sent || (!state?.sliderVisible && !state?.failed)) return match.naturalX;
-    if (state?.failed) throw new Error('Native Chrome slider validation failed before Playwright attachment');
-    await wait(500);
+    const deadline = Date.now() + 25000;
+    while (Date.now() < deadline) {
+      const state = await client.evaluate(`(() => {
+        const text = document.body?.innerText || '';
+        const slider = document.querySelector('#slider_check,.slider-check-box');
+        const visible = element => {
+          if (!element) return false;
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        return {
+          sent: /验证码已下发|请注意查收/.test(text),
+          failed: /服务繁忙|验证失败|请稍后再试/.test(text),
+          sliderVisible: visible(slider),
+        };
+      })()`);
+      if (state?.sent || (!state?.sliderVisible && !state?.failed)) return match.naturalX;
+      if (state?.failed) throw new Error('Native Chrome slider validation failed before Playwright attachment');
+      await wait(500);
+    }
+    throw new Error('Native Chrome slider validation timed out before Playwright attachment');
   }
-  throw new Error('Native Chrome slider validation timed out before Playwright attachment');
+  if (match?.reason === 'images-not-ready') {
+    console.log('Native Chrome legacy login slider images unavailable; using vision-first puzzle solver.');
+    return solveConfirmationSlider(client);
+  }
+  throw new Error(`Native Chrome slider match failed: ${match?.reason || 'invalid-result'}`);
 }
 
 async function clickPageElement(client, selectors, textPattern = '') {
@@ -1383,38 +1383,62 @@ async function solvePuzzleWithVisionFallback(client) {
 }
 
 async function solveConfirmationSlider(client) {
-  const matchDeadline = Date.now() + 20000;
   let info = null;
-  let refreshed = false;
-  while (Date.now() < matchDeadline) {
-    const rawInfo = await readConfirmationSliderInfo(client);
-    if (rawInfo?.moveX >= 40) {
-      info = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null) || rawInfo;
-      if (info?.moveX >= 40) break;
+  let visionAttempt = null;
+
+  // Prefer vision for redesigned puzzles. Only spend time on local canvas geometry
+  // when vision is unavailable or returns a weak answer.
+  if (visionConfigured()) {
+    const visionDeadline = Date.now() + 15000;
+    while (Date.now() < visionDeadline) {
+      visionAttempt = await solvePuzzleWithVisionFallback(client);
+      console.log('Native Chrome vision-first slider attempt', {
+        ok: visionAttempt?.ok,
+        reason: visionAttempt?.reason,
+        confidence: visionAttempt?.confidence || visionAttempt?.vision?.confidence,
+        method: visionAttempt?.method,
+        slider: visionAttempt?.slider,
+      });
+      if (visionAttempt?.ok && visionAttempt.moveX >= 40) {
+        info = visionAttempt;
+        break;
+      }
+      if (visionAttempt?.reason === 'puzzle-assets-missing') {
+        await wait(500);
+        continue;
+      }
+      break;
     }
-    if (!refreshed && Date.now() >= matchDeadline - 12000) {
-      refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
-      console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
-      await wait(refreshed ? 2000 : 500);
-      continue;
-    }
-    await wait(500);
+  } else {
+    console.log('Native Chrome vision solver skipped: set GEMINI_API_KEY (or TELECOM_VISION_API_KEY) with TELECOM_VISION_URL');
   }
+
   if (!info || info.moveX < 40) {
-    console.log('Native Chrome local slider match unavailable; using vision fallback');
-    const visionInfo = await solvePuzzleWithVisionFallback(client);
-    console.log('Native Chrome vision slider fallback', {
-      ok: visionInfo?.ok,
-      reason: visionInfo?.reason,
-      confidence: visionInfo?.confidence || visionInfo?.vision?.confidence,
-      method: visionInfo?.method,
-      slider: visionInfo?.slider,
-    });
-    if (visionInfo?.ok && visionInfo.moveX >= 40) info = visionInfo;
+    const matchDeadline = Date.now() + 12000;
+    let refreshed = false;
+    while (Date.now() < matchDeadline) {
+      const rawInfo = await readConfirmationSliderInfo(client);
+      if (rawInfo?.moveX >= 40) {
+        info = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null) || rawInfo;
+        if (info?.moveX >= 40) break;
+      }
+      if (!refreshed && Date.now() >= matchDeadline - 6000) {
+        refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
+        console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
+        await wait(refreshed ? 2000 : 500);
+        continue;
+      }
+      await wait(500);
+    }
   }
+
   if (!info || info.moveX < 40) {
     console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
-    throw new Error('Native Chrome confirmation slider target missing after asset wait');
+    throw new Error(
+      visionConfigured()
+        ? `Native Chrome confirmation slider target missing after vision-first solve (${visionAttempt?.reason || 'no-match'})`
+        : 'Native Chrome confirmation slider target missing: vision not configured and local match failed',
+    );
   }
   console.log('Native Chrome confirmation slider match', info);
   const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
