@@ -11,7 +11,7 @@ const {
   isFlatPuzzleCandidateReliable,
   preferCanvasTransparentMatch,
 } = require('../src/slider-canvas-match');
-const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
+const { estimateSliderDistanceWithVision, visionProvidersConfigured } = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 const { classifyPackageGate, summarizePackageGate } = require('../src/package-gate');
@@ -1121,12 +1121,7 @@ const puzzleSliderSelectors = [
 ];
 
 function visionConfigured() {
-  const key = process.env.GEMINI_API_KEY
-    || process.env.TELECOM_VISION_API_KEY
-    || process.env.OPENAI_API_KEY
-    || process.env.ANTHROPIC_AUTH_TOKEN
-    || '';
-  return !!(key && process.env.TELECOM_VISION_URL);
+  return visionProvidersConfigured();
 }
 
 function chooseVisionMoveX({
@@ -1623,7 +1618,7 @@ async function solveConfirmationSlider(client) {
   if (visionConfigured()) {
     info = await tryVisionSolve();
   } else {
-    console.log('Native Chrome vision solver skipped: set GEMINI_API_KEY (or TELECOM_VISION_API_KEY) with TELECOM_VISION_URL');
+    console.log('Native Chrome vision solver skipped: set CODEX_GATEWAY_COMMAND (preferred) or GEMINI_API_KEY with TELECOM_VISION_URL');
   }
 
   if (!info || info.moveX < 40) {

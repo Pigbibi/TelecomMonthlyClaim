@@ -56,6 +56,80 @@ test('uses Gemini API key and request format when configured', async () => {
   assert.equal(body.generationConfig.responseMimeType, 'application/json');
 });
 
+test('uses CodexGateway before direct Gemini when CODEX_GATEWAY_COMMAND is set', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-fake-gateway-'));
+  const scriptPath = path.join(tmpDir, 'fake-codex-gateway.sh');
+  fs.writeFileSync(scriptPath, `#!/bin/bash
+set -euo pipefail
+out=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\\n' '{"x":156,"move":118,"confidence":0.9,"reason":"gateway"}' > "$out"
+`);
+  fs.chmodSync(scriptPath, 0o755);
+
+  const result = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    GEMINI_API_KEY: 'should-not-be-used',
+    TELECOM_VISION_URL: 'https://example.invalid/v1',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    imageWidth: 280,
+  }));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codex-gateway');
+  assert.equal(result.naturalX, 156);
+  assert.equal(result.moveX, 118);
+});
+
+test('falls back to Gemini when CodexGateway fails', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-fake-gateway-fail-'));
+  const scriptPath = path.join(tmpDir, 'fake-codex-gateway.sh');
+  fs.writeFileSync(scriptPath, '#!/bin/bash\necho gateway-down >&2\nexit 2\n');
+  fs.chmodSync(scriptPath, 0o755);
+
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        candidates: [{
+          content: { parts: [{ text: '{"x":142,"move":110,"confidence":0.8,"reason":"gemini"}' }] },
+        }],
+      }),
+    };
+  };
+
+  const result = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    TELECOM_VISION_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+    GEMINI_API_KEY: 'gemini-test-key',
+    TELECOM_VISION_MODE: 'gemini',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    imageWidth: 280,
+  }));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'gemini-direct');
+  assert.equal(result.moveX, 110);
+  assert.equal(calls.length, 1);
+});
+
 test('treats oversized move as gap x when x is missing', async () => {
   global.fetch = async () => ({
     ok: true,

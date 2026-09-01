@@ -24,6 +24,14 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
   assert.doesNotMatch(workflowText, /uses:\s\.\/actions\/setup-home-proxy/);
 });
 
+test('monthly workflow prefers CodexGateway then Gemini for slider vision', () => {
+  assert.match(workflowText, /id-token:\s+write/);
+  assert.match(workflowText, /Pigbibi\/AIGateway\/actions\/setup-codex-gateway@main/);
+  assert.match(workflowText, /provider-chain:\s+codex,gemini-free/);
+  assert.match(workflowText, /CODEX_GATEWAY_SERVICE_URL/);
+  assert.match(workflowText, /GEMINI_API_KEY/);
+});
+
 test('monthly workflow uses GitHub-hosted Linux with generic proxy modes', () => {
   assert.match(workflowText, /connectivity_mode:/);
   assert.match(workflowText, /runs-on:\s+ubuntu-latest/);
@@ -226,7 +234,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /--proxy-server=/);
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
   assert.match(script, /Native Chrome vision-first slider attempt/);
-  assert.match(script, /vision solver skipped: set GEMINI_API_KEY/);
+  assert.match(script, /vision solver skipped: set CODEX_GATEWAY_COMMAND/);
+  assert.match(script, /visionProvidersConfigured/);
   assert.match(script, /solvePuzzleWithVisionFallback/);
   assert.match(script, /chooseVisionMoveX/);
   assert.match(script, /findPuzzleSlider/);
