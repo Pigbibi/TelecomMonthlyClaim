@@ -1566,7 +1566,8 @@ async function solveConfirmationSlider(client) {
 
   const tryVisionSolve = async () => {
     if (!visionConfigured()) return null;
-    const visionDeadline = Date.now() + 25000;
+    const visionDeadline = Date.now() + 45000;
+    let rateLimitHits = 0;
     while (Date.now() < visionDeadline) {
       visionAttempt = await solvePuzzleWithVisionFallback(client);
       console.log('Native Chrome vision-first slider attempt', {
@@ -1591,6 +1592,15 @@ async function solveConfirmationSlider(client) {
         visionBody: visionAttempt?.visionBody,
       });
       if (visionAttempt?.ok && visionAttempt.moveX >= 40) return visionAttempt;
+      if (visionAttempt?.reason === 'vision-http-429') {
+        rateLimitHits += 1;
+        if (rateLimitHits >= 3) {
+          console.log('Native Chrome vision rate-limited; falling back to local match', { rateLimitHits });
+          return null;
+        }
+        await wait(10000 * rateLimitHits);
+        continue;
+      }
       if (
         visionAttempt?.reason === 'puzzle-assets-missing'
         || visionAttempt?.reason === 'puzzle-still-loading'
