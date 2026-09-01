@@ -26,10 +26,11 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
 
 test('monthly workflow prefers CodexGateway then Gemini for slider vision', () => {
   assert.match(workflowText, /id-token:\s+write/);
-  assert.match(workflowText, /Pigbibi\/AIGateway\/actions\/setup-codex-gateway@main/);
-  assert.match(workflowText, /provider-chain:\s+codex,gemini-free/);
   assert.match(workflowText, /CODEX_GATEWAY_SERVICE_URL/);
+  assert.match(workflowText, /CODEX_GATEWAY_SERVICE_AUDIENCE/);
   assert.match(workflowText, /GEMINI_API_KEY/);
+  // Public repos cannot use the private AIGateway action; call the service over HTTP.
+  assert.doesNotMatch(workflowText, /Pigbibi\/AIGateway\/actions\/setup-codex-gateway/);
 });
 
 test('monthly workflow uses GitHub-hosted Linux with generic proxy modes', () => {
@@ -181,6 +182,7 @@ test('extension preflight does not persist phone or browser profile data', () =>
 
 test('native Playwright transport starts a fresh headed system Chrome before attachment', () => {
   const script = fs.readFileSync(path.join(root, 'scripts/run-native-chrome-claim.js'), 'utf8');
+  const vision = fs.readFileSync(path.join(root, 'src/slider-vision.js'), 'utf8');
   const wrapper = fs.readFileSync(path.join(root, 'scripts/run-real-chrome-claim.sh'), 'utf8');
   assert.match(wrapper, /TRANSPORT=native_playwright/);
   assert.match(wrapper, /run-native-chrome-claim\.js/);
@@ -234,8 +236,10 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /--proxy-server=/);
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
   assert.match(script, /Native Chrome vision-first slider attempt/);
-  assert.match(script, /vision solver skipped: set CODEX_GATEWAY_COMMAND/);
+  assert.match(script, /vision solver skipped: set CODEX_GATEWAY_SERVICE_URL/);
   assert.match(script, /visionProvidersConfigured/);
+  assert.match(vision, /CODEX_GATEWAY_SERVICE_URL/);
+  assert.match(vision, /codex-gateway-service/);
   assert.match(script, /solvePuzzleWithVisionFallback/);
   assert.match(script, /chooseVisionMoveX/);
   assert.match(script, /findPuzzleSlider/);

@@ -1,13 +1,14 @@
 /**
  * Vision estimator for telecom slider hole X / drag distance.
  *
- * Preferred path (same as FranchiseLead / 12345):
- *   setup-codex-gateway with provider-chain=codex,gemini-free
- *   CODEX_GATEWAY_COMMAND=...  (Codex first, gemini-free inside gateway)
+ * Preferred path (aligned with FranchiseLead / 12345 provider order):
+ *   1) CodexGateway service HTTP via GitHub OIDC (CODEX_GATEWAY_SERVICE_URL)
+ *      — public repos cannot `uses:` the private AIGateway action, so we call
+ *        the same /v1/codex service contract directly from Node.
+ *   2) Local CODEX_GATEWAY_COMMAND CLI when present (self-hosted / private repos)
+ *   3) Direct Gemini / OpenAI / Anthropic HTTP fallback
  *
- * Direct Gemini / OpenAI / Anthropic HTTP remains the outer fallback:
- *   TELECOM_VISION_URL=...
- *   GEMINI_API_KEY / TELECOM_VISION_API_KEY / ...
+ * Gateway service only runs provider=codex; gemini-free must stay caller-side.
  */
 
 const fs = require('node:fs');
@@ -117,7 +118,137 @@ function parseVisionJsonText(outText, imageWidth, method) {
   return finalizeVisionParse(parsed, imageWidth, method);
 }
 
-function estimateWithCodexGateway({ bgPngBase64, blockPngBase64, imageWidth, cssWidth, correctY }) {
+function sliderOutputSchema() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      x: { type: 'number' },
+      move: { type: 'number' },
+      confidence: { type: 'number' },
+      reason: { type: 'string' },
+    },
+    required: ['x', 'move'],
+  };
+}
+
+function encodeAttachment(name, bytes, suffix = '.png') {
+  return {
+    name,
+    suffix,
+    content_base64: Buffer.from(bytes).toString('base64'),
+  };
+}
+
+async function fetchGithubOidcToken(audience) {
+  const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL || '';
+  const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN || '';
+  if (!requestUrl || !requestToken) {
+    return { ok: false, reason: 'vision-oidc-unavailable' };
+  }
+  const url = new URL(requestUrl);
+  url.searchParams.set('audience', audience || 'codex-gateway');
+  const resp = await fetch(url, {
+    headers: { Authorization: `bearer ${requestToken}` },
+  });
+  const text = await resp.text();
+  if (!resp.ok) {
+    return { ok: false, reason: `vision-oidc-http-${resp.status}`, body: text.slice(0, 300) };
+  }
+  let payload;
+  try { payload = JSON.parse(text); } catch {
+    return { ok: false, reason: 'vision-oidc-non-json', body: text.slice(0, 300) };
+  }
+  const token = String(payload.value || '').trim();
+  if (!token) {
+    return { ok: false, reason: 'vision-oidc-empty' };
+  }
+  return { ok: true, token };
+}
+
+async function estimateWithCodexGatewayService({
+  bgPngBase64,
+  blockPngBase64,
+  imageWidth,
+  cssWidth,
+  correctY,
+}) {
+  const serviceBase = process.env.CODEX_GATEWAY_SERVICE_URL || '';
+  if (!serviceBase || !bgPngBase64) {
+    return { ok: false, reason: 'vision-gateway-not-configured' };
+  }
+  const png = decodePngBase64(bgPngBase64);
+  if (!png?.length) {
+    return { ok: false, reason: 'vision-image-missing' };
+  }
+  const audience = process.env.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway';
+  const oidc = await fetchGithubOidcToken(audience);
+  if (!oidc.ok) return { ...oidc, method: 'codex-gateway-service' };
+
+  const timeoutSeconds = Math.max(15, Number(process.env.TELECOM_VISION_TIMEOUT_SECONDS || process.env.CAPTCHA_CODEX_TIMEOUT_SECONDS || 60));
+  const endpoint = serviceBase.endsWith('/v1/codex') ? serviceBase : `${serviceBase.replace(/\/$/, '')}/v1/codex`;
+  const images = [encodeAttachment('slider.png', png, '.png')];
+  if (blockPngBase64) {
+    const block = decodePngBase64(blockPngBase64);
+    if (block?.length) images.push(encodeAttachment('block.png', block, '.png'));
+  }
+  const schemaJson = Buffer.from(JSON.stringify(sliderOutputSchema()), 'utf8');
+  const payload = {
+    prompt: buildSliderPrompt({ imageWidth, cssWidth, correctY }),
+    timeout_seconds: timeoutSeconds,
+    search: false,
+    sandbox: 'read-only',
+    ask_for_approval: 'never',
+    model: (process.env.CAPTCHA_CODEX_MODEL || process.env.CODEX_GATEWAY_MODEL || '').trim(),
+    reasoning_effort: (process.env.CODEX_GATEWAY_REASONING_EFFORT || '').trim(),
+    task: 'captcha',
+    complexity: 'high',
+    // Service only accepts codex; Gemini fallback stays in this caller.
+    provider_chain: 'codex',
+    images,
+    output_schema: encodeAttachment('schema.json', schemaJson, '.json'),
+  };
+  const overhead = Math.max(30, Number(process.env.CODEX_GATEWAY_SERVICE_TIMEOUT_OVERHEAD_SECONDS || 60));
+  let resp;
+  let text;
+  try {
+    resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oidc.token}`,
+        'Content-Type': 'application/json; charset=utf-8',
+        Accept: 'application/json',
+        'User-Agent': 'telecom-monthly-claim-slider-vision',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout((timeoutSeconds + overhead) * 1000),
+    });
+    text = await resp.text();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'vision-gateway-error',
+      body: String(error?.message || error).slice(0, 300),
+      method: 'codex-gateway-service',
+    };
+  }
+  if (!resp.ok) {
+    return {
+      ok: false,
+      reason: `vision-gateway-http-${resp.status}`,
+      body: text.slice(0, 300),
+      method: 'codex-gateway-service',
+    };
+  }
+  let data;
+  try { data = JSON.parse(text); } catch {
+    return parseVisionJsonText(text, imageWidth, 'codex-gateway-service');
+  }
+  const outText = typeof data.output === 'string' ? data.output : text;
+  return parseVisionJsonText(outText, imageWidth, 'codex-gateway-service');
+}
+
+function estimateWithCodexGatewayCli({ bgPngBase64, blockPngBase64, imageWidth, cssWidth, correctY }) {
   const command = splitCommand(process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND || '');
   if (!command.length || !bgPngBase64) {
     return { ok: false, reason: 'vision-gateway-not-configured' };
@@ -143,17 +274,7 @@ function estimateWithCodexGateway({ bgPngBase64, blockPngBase64, imageWidth, css
       if (block?.length) fs.writeFileSync(path.join(tmpDir, 'block.png'), block);
     }
     fs.writeFileSync(promptPath, prompt);
-    fs.writeFileSync(schemaPath, JSON.stringify({
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        x: { type: 'number' },
-        move: { type: 'number' },
-        confidence: { type: 'number' },
-        reason: { type: 'string' },
-      },
-      required: ['x', 'move'],
-    }));
+    fs.writeFileSync(schemaPath, JSON.stringify(sliderOutputSchema()));
     const args = [
       ...command.slice(1),
       '--prompt-file', promptPath,
@@ -205,6 +326,13 @@ function estimateWithCodexGateway({ bgPngBase64, blockPngBase64, imageWidth, css
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+async function estimateWithCodexGateway(options) {
+  if (process.env.CODEX_GATEWAY_SERVICE_URL) {
+    return estimateWithCodexGatewayService(options);
+  }
+  return estimateWithCodexGatewayCli(options);
 }
 
 async function estimateWithHttpVision({
@@ -345,7 +473,11 @@ async function estimateWithHttpVision({
 }
 
 function visionProvidersConfigured() {
-  const gateway = !!(process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND);
+  const gateway = !!(
+    process.env.CODEX_GATEWAY_SERVICE_URL
+    || process.env.CODEX_GATEWAY_COMMAND
+    || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND
+  );
   const key = !!(process.env.TELECOM_VISION_API_KEY
     || process.env.GEMINI_API_KEY
     || process.env.OPENAI_API_KEY
@@ -369,8 +501,12 @@ async function estimateSliderDistanceWithVision(options = {}) {
   }
 
   let gatewayError = null;
-  if (process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND) {
-    const gateway = estimateWithCodexGateway(normalized);
+  if (
+    process.env.CODEX_GATEWAY_SERVICE_URL
+    || process.env.CODEX_GATEWAY_COMMAND
+    || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND
+  ) {
+    const gateway = await estimateWithCodexGateway(normalized);
     if (gateway.ok) return gateway;
     gatewayError = gateway;
     if (!(process.env.GEMINI_API_KEY || process.env.TELECOM_VISION_API_KEY || process.env.TELECOM_VISION_URL)) {

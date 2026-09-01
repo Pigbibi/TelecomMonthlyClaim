@@ -55,6 +55,9 @@ jobs:
       PUSHPLUS_RELAY_INBOX_URL: ${{ vars.PUSHPLUS_RELAY_INBOX_URL || '' }}
       PUSHPLUS_RELAY_INBOX_TOKEN: ${{ secrets.PUSHPLUS_RELAY_INBOX_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CODEX_GATEWAY_SERVICE_URL: ${{ vars.CODEX_GATEWAY_SERVICE_URL }}
+      CODEX_GATEWAY_SERVICE_AUDIENCE: ${{ vars.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway' }}
+      CODEX_GATEWAY_MODEL: ${{ vars.CAPTCHA_CODEX_MODEL || vars.CODEX_GATEWAY_MODEL || '' }}
       TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent' }}
       TELECOM_VISION_MODE: ${{ vars.TELECOM_VISION_MODE || 'gemini' }}
       TELECOM_VISION_MODEL: ${{ vars.TELECOM_VISION_MODEL || 'gemini-3.6-flash' }}
@@ -108,17 +111,6 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-
-      - name: Setup CodexGateway for slider vision
-        continue-on-error: true
-        uses: Pigbibi/AIGateway/actions/setup-codex-gateway@main
-        with:
-          backend: service
-          service-url: ${{ vars.CODEX_GATEWAY_SERVICE_URL }}
-          service-audience: ${{ vars.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway' }}
-          provider-chain: codex,gemini-free
-          model: ${{ vars.CAPTCHA_CODEX_MODEL || vars.CODEX_GATEWAY_MODEL }}
-          task: captcha
 
       - name: Validate connectivity
         run: |
