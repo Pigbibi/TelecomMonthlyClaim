@@ -188,6 +188,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /其他登录方式/);
   assert.match(script, /本机号码一键登录/);
   assert.match(script, /__telecomNativeOneClickAttempted/);
+  assert.match(script, /document\.body\?\.querySelectorAll\('\*'\)/);
   assert.match(script, /clickedLoginSwitch/);
   assert.match(script, /fillNativePhoneInput/);
   assert.match(script, /phonePrimed:/);
