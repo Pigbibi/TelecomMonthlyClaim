@@ -63,7 +63,10 @@ serialized and capped at 10 minutes.
 - PushPlus Open API, protected relay inbox, and generic HTTP SMS inbox support.
 - Login and confirmation SMS parsing with sender, phone, product, and plan
   checks.
-- Optional visual second opinion for the current slider challenge.
+- Optional visual second opinion for the current slider challenge (off by
+  default; local canvas match first).
+- Entry URL shape checks via env (required query keys + optional channel pin)
+  without hardcoding personal campaign values.
 - Month-scoped success state that prevents an ordinary duplicate run.
 - Redacted run logs that exclude phone numbers, OTPs, tokens, private keys, and
   page bodies.
@@ -94,7 +97,7 @@ Repository secrets:
 | Secret | Purpose |
 | --- | --- |
 | `TELECOM_PHONE` | Authorized Beijing Telecom phone number |
-| `TELECOM_ENTRY_URL` | Current campaign entry; recommended because URLs may contain account identifiers |
+| `TELECOM_ENTRY_URL` | Full campaign share link (may include `wxopenid`); keep out of git |
 | `PUSHPLUS_TOKEN` | PushPlus user token when direct Open API access is used |
 | `PUSHPLUS_SECRET_KEY` | PushPlus Open API secret key |
 
@@ -103,12 +106,17 @@ Repository variables:
 | Variable | Example | Purpose |
 | --- | --- | --- |
 | `TELECOM_TARGET_PACKAGE` | `voice200` | `voice200` or `5g` preset |
+| `TELECOM_ENTRY_REQUIRED_PARAMS` | `campaignId,channelId,wxopenid` | Query keys that must exist on the entry URL |
+| `TELECOM_EXPECTED_CHANNEL_ID` | `dx531` | Optional exact `channelId` pin for your deployment |
 | `SMS_INBOX_PROVIDER` | `pushplus` | `pushplus` or `http` |
 | `TELECOM_CONNECTIVITY_MODE` | `direct` | Network entry mode |
 
-An activity URL may contain account or campaign identifiers. Use a private
-deployment and store it as a secret. The workflows accept a repository variable
-as a fallback only for URLs that contain no sensitive values.
+Open-source code never ships personal `campaignId` / `wxopenid` / channel pins.
+It only checks path family, required query **keys**, and an optional channel pin
+you set on your fork. See [Configuration](docs/configuration.md#entry-url-open-source-vs-deployment).
+
+Store the real share link as a secret. Use a repository variable for
+`TELECOM_ENTRY_URL` only when the URL contains no account identifiers.
 
 ### 3. Run a probe
 
