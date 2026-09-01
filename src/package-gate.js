@@ -1,4 +1,9 @@
-const { mergeOfferLabels, pageFamilyFromUrl } = require('./offer-inventory');
+const {
+  mergeOfferLabels,
+  pageFamilyFromUrl,
+  classifyActivityRoute,
+  expectedActivityForTarget,
+} = require('./offer-inventory');
 
 function compactText(text) {
   return String(text || '').replace(/\s+/g, '');
@@ -33,20 +38,38 @@ function classifyPackageGate(input = {}) {
   const dialogText = String(input.dialogText || '');
   const packageLabels = mergeOfferLabels(input.packageLabels, input.metaOffers);
   const productName = String(input.productName || '');
+  const targetPackage = String(input.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200');
+  const expected = input.expectedActivity || expectedActivityForTarget(targetPackage);
   const combined = `${dialogText}\n${bodyText}\n${packageLabels.join('\n')}`;
-  const productReady = /preDepositC\w*_list/i.test(url)
-    && productName
-    && textContainsProduct(combined, productName);
-  if (productReady) return { ...input, packageLabels, state: 'ready' };
   if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(compactText(combined))) {
     return { ...input, packageLabels, state: 'already_claimed' };
   }
+  const activity = classifyActivityRoute({
+    url,
+    phase: 'post_login',
+    expected,
+    targetPackage,
+  });
+  if (!activity.ok) {
+    return {
+      ...input,
+      packageLabels,
+      pageFamily: activity.pageFamily || pageFamilyFromUrl(url),
+      state: 'wrong_activity',
+      activity,
+    };
+  }
+  const productReady = /preDepositCfg_/i.test(url)
+    && productName
+    && textContainsProduct(combined, productName);
+  if (productReady) return { ...input, packageLabels, state: 'ready' };
   const offerLabels = packageLabels
     .map(label => String(label || '').replace(/\s+/g, ' ').trim())
     .filter(label => label
       && !/^(提交订单|确认|确定|取消|加载中|温馨提示|去办理)$/.test(label)
       && !/验证码已下发|请注意查收/.test(label));
-  if (/preDepositC\w*_list/i.test(url) && offerLabels.length > 0 && productName && !textContainsProduct(combined, productName)) {
+  // Soft-unavailable only on the configured Cfg activity shell, never on Cfq divert.
+  if (/preDepositCfg_/i.test(url) && offerLabels.length > 0 && productName && !textContainsProduct(combined, productName)) {
     return { ...input, packageLabels: offerLabels, state: 'unavailable' };
   }
   return { ...input, packageLabels, state: compactText(dialogText) ? 'blocked' : 'waiting' };
@@ -81,6 +104,7 @@ function summarizePackageGate(gate = {}) {
     dialog: sanitizeDiagnosticText(gate.dialogText),
     packageLabels: labels,
     bodyPreview: sanitizeDiagnosticText(gate.bodyText).slice(0, 160),
+    activityReason: sanitizeDiagnosticText(gate.activity?.reason || ''),
   };
 }
 

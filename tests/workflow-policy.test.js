@@ -219,13 +219,17 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /dismissBenignDialogs/);
   assert.match(script, /Native Chrome dismissed package-page dialog/);
   assert.match(script, /configured package unavailable/);
+  assert.match(script, /wrong activity page/);
   assert.match(script, /TELECOM_PACKAGE_UNAVAILABLE/);
   assert.match(script, /collectMetaOfferLabels/);
   assert.match(script, /pageFamily/);
   assert.match(script, /summarizeEntryFingerprint/);
+  assert.match(script, /classifyActivityRoute/);
   assert.match(script, /post-login route diagnostics/);
   assert.match(script, /package-unavailable/);
+  assert.match(script, /wrong-activity/);
   assert.match(script, /captureCdpScreenshot\(cdp, 'package-unavailable'\)/);
+  assert.match(script, /captureCdpScreenshot\(cdp, 'wrong-activity'\)/);
 
   assert.match(script, /recentTelecomApiDiagnostics\(packageDiagnosticsStartedAt\)/);
   assert.match(script, /packageDiagnosticsStartedAt = packageStartedAt - 10000/);

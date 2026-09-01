@@ -24,6 +24,7 @@ const {
   summarizeEntryFingerprint,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
+  classifyActivityRoute,
 } = require('../src/offer-inventory');
 
 const root = path.resolve(__dirname, '..');
@@ -516,7 +517,16 @@ async function fillNativePhoneInput(client, phoneValue, timeoutMs = 15000) {
 }
 
 async function navigateToEntryPage(client) {
-  console.log('Native Chrome entry fingerprint', summarizeEntryFingerprint(entryUrl));
+  const entryFingerprint = summarizeEntryFingerprint(entryUrl);
+  console.log('Native Chrome entry fingerprint', entryFingerprint);
+  const entryActivity = classifyActivityRoute({
+    url: entryUrl,
+    phase: 'entry',
+    targetPackage: process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  });
+  if (!entryActivity.ok) {
+    throw new Error(`Native Chrome wrong entry activity page: ${entryActivity.reason}`);
+  }
   let documentStatus = null;
   let lastState = null;
   const startedAt = Date.now();
@@ -1103,6 +1113,15 @@ async function selectTargetPackage(client, productName) {
     if (gate.state === 'already_claimed') {
       return { alreadyClaimed: true, diagnostic: summarizePackageGate(gate) };
     }
+    if (gate.state === 'wrong_activity') {
+      console.log('Native Chrome wrong activity page after login', summarizePackageGate(gate));
+      return {
+        wrongActivity: true,
+        diagnostic: summarizePackageGate(gate),
+        pageFamily,
+        offerLabels: gate.packageLabels || [],
+      };
+    }
     if (gate.state === 'unavailable') {
       console.log('Native Chrome configured package unavailable', summarizePackageGate(gate));
       return {
@@ -1135,6 +1154,15 @@ async function selectTargetPackage(client, productName) {
       console.log('Native Chrome configured package unavailable after wait', summarizePackageGate(gate));
       return {
         packageUnavailable: true,
+        diagnostic: summarizePackageGate(gate),
+        pageFamily: gate.pageFamily,
+        offerLabels: gate.packageLabels || [],
+      };
+    }
+    if (gate.state === 'wrong_activity') {
+      console.log('Native Chrome wrong activity page after wait', summarizePackageGate(gate));
+      return {
+        wrongActivity: true,
         diagnostic: summarizePackageGate(gate),
         pageFamily: gate.pageFamily,
         offerLabels: gate.packageLabels || [],
@@ -2060,6 +2088,10 @@ async function main() {
       packageUnavailable = packageResult.packageUnavailable;
       pageFamily = packageResult.pageFamily || pageFamilyAfterLogin;
       offerLabels = packageResult.offerLabels || [];
+      if (packageResult.wrongActivity) {
+        await captureCdpScreenshot(cdp, 'wrong-activity');
+        throw new Error(`Native Chrome landed on wrong activity page after login: ${JSON.stringify(packageResult.diagnostic)}`);
+      }
       if (alreadyClaimed) {
         console.log('Native Chrome detected an already-claimed package response', packageResult.diagnostic);
         await captureCdpScreenshot(cdp, 'package-already-claimed');

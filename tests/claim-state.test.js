@@ -79,8 +79,8 @@ test('records configured package unavailable as skipped_unavailable without laun
       TELECOM_PHONE: '18500000000',
       TELECOM_ENTRY_URL: 'https://example.test/entry',
       TELECOM_PACKAGE_UNAVAILABLE: 'true',
-      TELECOM_PAGE_FAMILY: 'echnwap',
-      TELECOM_OFFER_LABELS: '3GB通用流量-网龄活动专用',
+      TELECOM_PAGE_FAMILY: 'wap2017',
+      TELECOM_OFFER_LABELS: '网龄享其他套餐',
       DRY_RUN_BEFORE_FINAL_SUBMIT: 'false',
       FORCE_RUN: 'true',
     },
@@ -90,7 +90,7 @@ test('records configured package unavailable as skipped_unavailable without laun
   const state = JSON.parse(fs.readFileSync(path.join(dir, 'state', `${stateMonth()}.json`), 'utf8'));
   assert.equal(state.status, 'skipped_unavailable');
   assert.equal(state.successEvidence, 'configured_package_unavailable');
-  assert.equal(state.pageFamily, 'echnwap');
-  assert.deepEqual(state.offerLabels, ['3GB通用流量-网龄活动专用']);
+  assert.equal(state.pageFamily, 'wap2017');
+  assert.deepEqual(state.offerLabels, ['网龄享其他套餐']);
   fs.rmSync(dir, { recursive: true, force: true });
 });
