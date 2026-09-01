@@ -2106,7 +2106,13 @@ async function main() {
       }
     }
     await wait(800);
-    fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    try {
+      fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (cleanupError) {
+      console.log('Native Chrome profile cleanup failed', {
+        message: sanitizeDiagnosticMessage(cleanupError?.message || cleanupError),
+      });
+    }
   }
 }
 
