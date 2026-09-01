@@ -145,12 +145,14 @@ git show origin/logs:latest.json
 ## 文档
 
 - [配置说明](docs/configuration.md)
+- [北京电信 5GB/200 分钟配置指南](docs/beijing-campaign-setup.zh-CN.md)
+- [Beijing campaign setup (English)](docs/beijing-campaign-setup.md)
 - [网络连接](docs/connectivity.md)
 - [短信来源](docs/sms-providers.md)
 - [开发与排错](docs/development.md)
 - [贡献指南](CONTRIBUTING.md)
-- [安全策略](SECURITY.md)
-- [支持说明](SUPPORT.md)
+- [安全政策](SECURITY.md)
+- [支持](SUPPORT.md)
 
 ## 安全
 
