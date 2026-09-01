@@ -5,12 +5,35 @@ const {
   summarizeEntryFingerprint,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
+  classifyActivityRoute,
 } = require('../src/offer-inventory');
 
 test('classifies page families from telecom urls', () => {
   assert.equal(pageFamilyFromUrl('https://wapbj.189.cn/echnwap/preDepositCfq_list'), 'echnwap');
   assert.equal(pageFamilyFromUrl('https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html'), 'wap2017');
   assert.equal(pageFamilyFromUrl('https://example.test/other'), 'unknown');
+});
+
+test('accepts HighPic entry and rejects echnwap login entry', () => {
+  assert.equal(classifyActivityRoute({
+    phase: 'entry',
+    url: 'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&version=V1',
+  }).ok, true);
+  assert.equal(classifyActivityRoute({
+    phase: 'entry',
+    url: 'https://wapbj.189.cn/echnwap/preDepositHigh_login?campaignId=1&channelId=dxts',
+  }).state, 'wrong_activity');
+});
+
+test('rejects Cfq post-login divert as wrong activity', () => {
+  assert.equal(classifyActivityRoute({
+    phase: 'post_login',
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+  }).state, 'wrong_activity');
+  assert.equal(classifyActivityRoute({
+    phase: 'post_login',
+    url: 'https://wapbj.189.cn/wap2017/preDepositCfg_list',
+  }).ok, true);
 });
 
 test('summarizes entry fingerprint without raw secrets', () => {

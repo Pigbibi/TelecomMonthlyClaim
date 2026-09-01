@@ -107,8 +107,8 @@ The monthly workflow writes `state/YYYY-MM.json` to `main`.
 | Status | Meaning | Schedule / Issue |
 | --- | --- | --- |
 | `success` | Claimed or already claimed | Skip later ordinary runs |
-| `skipped_unavailable` | Logged in, but configured SKU not in cold-session offers | Soft skip; not an engineering failure issue |
-| `failed` | Login / slider / proxy / submit error | Retry; issue only on final retry day |
+| `skipped_unavailable` | Logged in on the **expected** Cfg activity, but configured SKU not in offers | Soft skip; not an engineering failure issue |
+| `failed` | Login / slider / proxy / submit error, or **wrong activity page** (for example echnwap `preDepositCfq_*`) | Retry; issue only on final retry day |
 
 A later engineering failure does not overwrite an existing `success` or
 `skipped_unavailable` state.
@@ -116,6 +116,17 @@ A later engineering failure does not overwrite an existing `success` or
 
 If the carrier page clearly reports an already-completed claim, the run records
 that page as success evidence instead of requesting another confirmation SMS.
+
+### Expected activity hard gate (`voice200`)
+
+Only continue when both are true:
+
+1. Entry URL is `wap2017` `preDepositHighPic_check.html` (orange 成长礼 shell).
+2. After SMS login the session stays on `wap2017` (typically `preDepositCfg_*`).
+
+Landing on `echnwap/preDepositCfq_*` (or any other echnwap package shell) is a
+**hard failure** (`wrong_activity`), not a soft skip. Do not claim alternate
+data packs from the diverted catalog.
 
 ### Warm browser vs cold automation
 
@@ -134,9 +145,14 @@ Recovery options, in order:
    only see data packs, the campaign cold catalog no longer includes voice.
 2. Fresh WeChat / official share entry for the September voice entitlement, then
    update `TELECOM_ENTRY_URL` (keep secrets out of git).
-3. Do not claim unconfigured 3GB; leave `skipped_unavailable`.
+3. Do not claim unconfigured 3GB; leave the run failed on `wrong_activity` until
+   a correct Cfg entry/session is available.
 
 Do not treat a warm local session as proof that CI will see the same packages.
+
+Slider vision (CodexGateway / Gemini) stays enabled: the Sep login puzzle no
+longer exposes the legacy image DOM, so local template match alone is not
+enough. Vision is only for slider geometry, not for choosing packages.
 
 ## Additional guides
 

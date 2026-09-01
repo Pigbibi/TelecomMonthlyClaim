@@ -9,6 +9,82 @@ function pageFamilyFromUrl(url) {
   return 'unknown';
 }
 
+/**
+ * voice200 (and default) expect the orange HighPic entry and wap2017 Cfg
+ * confirm/list after SMS login. The Sep cold divert into echnwap Cfq is the
+ * wrong activity shell and must fail closed instead of soft-skipping.
+ */
+function expectedActivityForTarget(targetPackage = 'voice200') {
+  void targetPackage;
+  return {
+    id: 'wap2017_cfg',
+    pageFamily: 'wap2017',
+    entryPathPattern: /preDepositHighPic_check\.html/i,
+    postLoginPathPattern: /preDepositCfg_/i,
+    forbiddenPostLoginPathPattern: /preDepositCfq_/i,
+  };
+}
+
+function safePathname(url) {
+  try {
+    return new URL(String(url || '')).pathname;
+  } catch {
+    const value = String(url || '');
+    const match = value.match(/https?:\/\/[^/]+(\/[^?#]*)/i);
+    return match ? match[1] : value;
+  }
+}
+
+function classifyActivityRoute(input = {}) {
+  const phase = input.phase === 'entry' ? 'entry' : 'post_login';
+  const expected = input.expected || expectedActivityForTarget(input.targetPackage);
+  const url = String(input.url || '');
+  const path = safePathname(url);
+  const pageFamily = pageFamilyFromUrl(url);
+
+  if (phase === 'entry') {
+    if (pageFamily === expected.pageFamily && expected.entryPathPattern.test(path)) {
+      return { ok: true, state: 'ok', phase, pageFamily, path, expectedId: expected.id };
+    }
+    return {
+      ok: false,
+      state: 'wrong_activity',
+      phase,
+      pageFamily,
+      path,
+      expectedId: expected.id,
+      reason: `expected ${expected.pageFamily} HighPic entry, got ${pageFamily} ${path}`,
+    };
+  }
+
+  if (expected.forbiddenPostLoginPathPattern.test(path) || pageFamily === 'echnwap') {
+    return {
+      ok: false,
+      state: 'wrong_activity',
+      phase,
+      pageFamily,
+      path,
+      expectedId: expected.id,
+      reason: `expected ${expected.pageFamily} Cfg activity after login, got ${pageFamily} ${path}`,
+    };
+  }
+
+  // Stay on wap2017 (HighPic → Cfg/confirm) while the package UI settles.
+  if (pageFamily === expected.pageFamily) {
+    return { ok: true, state: 'ok', phase, pageFamily, path, expectedId: expected.id };
+  }
+
+  return {
+    ok: false,
+    state: 'wrong_activity',
+    phase,
+    pageFamily,
+    path,
+    expectedId: expected.id,
+    reason: `expected ${expected.pageFamily} activity after login, got ${pageFamily} ${path}`,
+  };
+}
+
 function summarizeEntryFingerprint(url) {
   try {
     const parsed = new URL(String(url || ''));
@@ -89,6 +165,8 @@ function mergeOfferLabels(...lists) {
 
 module.exports = {
   pageFamilyFromUrl,
+  expectedActivityForTarget,
+  classifyActivityRoute,
   summarizeEntryFingerprint,
   looksLikeOfferLabel,
   extractOfferLabelsFromMeta,
