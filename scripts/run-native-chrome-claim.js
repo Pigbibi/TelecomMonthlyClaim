@@ -11,7 +11,11 @@ const {
   isFlatPuzzleCandidateReliable,
   preferCanvasTransparentMatch,
 } = require('../src/slider-canvas-match');
-const { estimateSliderDistanceWithVision, visionProvidersConfigured } = require('../src/slider-vision');
+const {
+  estimateSliderDistanceWithVision,
+  visionProvidersConfigured,
+  isVisionPuzzleLoading,
+} = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
 const { classifyPackageGate, summarizePackageGate, productMatchAliases } = require('../src/package-gate');
@@ -1470,9 +1474,65 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
   return preferCanvasTransparentMatch(local, rawInfo);
 }
 
+async function waitForPuzzleCanvasReady(client, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await client.evaluate(`(() => {
+      ${findPuzzleSliderJs()}
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const root = document.querySelector(${JSON.stringify(puzzleRootSelector)}) || document;
+      const text = String(root.innerText || '').replace(/\\s+/g, '');
+      const loadingText = /加载中|请稍候|转圈/.test(text);
+      const bg = document.querySelector('#slider_bg_image');
+      const block = document.querySelector('#slider_block_image');
+      const legacyReady = !!(bg?.complete && bg.naturalWidth > 40 && block?.complete && block.naturalWidth > 10);
+      const canvases = [...root.querySelectorAll('canvas:not(.block),canvas')]
+        .filter(item => visible(item) && item.getBoundingClientRect().width >= 80 && item.getBoundingClientRect().height >= 40);
+      let colorful = 0;
+      for (const source of canvases) {
+        try {
+          const sample = source.getContext('2d').getImageData(0, 0, Math.min(source.width, 80), Math.min(source.height, 40)).data;
+          for (let i = 0; i < sample.length; i += 16) {
+            const r = sample[i]; const g = sample[i + 1]; const b = sample[i + 2];
+            if (Math.max(r, g, b) - Math.min(r, g, b) > 12 || r < 245 || g < 245 || b < 245) colorful += 1;
+          }
+        } catch {}
+      }
+      const slider = findPuzzleSlider(root, ${JSON.stringify(puzzleSliderSelectors)});
+      return {
+        ready: legacyReady || (colorful >= 8 && !!slider),
+        loadingText,
+        colorful,
+        canvasCount: canvases.length,
+        hasSlider: !!slider,
+      };
+    })()`).catch(() => null);
+    if (last?.ready) return last;
+    await wait(400);
+  }
+  return last;
+}
+
 async function solvePuzzleWithVisionFallback(client) {
   if (!visionConfigured()) {
     return { ok: false, reason: 'vision-not-configured' };
+  }
+  const painted = await waitForPuzzleCanvasReady(client, 20000);
+  if (!painted?.ready && (painted?.loadingText || !painted?.hasSlider)) {
+    return {
+      ok: false,
+      reason: 'puzzle-still-loading',
+      colorful: painted?.colorful || 0,
+      canvasCount: painted?.canvasCount || 0,
+      hasSlider: !!painted?.hasSlider,
+      loadingText: !!painted?.loadingText,
+    };
   }
   const screenshot = await client.send('Page.captureScreenshot', {
     format: 'png',
@@ -1491,6 +1551,7 @@ async function solvePuzzleWithVisionFallback(client) {
         return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
       };
       const root = document.querySelector(${JSON.stringify(puzzleRootSelector)}) || document;
+      const loadingText = /加载中|请稍候|转圈/.test(String(root.innerText || '').replace(/\\s+/g, ''));
       const canvases = [...root.querySelectorAll('canvas:not(.block),canvas')]
         .filter(item => visible(item) && item.getBoundingClientRect().width >= 80 && item.getBoundingClientRect().height >= 40)
         .sort((left, right) => {
@@ -1500,6 +1561,16 @@ async function solvePuzzleWithVisionFallback(client) {
         });
       const source = canvases[0] || (visible(root) && root !== document ? root : null);
       const slider = findPuzzleSlider(root, ${JSON.stringify(puzzleSliderSelectors)});
+      if (loadingText && !canvases.length) {
+        return resolve({
+          ok: false,
+          reason: 'puzzle-still-loading',
+          rootClass: root === document ? '' : String(root.className || '').slice(0, 120),
+          hasSource: !!source,
+          hasSlider: !!slider,
+          canvasCount: 0,
+        });
+      }
       if (source && source.tagName === 'CANVAS') {
         try {
           const sample = source.getContext('2d').getImageData(0, 0, Math.min(source.width, 80), Math.min(source.height, 40)).data;
@@ -1584,8 +1655,7 @@ async function solvePuzzleWithVisionFallback(client) {
     imageWidth: crop.imageWidth,
     cssWidth: crop.sourceWidth || crop.canvasWidth,
   });
-  const loadingHint = `${vision.reason || ''} ${vision.body || ''}`.toLowerCase();
-  if (/loading|spinner|not yet visible|加载中|请稍候/.test(loadingHint)) {
+  if (isVisionPuzzleLoading(vision) || vision.reason === 'puzzle-still-loading') {
     return {
       ok: false,
       reason: 'puzzle-still-loading',
@@ -1726,12 +1796,13 @@ async function solveConfirmationSlider(client) {
       if (
         visionAttempt?.reason === 'puzzle-assets-missing'
         || visionAttempt?.reason === 'puzzle-still-loading'
+        || visionAttempt?.reason === 'vision-gateway-and-http-failed'
         || visionAttempt?.reason === 'vision-x-out-of-range'
         || visionAttempt?.reason === 'low-confidence'
         || /^vision-http-/.test(visionAttempt?.reason || '')
         || /^vision-finish-/.test(visionAttempt?.reason || '')
       ) {
-        await wait(1200);
+        await wait(visionAttempt?.reason === 'puzzle-still-loading' ? 2000 : 1200);
         continue;
       }
       return null;
