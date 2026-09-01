@@ -265,7 +265,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /confirmation slider target missing after local canvas match/);
   assert.match(script, /puzzle-still-loading/);
   assert.match(script, /waitForPuzzleCanvasReady/);
-  assert.match(script, /vision-gateway-and-http-failed/);
+  assert.match(vision, /vision-gateway-and-http-failed/);
   assert.match(script, /isVisionPuzzleLoading/);
   assert.match(script, /slider attempt rejected/);
   assert.match(script, /vision-direct/);
