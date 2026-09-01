@@ -418,6 +418,16 @@ async function readNativePhoneState(client, { clickSmsTab = false } = {}) {
       scriptCount: document.scripts.length,
       htmlLength: document.documentElement?.outerHTML?.length || 0,
       bodyTextLength: (document.body?.innerText || '').length,
+      inputs: [...document.querySelectorAll('input')].slice(0, 8).map(element => ({
+        type: element.type || '',
+        id: element.id || '',
+        name: element.name || '',
+        className: String(element.className || '').slice(0, 120),
+        placeholder: String(element.getAttribute('placeholder') || '').slice(0, 80),
+        inputMode: element.inputMode || '',
+        maxLength: Number(element.maxLength),
+        visible: visible(element),
+      })),
     };
   })()`);
 }
