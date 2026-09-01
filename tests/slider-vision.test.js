@@ -234,3 +234,25 @@ test('falls back to TELECOM_VISION_API_KEY for non-Gemini providers', async () =
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init.headers.Authorization, 'Bearer openai-test-key');
 });
+
+test('accepts fractional x from Codex-style ratios', async () => {
+  const { finalizeVisionParse } = require('../src/slider-vision');
+  // finalize not exported - exercise via HTTP mock instead
+  global.fetch = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"x":0.52,"move":0.18,"confidence":0.9,"reason":"ratio"}' }] } }],
+    }),
+  });
+  const result = await withVisionEnv({
+    TELECOM_VISION_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+    GEMINI_API_KEY: 'k',
+    TELECOM_VISION_MODE: 'gemini',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: 'data:image/png;base64,bg',
+    imageWidth: 900,
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.naturalX, 468);
+  assert.equal(result.moveX, 162);
+});

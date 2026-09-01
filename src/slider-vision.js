@@ -69,13 +69,28 @@ function decodePngBase64(value) {
 }
 
 function finalizeVisionParse(parsed, imageWidth, method) {
-  let x = Math.round(pickFirstNumber(parsed, ['x', 'gapX', 'holeX', 'targetX', 'offsetX']));
-  let move = Math.round(pickFirstNumber(parsed, ['move', 'distance', 'sliderDistance', 'drag', 'dragX']));
+  let x = pickFirstNumber(parsed, ['x', 'gapX', 'holeX', 'targetX', 'offsetX']);
+  let move = pickFirstNumber(parsed, ['move', 'distance', 'sliderDistance', 'drag', 'dragX']);
+  // Codex sometimes returns ratios instead of pixels.
+  if (Number.isFinite(x) && x > 0 && x <= 1.5) x *= imageWidth;
+  if (Number.isFinite(move) && move > 0 && move <= 1.5) {
+    const asImageFrac = move * imageWidth;
+    const asTrackFrac = move * 220;
+    if (asImageFrac >= 40 && asImageFrac <= 280) move = asImageFrac;
+    else if (asTrackFrac >= 40 && asTrackFrac <= 280) move = asTrackFrac;
+    else move = asImageFrac;
+  }
+  x = Math.round(x);
+  move = Math.round(move);
   if (!Number.isFinite(x) && Number.isFinite(move) && move > 280 && move <= Math.max(80, imageWidth - 20)) {
     x = move;
     move = NaN;
   }
   if (Number.isFinite(move) && Number.isFinite(x) && Math.abs(move - x) <= 2 && move > 280) {
+    move = NaN;
+  }
+  // If model duplicated gap-x into move (both mid-range image coords), keep x and drop move.
+  if (Number.isFinite(move) && Number.isFinite(x) && Math.abs(move - x) <= 2 && x > 280) {
     move = NaN;
   }
   const maxX = Math.max(80, imageWidth - 20);
@@ -87,6 +102,8 @@ function finalizeVisionParse(parsed, imageWidth, method) {
       reason: 'vision-x-out-of-range',
       parsed,
       imageWidth,
+      x,
+      move,
       method,
     };
   }
@@ -430,21 +447,50 @@ async function estimateWithHttpVision({
     };
   }
 
-  let requestUrl = url;
   if (mode === 'gemini') {
-    const parsedUrl = new URL(url);
-    if (!parsedUrl.searchParams.has('key')) parsedUrl.searchParams.set('key', key);
-    requestUrl = parsedUrl.toString();
     delete headers.Authorization;
   } else {
     headers.Authorization = mode === 'anthropic' ? undefined : `Bearer ${key}`;
     if (headers.Authorization === undefined) delete headers.Authorization;
   }
 
-  const resp = await fetch(requestUrl, { method: 'POST', headers, body: JSON.stringify(body) });
-  const text = await resp.text();
-  if (!resp.ok) {
-    return { ok: false, reason: `vision-http-${resp.status}`, body: text.slice(0, 300), method: mode };
+  const modelFallbacks = mode === 'gemini'
+    ? [...new Set([
+      model,
+      process.env.TELECOM_VISION_FALLBACK_MODEL || '',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      DEFAULT_GEMINI_MODEL,
+    ].filter(Boolean))]
+    : [model];
+  let resp;
+  let text = '';
+  let usedModel = model;
+  for (let i = 0; i < modelFallbacks.length; i += 1) {
+    usedModel = modelFallbacks[i];
+    let attemptUrl = url;
+    if (mode === 'gemini') {
+      const parsedUrl = new URL(
+        /\/models\/[^/:]+/.test(url)
+          ? url.replace(/\/models\/[^/:]+/, `/models/${usedModel}`)
+          : `https://generativelanguage.googleapis.com/v1beta/models/${usedModel}:generateContent`,
+      );
+      if (!parsedUrl.searchParams.has('key')) parsedUrl.searchParams.set('key', key);
+      attemptUrl = parsedUrl.toString();
+    } else if (mode !== 'anthropic') {
+      body = { ...body, model: usedModel };
+      attemptUrl = url;
+    }
+    resp = await fetch(attemptUrl, { method: 'POST', headers, body: JSON.stringify(body) });
+    text = await resp.text();
+    if (resp.ok) break;
+    if (![429, 503, 500].includes(resp.status) || i === modelFallbacks.length - 1) {
+      return { ok: false, reason: `vision-http-${resp.status}`, body: text.slice(0, 300), method: mode, model: usedModel };
+    }
+    await new Promise(resolve => setTimeout(resolve, 800 * (i + 1)));
+  }
+  if (!resp?.ok) {
+    return { ok: false, reason: `vision-http-${resp?.status || 'error'}`, body: text.slice(0, 300), method: mode, model: usedModel };
   }
   let data;
   try { data = JSON.parse(text); } catch {
@@ -514,6 +560,10 @@ async function estimateSliderDistanceWithVision(options = {}) {
     }
     console.warn(`CodexGateway slider vision failed (${gateway.reason}); falling back to direct Gemini/HTTP`, {
       body: gateway.body,
+      parsed: gateway.parsed,
+      x: gateway.x,
+      move: gateway.move,
+      imageWidth: gateway.imageWidth,
     });
   }
 
