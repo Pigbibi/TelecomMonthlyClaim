@@ -230,6 +230,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /chooseVisionMoveX/);
   assert.match(script, /findPuzzleSlider/);
   assert.match(script, /visionMoveX/);
+  assert.match(script, /cssWidth/);
+  assert.match(script, /vision-x-out-of-range/);
   assert.match(script, /Always drag the distance for THIS challenge/);
   assert.match(script, /puzzle-still-loading/);
   assert.match(script, /slider attempt rejected/);

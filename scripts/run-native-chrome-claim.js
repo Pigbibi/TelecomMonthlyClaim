@@ -1463,6 +1463,7 @@ async function solvePuzzleWithVisionFallback(client) {
   const vision = await estimateSliderDistanceWithVision({
     bgPngBase64: crop.cropPng,
     imageWidth: crop.imageWidth,
+    cssWidth: crop.sourceWidth || crop.canvasWidth,
   });
   const loadingHint = `${vision.reason || ''} ${vision.body || ''}`.toLowerCase();
   if (/loading|spinner|not yet visible|加载中|请稍候/.test(loadingHint)) {
@@ -1473,6 +1474,8 @@ async function solvePuzzleWithVisionFallback(client) {
       slider: crop.slider,
       imageWidth: crop.imageWidth,
       visionReason: vision.reason || '',
+      visionBody: vision.body || '',
+      visionParsed: vision.parsed || null,
     };
   }
   if (!vision.ok || vision.confidence < 0.55) {
@@ -1482,6 +1485,10 @@ async function solvePuzzleWithVisionFallback(client) {
       confidence: vision.confidence || 0,
       slider: crop.slider,
       imageWidth: crop.imageWidth,
+      canvasWidth: crop.canvasWidth,
+      sourceWidth: crop.sourceWidth,
+      visionBody: vision.body || '',
+      visionParsed: vision.parsed || null,
     };
   }
   const chosen = chooseVisionMoveX({
@@ -1565,7 +1572,7 @@ async function solveConfirmationSlider(client) {
       console.log('Native Chrome vision-first slider attempt', {
         ok: visionAttempt?.ok,
         reason: visionAttempt?.reason,
-        confidence: visionAttempt?.confidence || visionAttempt?.vision?.confidence,
+        confidence: visionAttempt?.confidence ?? visionAttempt?.vision?.confidence,
         method: visionAttempt?.method,
         moveX: visionAttempt?.moveX,
         moveCandidates: visionAttempt?.moveCandidates || visionAttempt?.candidates,
@@ -1578,11 +1585,21 @@ async function solveConfirmationSlider(client) {
         screenshotScaleX: visionAttempt?.screenshotScaleX,
         imageWidth: visionAttempt?.imageWidth,
         canvasWidth: visionAttempt?.canvasWidth,
+        sourceWidth: visionAttempt?.sourceWidth,
         slider: visionAttempt?.slider,
+        visionParsed: visionAttempt?.visionParsed,
+        visionBody: visionAttempt?.visionBody,
       });
       if (visionAttempt?.ok && visionAttempt.moveX >= 40) return visionAttempt;
-      if (visionAttempt?.reason === 'puzzle-assets-missing' || visionAttempt?.reason === 'puzzle-still-loading') {
-        await wait(1000);
+      if (
+        visionAttempt?.reason === 'puzzle-assets-missing'
+        || visionAttempt?.reason === 'puzzle-still-loading'
+        || visionAttempt?.reason === 'vision-x-out-of-range'
+        || visionAttempt?.reason === 'low-confidence'
+        || /^vision-http-/.test(visionAttempt?.reason || '')
+        || /^vision-finish-/.test(visionAttempt?.reason || '')
+      ) {
+        await wait(1200);
         continue;
       }
       return null;
