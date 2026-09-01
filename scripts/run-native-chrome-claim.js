@@ -655,28 +655,44 @@ async function openSliderChallenge(client, phone) {
       };
       const bg = document.querySelector('#slider_bg_image');
       const block = document.querySelector('#slider_block_image');
-      const root = document.querySelector('.puzzle-verify-popup,.captcha-wrapper') || document;
+      const popup = document.querySelector('.puzzle-verify-popup,.puzzle-verify-container,.captcha-wrapper');
+      const root = popup || document;
       const canvas = [...root.querySelectorAll('canvas')]
         .find(element => visible(element) && element.width >= 100 && element.height >= 50);
-      const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+      const slider = [
+        '#slider_track_btn', '.slider-btn', '.slider', '[role="slider"]',
+        'input[type="range"]', '[class*="slider" i]', '[class*="drag" i]', '[class*="handle" i]',
+      ]
         .map(selector => root.querySelector(selector))
         .find(visible);
       const message = document.querySelector('#slider_check_msg,.slider-check-msg,.puzzle-msg')?.innerText?.trim() || '';
+      const challengeVisible = visible(popup)
+        && /请完成安全验证|向右滑动滑块|滑动滑块/.test(popup.innerText || '');
       return {
         ready: !!(
           (bg?.complete && bg.naturalWidth > 40 && block?.complete && block.naturalWidth > 10)
           || (canvas && slider)
         ),
+        challengeVisible,
         busy: /服务繁忙|请稍后再试/.test(message),
       };
     })()`);
     if (state?.ready) return;
     if (state?.busy) throw new Error('Native Chrome getSliderChallenge was rejected before Playwright attachment');
+    // Probe mode deliberately blocks the SMS endpoints and never submits the
+    // challenge. A visible challenge paired with the successful challenge API
+    // response is therefore the complete, side-effect-free assertion.
+    if (probeOnly && state?.challengeVisible && networkEvents.some(event => (
+      event.phase === 'response'
+      && /getSliderChallenge/i.test(event.pathname)
+      && event.status >= 200
+      && event.status < 300
+    ))) return;
     await wait(500);
   }
   const finalState = await client.evaluate(`(() => ({
     buttonText: (document.querySelector('.checknum-button.slider-sms-btn,.checknum-button,.slider-sms-btn,.content_send_unlog,#sendCode')?.innerText || '').trim(),
-    sliderPresent: !!document.querySelector('#slider_bg_image,#slider_check,.slider-check-box'),
+    sliderPresent: !!document.querySelector('#slider_bg_image,#slider_check,.slider-check-box,.puzzle-verify-popup,.puzzle-verify-container,.captcha-wrapper'),
     candidates: [...new Set([
       ...document.querySelectorAll('.content_send_unlog,#sendCode,.slider-sms-btn,.checknum-button.slider-sms-btn,.checknum-button'),
       ...document.elementsFromPoint(${JSON.stringify(point.x)}, ${JSON.stringify(point.y)}),
