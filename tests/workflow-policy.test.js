@@ -292,8 +292,10 @@ test('native Chrome redacts sensitive form fields before failure screenshots', (
   assert.match(script, /redactSensitivePageFields/);
   assert.match(script, /querySelectorAll\('input,textarea,\[contenteditable="true"\]'\)/);
   assert.match(script, /createTreeWalker\(document\.body, NodeFilter\.SHOW_TEXT\)/);
+  assert.match(script, /return client\.evaluate\(/);
   assert.ok(script.indexOf('await redactSensitivePageFields(client)') < script.indexOf("Page.captureScreenshot', { format: 'png'"));
-  assert.match(script, /if \(!await redactSensitivePageFields\(client\)\) return/);
+  assert.doesNotMatch(script, /if \(!await redactSensitivePageFields\(client\)\) return/);
+  assert.match(script, /Native Chrome saved debug screenshot/);
 });
 
 test('native Chrome login timeout diagnostics stay metadata-only', () => {
