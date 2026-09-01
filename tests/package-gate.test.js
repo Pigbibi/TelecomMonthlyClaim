@@ -10,6 +10,14 @@ test('classifies a rendered target package as ready', () => {
   }).state, 'ready');
 });
 
+test('accepts redesigned preDepositCfq_list package path', () => {
+  assert.equal(classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '互联网卡网龄享200分钟国内语音 去办理',
+    productName: '互联网卡网龄享200分钟国内语音',
+  }).state, 'ready');
+});
+
 test('classifies explicit duplicate claim wording', () => {
   assert.equal(classifyPackageGate({
     url: 'https://wapbj.189.cn/wap2017/index',

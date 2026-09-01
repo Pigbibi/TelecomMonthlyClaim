@@ -8,7 +8,7 @@ function classifyPackageGate(input = {}) {
   const dialogText = String(input.dialogText || '');
   const productName = String(input.productName || '');
   const combined = compactText(`${dialogText}\n${bodyText}`);
-  const productReady = url.includes('preDepositCfg_list')
+  const productReady = /preDepositC\w*_list/i.test(url)
     && productName
     && combined.includes(compactText(productName));
   if (productReady) return { ...input, state: 'ready' };
