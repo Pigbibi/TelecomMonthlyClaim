@@ -428,38 +428,121 @@ async function openSliderChallenge(client, phone) {
     await client.send('Input.insertText', { text: digit });
     await wait(70 + Math.floor(Math.random() * 90));
   }
-  await wait(900 + Math.floor(Math.random() * 900));
-  const point = await client.evaluate(`(() => {
-    const selectors = ['.content_send_unlog','#sendCode','.slider-sms-btn','.checknum-button.slider-sms-btn','.checknum-button'];
+  // Telecom's login UI often keeps the SMS button hidden/disabled until the phone
+  // field commits a valid 11-digit value via change/blur.
+  const phoneCommit = await client.evaluate(`(() => {
+    const input = document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]');
+    if (!input) return { ok: false, reason: 'missing-input' };
+    const expected = ${JSON.stringify(String(phone || ''))};
+    if (String(input.value || '') !== expected) {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+      if (setter) setter.call(input, expected); else input.value = expected;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.blur();
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+    return {
+      ok: true,
+      valueLength: String(input.value || '').length,
+      matchesExpected: String(input.value || '') === expected,
+    };
+  })()`);
+  if (!phoneCommit?.ok || !phoneCommit.matchesExpected || phoneCommit.valueLength !== 11) {
+    throw new Error(`Native Chrome phone input did not commit before SMS send: ${JSON.stringify(phoneCommit)}`);
+  }
+
+  const findAndClickSmsButton = `(() => {
+    const selectors = [
+      '.content_send_unlog',
+      '#sendCode',
+      '.slider-sms-btn',
+      '.checknum-button.slider-sms-btn',
+      '.checknum-button',
+      '[onclick*="send"]',
+      '[onclick*="Send"]',
+    ];
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      return rect.width > 0 && rect.height > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.pointerEvents !== 'none'
+        && Number(style.opacity || '1') > 0.05;
     };
-    const textButton = [...document.querySelectorAll('button,a,div,span')]
-      .filter(element => visible(element) && /^(获取验证码|点击获取)$/.test((element.innerText || '').replace(/\s+/g, '')))
+    const normalize = text => String(text || '').replace(/\\s+/g, '');
+    const labelOk = text => /^(获取验证码|点击获取|发送验证码|获取短信验证码|点击获取验证码)$/.test(normalize(text))
+      || /获取验证码|发送验证码|点击获取/.test(normalize(text));
+    const textButton = [...document.querySelectorAll('button,a,div,span,input[type="button"],input[type="submit"]')]
+      .filter(element => visible(element) && !element.disabled && labelOk(element.innerText || element.value || element.textContent))
       .sort((left, right) => {
         const a = left.getBoundingClientRect();
         const b = right.getBoundingClientRect();
         return a.width * a.height - b.width * b.height;
       })[0];
-    const button = textButton || selectors.map(selector => document.querySelector(selector)).find(visible);
-    if (!button) return null;
+    const button = textButton || selectors.map(selector => document.querySelector(selector)).find(element => visible(element) && !element.disabled);
+    if (!button) {
+      const candidates = [...document.querySelectorAll('button,a,div,span,input[type="button"],input[type="submit"],.content_send_unlog,#sendCode,.slider-sms-btn,.checknum-button')]
+        .slice(0, 30)
+        .map(element => {
+          const rect = element.getBoundingClientRect();
+          return {
+            tag: element.tagName,
+            id: element.id || '',
+            className: String(element.className || '').slice(0, 120),
+            text: normalize(element.innerText || element.value || element.textContent).slice(0, 40),
+            disabled: !!element.disabled,
+            visible: visible(element),
+            rect: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)],
+          };
+        })
+        .filter(item => item.text || item.id || /send|sms|code|checknum|验证码|获取/i.test(item.className + ' ' + item.text));
+      return {
+        clicked: false,
+        href: location.href,
+        title: document.title || '',
+        bodySnippet: (document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 240),
+        phoneValueLength: String(document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]')?.value || '').length,
+        candidates,
+      };
+    }
     const rect = button.getBoundingClientRect();
     const x = rect.x + rect.width / 2;
     const y = rect.y + rect.height / 2;
     const hit = document.elementFromPoint(x, y);
     button.click();
     return {
+      clicked: true,
       x,
       y,
-      text: (button.innerText || button.textContent || '').trim(),
+      text: (button.innerText || button.value || button.textContent || '').trim(),
       disabled: !!button.disabled,
       hitInsideButton: hit === button || button.contains(hit),
+      href: location.href,
+      title: document.title || '',
     };
-  })()`);
-  if (!point) throw new Error('Native Chrome SMS button missing');
+  })()`;
+
+  let point = null;
+  const smsButtonDeadline = Date.now() + 15000;
+  while (Date.now() < smsButtonDeadline) {
+    point = await client.evaluate(findAndClickSmsButton);
+    if (point?.clicked) break;
+    await wait(500);
+  }
+  if (!point?.clicked) {
+    console.log('Native Chrome SMS button diagnostics', point);
+    throw new Error(`Native Chrome SMS button missing: ${JSON.stringify({
+      href: point?.href,
+      title: point?.title,
+      phoneValueLength: point?.phoneValueLength,
+      candidateCount: Array.isArray(point?.candidates) ? point.candidates.length : 0,
+      candidates: (point?.candidates || []).slice(0, 8),
+      bodySnippet: point?.bodySnippet,
+    })}`);
+  }
 
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
