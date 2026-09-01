@@ -1927,7 +1927,7 @@ async function redactSensitivePageFields(client) {
   })()`).catch(() => false);
 }
 
-async function captureCdpScreenshot(client) {
+async function captureCdpScreenshot(client, label = 'native-chrome-preflight-failed') {
   try {
     await client.send('Page.enable');
     if (!await redactSensitivePageFields(client)) return;
@@ -1935,7 +1935,8 @@ async function captureCdpScreenshot(client) {
     if (!screenshot?.data) return;
     const artifactDir = path.join(root, 'artifacts', 'claim-debug');
     fs.mkdirSync(artifactDir, { recursive: true });
-    fs.writeFileSync(path.join(artifactDir, `${Date.now()}-native-chrome-preflight-failed.png`), Buffer.from(screenshot.data, 'base64'));
+    const safeLabel = String(label || 'capture').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 64);
+    fs.writeFileSync(path.join(artifactDir, `${Date.now()}-${safeLabel}.png`), Buffer.from(screenshot.data, 'base64'));
   } catch {}
 }
 
@@ -2012,8 +2013,10 @@ async function main() {
       offerLabels = packageResult.offerLabels || [];
       if (alreadyClaimed) {
         console.log('Native Chrome detected an already-claimed package response', packageResult.diagnostic);
+        await captureCdpScreenshot(cdp, 'package-already-claimed');
       } else if (packageUnavailable) {
         console.log('Native Chrome skipping claim; configured package unavailable', packageResult.diagnostic);
+        await captureCdpScreenshot(cdp, 'package-unavailable');
       } else {
         await openConfirmationSlider(cdp);
         const confirmationDistance = await solveConfirmationSlider(cdp);
