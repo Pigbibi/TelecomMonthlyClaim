@@ -213,7 +213,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /legacy login slider images unavailable; using vision-first puzzle solver/);
   assert.match(script, /return solveConfirmationSlider\(client\)/);
   assert.match(script, /SmsInboxClient/);
-  assert.match(script, /preDepositC\\w\*_list/);
+  assert.match(script, /preDepositC\\\\w\*_list/);
   assert.match(script, /login completed before Playwright attachment/);
   assert.match(script, /Native Chrome package page diagnostics/);
   assert.match(script, /recentTelecomApiDiagnostics\(packageDiagnosticsStartedAt\)/);

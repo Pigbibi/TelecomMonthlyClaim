@@ -128,7 +128,7 @@ function sliderOutputSchema() {
       confidence: { type: 'number' },
       reason: { type: 'string' },
     },
-    required: ['x', 'move'],
+    required: ['x', 'move', 'confidence', 'reason'],
   };
 }
 
