@@ -227,6 +227,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /Native Chrome vision-first slider attempt/);
   assert.match(script, /vision solver skipped: set GEMINI_API_KEY/);
   assert.match(script, /solvePuzzleWithVisionFallback/);
+  assert.match(script, /chooseVisionMoveX/);
+  assert.match(script, /findPuzzleSlider/);
   assert.match(script, /vision-direct/);
   assert.match(script, /puzzle-verify-popup/);
   assert.match(script, /\.refreshIcon.*#slider_refresh_icon.*\.slider-refresh-icon/);
