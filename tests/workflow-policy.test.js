@@ -216,6 +216,9 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /preDepositC\\\\w\*_list/);
   assert.match(script, /login completed before Playwright attachment/);
   assert.match(script, /Native Chrome package page diagnostics/);
+  assert.match(script, /dismissBenignDialogs/);
+  assert.match(script, /Native Chrome dismissed package-page dialog/);
+
   assert.match(script, /recentTelecomApiDiagnostics\(packageDiagnosticsStartedAt\)/);
   assert.match(script, /packageDiagnosticsStartedAt = packageStartedAt - 10000/);
   assert.match(script, /recentRuntimeDiagnostics\(packageDiagnosticsStartedAt\)/);
