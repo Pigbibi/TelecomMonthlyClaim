@@ -1140,35 +1140,37 @@ function chooseVisionMoveX({
 }) {
   const scale = Number(screenshotScaleX) > 0 ? Number(screenshotScaleX) : 1;
   const gapCssX = Number(sourceX) + Number(naturalX) / scale;
-  const ratios = [];
+  const cssFromCrop = Number(naturalX) / scale;
   const width = Number(canvasWidth) || Number(imageWidth) / scale;
-  if (Number.isFinite(width) && width > 60) ratios.push((width - 40) / (width - 60));
-  ratios.push(1);
-  const raw = [
-    gapCssX - Number(startX),
+  const ratio = Number.isFinite(width) && width > 60 ? (width - 40) / (width - 60) : 1;
+  const ranked = [
+    // Prefer geometry grounded in the cropped puzzle image.
+    cssFromCrop,
     gapCssX - Number(sliderX),
-    Number(naturalX) / scale,
+    gapCssX - Number(startX),
     renderedPuzzleMoveX(sourceX, naturalX, scale, sliderX, width),
-  ];
-  const candidates = [];
-  for (const value of raw) {
-    if (!Number.isFinite(value)) continue;
-    for (const ratio of ratios) {
-      const moveX = Math.round(value * ratio);
-      if (moveX >= 40 && moveX <= 360) candidates.push(moveX);
-    }
-  }
-  if (!candidates.length) {
+    cssFromCrop * ratio,
+    (gapCssX - Number(sliderX)) * ratio,
+  ]
+    .map(value => Math.round(Number(value)))
+    .filter((value, index, all) => Number.isFinite(value) && value >= 40 && value <= 360 && all.indexOf(value) === index);
+
+  if (!ranked.length) {
     return {
       moveX: null,
+      candidates: [],
       gapCssX,
-      raw,
+      cssFromCrop,
       reason: 'vision-move-out-of-range',
     };
   }
-  // Prefer a mid-track travel distance; extreme values are usually bad geometry.
-  candidates.sort((left, right) => Math.abs(left - 120) - Math.abs(right - 120));
-  return { moveX: candidates[0], gapCssX, raw, reason: 'ok' };
+  return {
+    moveX: ranked[0],
+    candidates: ranked,
+    gapCssX,
+    cssFromCrop,
+    reason: 'ok',
+  };
 }
 
 /** Browser-side helper string: pick the smallest handle-like control. */
@@ -1389,8 +1391,11 @@ async function solvePuzzleWithVisionFallback(client) {
           canvasCount: canvases.length,
         });
       }
+      const handle = (/icon/i.test(String(slider.className || '')) && slider.parentElement)
+        ? slider.parentElement
+        : slider;
       const sourceRect = source.getBoundingClientRect();
-      const sliderRect = slider.getBoundingClientRect();
+      const sliderRect = handle.getBoundingClientRect();
       const screenshotScaleX = image.naturalWidth / Math.max(1, window.innerWidth);
       const screenshotScaleY = image.naturalHeight / Math.max(1, window.innerHeight);
       const cropCanvas = document.createElement('canvas');
@@ -1421,9 +1426,9 @@ async function solvePuzzleWithVisionFallback(client) {
         startX: sliderRect.x + sliderRect.width / 2,
         startY: sliderRect.y + sliderRect.height / 2,
         slider: {
-          tag: slider.tagName,
-          id: slider.id || '',
-          className: String(slider.className || '').slice(0, 80),
+          tag: handle.tagName,
+          id: handle.id || '',
+          className: String(handle.className || '').slice(0, 80),
           width: Math.round(sliderRect.width),
           height: Math.round(sliderRect.height),
         },
@@ -1460,7 +1465,9 @@ async function solvePuzzleWithVisionFallback(client) {
       ok: false,
       reason: chosen.reason || 'vision-move-too-small',
       moveX: chosen.moveX,
+      candidates: chosen.candidates,
       gapCssX: chosen.gapCssX,
+      cssFromCrop: chosen.cssFromCrop,
       raw: chosen.raw,
       vision,
       slider: crop.slider,
@@ -1469,28 +1476,55 @@ async function solvePuzzleWithVisionFallback(client) {
       startX: crop.startX,
       screenshotScaleX: crop.screenshotScaleX,
       imageWidth: crop.imageWidth,
+      canvasWidth: crop.canvasWidth,
     };
   }
+  const naturalDistance = Number.isFinite(crop.canvasWidth) && crop.imageWidth > 0
+    ? Math.round(vision.naturalX * (crop.canvasWidth / crop.imageWidth))
+    : Math.round(chosen.cssFromCrop);
   return {
     ok: true,
     method: 'vision-direct',
-    naturalX: chosen.moveX,
+    naturalX: naturalDistance,
     moveX: chosen.moveX,
+    moveCandidates: chosen.candidates,
     targetX: Math.round(chosen.gapCssX),
+    cssFromCrop: chosen.cssFromCrop,
     startX: crop.startX,
     startY: crop.startY,
     slider: crop.slider,
     vision: { confidence: vision.confidence, reason: vision.reason, naturalX: vision.naturalX },
+    sourceX: crop.sourceX,
+    sliderX: crop.sliderX,
+    screenshotScaleX: crop.screenshotScaleX,
+    imageWidth: crop.imageWidth,
+    canvasWidth: crop.canvasWidth,
   };
+}
+
+async function readPuzzleFailureText(client) {
+  return client.evaluate(`(() => {
+    const text = [
+      document.body?.innerText || '',
+      ...Array.from(document.querySelectorAll('#slider_check_msg,.slider-check-msg,.puzzle-msg,.puzzle-verify-popup'))
+        .map(node => node.innerText || ''),
+    ].join('\\n');
+    return {
+      text: text.replace(/\\s+/g, ' ').trim().slice(0, 240),
+      sent: /验证码已下发|请注意查收/.test(text),
+      failed: /服务繁忙|验证失败|操作失败|请稍后再试|当日发送短信数量过多|无法继续发送/.test(text),
+      success: /验证成功/.test(text),
+    };
+  })()`);
 }
 
 async function solveConfirmationSlider(client) {
   let info = null;
   let visionAttempt = null;
+  const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
 
-  // Prefer vision for redesigned puzzles. Only spend time on local canvas geometry
-  // when vision is unavailable or returns a weak answer.
-  if (visionConfigured()) {
+  const tryVisionSolve = async () => {
+    if (!visionConfigured()) return null;
     const visionDeadline = Date.now() + 15000;
     while (Date.now() < visionDeadline) {
       visionAttempt = await solvePuzzleWithVisionFallback(client);
@@ -1500,25 +1534,30 @@ async function solveConfirmationSlider(client) {
         confidence: visionAttempt?.confidence || visionAttempt?.vision?.confidence,
         method: visionAttempt?.method,
         moveX: visionAttempt?.moveX,
+        moveCandidates: visionAttempt?.moveCandidates || visionAttempt?.candidates,
+        cssFromCrop: visionAttempt?.cssFromCrop,
         visionNaturalX: visionAttempt?.vision?.naturalX,
+        naturalX: visionAttempt?.naturalX,
         gapCssX: visionAttempt?.gapCssX,
         startX: visionAttempt?.startX,
         sliderX: visionAttempt?.sliderX,
         screenshotScaleX: visionAttempt?.screenshotScaleX,
         imageWidth: visionAttempt?.imageWidth,
+        canvasWidth: visionAttempt?.canvasWidth,
         slider: visionAttempt?.slider,
-        raw: visionAttempt?.raw,
       });
-      if (visionAttempt?.ok && visionAttempt.moveX >= 40) {
-        info = visionAttempt;
-        break;
-      }
+      if (visionAttempt?.ok && visionAttempt.moveX >= 40) return visionAttempt;
       if (visionAttempt?.reason === 'puzzle-assets-missing') {
         await wait(500);
         continue;
       }
-      break;
+      return null;
     }
+    return null;
+  };
+
+  if (visionConfigured()) {
+    info = await tryVisionSolve();
   } else {
     console.log('Native Chrome vision solver skipped: set GEMINI_API_KEY (or TELECOM_VISION_API_KEY) with TELECOM_VISION_URL');
   }
@@ -1550,39 +1589,73 @@ async function solveConfirmationSlider(client) {
         : 'Native Chrome confirmation slider target missing: vision not configured and local match failed',
     );
   }
-  console.log('Native Chrome confirmation slider match', info);
-  const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
-  await drag(client, { startX: info.startX, startY: info.startY, moveX: info.moveX });
-  const deadline = Date.now() + 25000;
-  let hiddenSince = 0;
-  while (Date.now() < deadline) {
-    const state = await client.evaluate(`(() => {
-      const text = document.body?.innerText || '';
-      const popup = document.querySelector(${JSON.stringify(puzzleRootSelector)});
-      const rect = popup?.getBoundingClientRect();
-      const visible = !!(popup && rect.width > 0 && rect.height > 0 && getComputedStyle(popup).display !== 'none');
-      return {
-        sent: /验证码已下发|请注意查收/.test(text),
-        failed: /服务繁忙|验证失败|操作失败|请稍后再试|当日发送短信数量过多|无法继续发送/.test(text),
-        visible,
+
+  const moveAttempts = [];
+  const pushMove = value => {
+    const moveX = Math.round(Number(value));
+    if (!Number.isFinite(moveX) || moveX < 40 || moveX > 360) return;
+    if (moveAttempts.includes(moveX)) return;
+    moveAttempts.push(moveX);
+  };
+  pushMove(info.moveX);
+  for (const value of info.moveCandidates || []) pushMove(value);
+  pushMove(info.cssFromCrop);
+  for (const delta of [-12, 12, -24, 24, -36, 36]) pushMove(info.moveX + delta);
+
+  let lastOutcome = null;
+  for (let attempt = 0; attempt < moveAttempts.length; attempt += 1) {
+    const moveX = moveAttempts[attempt];
+    console.log('Native Chrome confirmation slider match', {
+      ...info,
+      attempt: attempt + 1,
+      attemptCount: moveAttempts.length,
+      moveX,
+    });
+    await drag(client, { startX: info.startX, startY: info.startY, moveX });
+    const deadline = Date.now() + 12000;
+    let hiddenSince = 0;
+    while (Date.now() < deadline) {
+      const state = await readPuzzleFailureText(client);
+      lastOutcome = state;
+      if (state?.sent || state?.success) return moveX;
+      if (state?.failed) break;
+      const visible = await client.evaluate(`(() => {
+        const popup = document.querySelector(${JSON.stringify(puzzleRootSelector)});
+        const rect = popup?.getBoundingClientRect();
+        return !!(popup && rect.width > 0 && rect.height > 0 && getComputedStyle(popup).display !== 'none');
+      })()`);
+      if (!visible) {
+        if (!hiddenSince) hiddenSince = Date.now();
+        if (Date.now() - hiddenSince >= 4000) return moveX;
+      } else {
+        hiddenSince = 0;
+      }
+      await wait(400);
+    }
+
+    console.log('Native Chrome slider attempt rejected', {
+      moveX,
+      outcome: lastOutcome,
+      network: await client.recentNetworkDiagnostics(),
+    });
+    if (attempt >= moveAttempts.length - 1) break;
+    const refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon', '[class*="refresh" i]']);
+    await wait(refreshed ? 1500 : 800);
+    // Re-acquire handle position after refresh; keep distance candidates from first vision.
+    const refreshedVision = await tryVisionSolve().catch(() => null);
+    if (refreshedVision?.ok) {
+      info = {
+        ...info,
+        ...refreshedVision,
+        moveCandidates: [...new Set([...(refreshedVision.moveCandidates || []), ...moveAttempts])],
       };
-    })()`);
-    if (state?.sent) return info.naturalX;
-    if (state?.failed) {
-      await wait(500);
-      console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
-      throw new Error('Native Chrome confirmation slider or SMS operation failed');
+      pushMove(refreshedVision.moveX);
+      pushMove(refreshedVision.cssFromCrop);
     }
-    if (!state?.visible) {
-      if (!hiddenSince) hiddenSince = Date.now();
-      if (Date.now() - hiddenSince >= 5000) return info.naturalX;
-    } else {
-      hiddenSince = 0;
-    }
-    await wait(500);
   }
+
   console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
-  throw new Error('Native Chrome confirmation slider validation timed out');
+  throw new Error('Native Chrome confirmation slider or SMS operation failed');
 }
 
 async function redactSensitivePageFields(client) {
