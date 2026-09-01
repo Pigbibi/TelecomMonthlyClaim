@@ -381,7 +381,11 @@ function nativePhoneInputExpression() {
   })()`;
 }
 
-async function readNativePhoneState(client, { clickSmsTab = false, phoneValue = null } = {}) {
+async function readNativePhoneState(client, {
+  clickSmsTab = false,
+  allowOneClickLogin = false,
+  phoneValue = null,
+} = {}) {
   return client.evaluate(`(() => {
     const input = ${nativePhoneInputExpression()};
     if (input) {
@@ -418,15 +422,22 @@ async function readNativePhoneState(client, { clickSmsTab = false, phoneValue = 
       .find(element => normalize(element.innerText || element.textContent) === label);
     const smsTab = findAction('短信验证码登录');
     const otherLogin = smsTab ? null : findAction('其他登录方式');
-    const loginSwitch = smsTab || otherLogin;
-    if (loginSwitch && ${clickSmsTab ? 'true' : 'false'}) loginSwitch.click();
+    const oneClickLogin = (smsTab || otherLogin) ? null : findAction('本机号码一键登录');
+    const guardedOneClickLogin = ${allowOneClickLogin ? 'true' : 'false'}
+      && !window.__telecomNativeOneClickAttempted ? oneClickLogin : null;
+    const loginSwitch = smsTab || otherLogin || guardedOneClickLogin;
+    if (loginSwitch && ${clickSmsTab ? 'true' : 'false'}) {
+      if (loginSwitch === oneClickLogin) window.__telecomNativeOneClickAttempted = true;
+      loginSwitch.click();
+    }
     return {
       ready: false,
       clickedSmsTab: !!smsTab && ${clickSmsTab ? 'true' : 'false'},
       clickedLoginSwitch: !!loginSwitch && ${clickSmsTab ? 'true' : 'false'},
-      loginSwitch: smsTab ? 'sms' : (otherLogin ? 'other' : ''),
+      loginSwitch: smsTab ? 'sms' : (otherLogin ? 'other' : (guardedOneClickLogin ? 'one-click' : '')),
       hasSmsTab: !!smsTab,
       hasOtherLogin: !!otherLogin,
+      hasOneClickLogin: !!oneClickLogin,
       visibleActions: [...new Set(actions
         .map(element => String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim())
         .filter(text => text && text.length <= 40))].slice(0, 20),
@@ -457,7 +468,11 @@ async function fillNativePhoneInput(client, phoneValue, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   let lastState = null;
   while (Date.now() < deadline) {
-    lastState = await readNativePhoneState(client, { clickSmsTab: true, phoneValue });
+    lastState = await readNativePhoneState(client, {
+      clickSmsTab: true,
+      allowOneClickLogin: true,
+      phoneValue,
+    });
     if (lastState?.ready && lastState.phonePrimed && lastState.valueLength === 11) return lastState;
     await wait(lastState?.clickedLoginSwitch ? 1000 : 500);
   }
