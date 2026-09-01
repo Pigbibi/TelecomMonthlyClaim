@@ -39,6 +39,14 @@ function classifyPackageGate(input = {}) {
   if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(compactText(combined))) {
     return { ...input, state: 'already_claimed' };
   }
+  const offerLabels = packageLabels
+    .map(label => String(label || '').replace(/\s+/g, ' ').trim())
+    .filter(label => label
+      && !/^(提交订单|确认|确定|取消|加载中|温馨提示|去办理)$/.test(label)
+      && !/验证码已下发|请注意查收/.test(label));
+  if (/preDepositC\w*_list/i.test(url) && offerLabels.length > 0 && productName && !textContainsProduct(combined, productName)) {
+    return { ...input, state: 'unavailable', packageLabels: offerLabels };
+  }
   return { ...input, state: compactText(dialogText) ? 'blocked' : 'waiting' };
 }
 
