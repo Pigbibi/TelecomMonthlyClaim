@@ -1584,9 +1584,9 @@ async function submitLoginCode(page, code, config) {
     await sleep(7000);
     text = await visibleText(page);
   }
-  if (/请选择档位|去办理/.test(text) && page.url().includes('preDepositCfg_list')) return true;
+  if (/请选择档位|去办理/.test(text) && /preDepositC\w*_list/i.test(page.url())) return true;
   if (/短信输入错误|验证码.*错误|验证码.*过期/.test(text)) return false;
-  return page.url().includes('preDepositCfg_list');
+  return /preDepositC\w*_list/i.test(page.url());
 }
 
 function withCacheBuster(rawUrl) {

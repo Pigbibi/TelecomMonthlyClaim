@@ -46,6 +46,15 @@ test('classifies package list page', () => {
   assert.equal(state.state, 'package_list');
 });
 
+test('classifies redesigned package list path preDepositCfq_list', () => {
+  const state = classifyTelecomPageObservation({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '请选择档位',
+  });
+
+  assert.equal(state.state, 'package_list');
+});
+
 test('classifies final confirm page from confirm controls', () => {
   const state = classifyTelecomPageObservation({
     activeNameText: '互联网卡网龄享200分钟国内语音',

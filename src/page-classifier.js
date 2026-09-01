@@ -63,7 +63,7 @@ function classifyTelecomPageObservation(observation = {}) {
     };
   }
 
-  if (url.includes('preDepositCfg_list') || observation.hasConductBtn || /请选择档位|去办理/.test(text)) {
+  if (/preDepositC\w*_list/i.test(url) || observation.hasConductBtn || /请选择档位|去办理/.test(text)) {
     return {
       state: 'package_list',
       confidence: 0.95,

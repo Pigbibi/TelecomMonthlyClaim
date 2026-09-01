@@ -911,7 +911,7 @@ async function submitLoginCode(client, code) {
   let lastState = {};
   while (Date.now() < deadline) {
     const state = await client.evaluate(`(() => ({
-      complete: location.href.includes('preDepositCfg_list') || /请选择档位|去办理/.test(document.body?.innerText || ''),
+      complete: /preDepositC\w*_list/i.test(location.href) || /请选择档位|去办理/.test(document.body?.innerText || ''),
       failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙|操作失败|当日发送短信数量过多|无法继续发送/.test(document.body?.innerText || ''),
       path: location.pathname,
       hasCodeInput: !!document.querySelector('#code,input[placeholder*="验证码"],input.checknum-input'),
