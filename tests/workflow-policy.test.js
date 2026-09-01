@@ -183,6 +183,9 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /new WebSocket/);
   assert.match(script, /Input\.insertText/);
   assert.match(script, /element\.click\(\)/);
+  assert.match(script, /input\.van-field__control/);
+  assert.match(script, /短信验证码登录/);
+  assert.match(script, /readNativePhoneState/);
   assert.match(script, /computeSliderImageMatchInPage/);
   assert.match(script, /SmsInboxClient/);
   assert.match(script, /login completed before Playwright attachment/);
