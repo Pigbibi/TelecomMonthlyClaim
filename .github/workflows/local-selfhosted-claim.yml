@@ -226,7 +226,13 @@ jobs:
       - name: Acquire workflow-scoped SMS intercept lease
         id: intercept_lease
         if: github.event.inputs.probe_only != 'true'
-        run: node scripts/manage-intercept-lease.js acquire telecom-claim-silent
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          if ! node scripts/manage-intercept-lease.js acquire telecom-claim-silent; then
+            echo "::warning::SMS intercept lease unavailable (often workers.dev SSL from this host); continuing with PushPlus inbox."
+            exit 1
+          fi
 
       - name: Run claim via real Chrome CDP
         env:
