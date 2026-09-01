@@ -200,6 +200,8 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /visibleActions:/);
   assert.match(script, /inputs: \[\.\.\.document\.querySelectorAll\('input'\)\]/);
   assert.match(script, /computeSliderImageMatchInPage/);
+  assert.match(script, /legacy login slider images unavailable; using canvas solver/);
+  assert.match(script, /return solveConfirmationSlider\(client\)/);
   assert.match(script, /SmsInboxClient/);
   assert.match(script, /login completed before Playwright attachment/);
   assert.match(script, /Native Chrome package page diagnostics/);
