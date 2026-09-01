@@ -224,8 +224,13 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /input\[type="range"\]/);
   assert.match(script, /--proxy-server=/);
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
+  assert.match(script, /Native Chrome local slider match unavailable; using vision fallback/);
+  assert.match(script, /solvePuzzleWithVisionFallback/);
+  assert.match(script, /vision-direct/);
+  assert.match(script, /puzzle-verify-popup/);
   assert.match(script, /\.refreshIcon.*#slider_refresh_icon.*\.slider-refresh-icon/);
   assert.match(script, /rendered-flat-component/);
+  assert.match(script, /rendered-crop-only/);
   assert.match(script, /preferCanvasTransparentMatch\(local, rawInfo\)/);
   assert.match(script, /vision-fallback/);
   assert.match(script, /isFlatPuzzleCandidateReliable/);
