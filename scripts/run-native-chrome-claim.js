@@ -857,7 +857,7 @@ async function solveSliderChallenge(client) {
     throw new Error('Native Chrome slider validation timed out before Playwright attachment');
   }
   if (match?.reason === 'images-not-ready') {
-    console.log('Native Chrome legacy login slider images unavailable; using vision-first puzzle solver.');
+    console.log('Native Chrome legacy login slider images unavailable; using local canvas puzzle solver.');
     return solveConfirmationSlider(client);
   }
   throw new Error(`Native Chrome slider match failed: ${match?.reason || 'invalid-result'}`);
@@ -1801,146 +1801,105 @@ async function readPuzzleFailureText(client) {
   return client.evaluate(`(() => {
     const text = [
       document.body?.innerText || '',
-      ...Array.from(document.querySelectorAll('#slider_check_msg,.slider-check-msg,.puzzle-msg,.puzzle-verify-popup'))
+      ...Array.from(document.querySelectorAll('#slider_check_msg,.slider-check-msg,.puzzle-msg,.puzzle-verify-popup,#secondPop_msg'))
         .map(node => node.innerText || ''),
     ].join('\\n');
     return {
       text: text.replace(/\\s+/g, ' ').trim().slice(0, 240),
-      sent: /验证码已下发|请注意查收/.test(text),
+      sent: /验证码已下发|请注意查收|短信已发送|已发送至手机/.test(text),
       failed: /服务繁忙|验证失败|操作失败|请稍后再试|当日发送短信数量过多|无法继续发送/.test(text),
       success: /验证成功/.test(text),
     };
   })()`);
 }
 
+async function readLocalConfirmationSlider(client) {
+  const rawInfo = await readConfirmationSliderInfo(client);
+  if (!(rawInfo?.moveX >= 40)) return rawInfo;
+  const rendered = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null);
+  if (rendered?.moveX >= 40) return rendered;
+  return rawInfo;
+}
+
 async function solveConfirmationSlider(client) {
   let info = null;
-  let visionAttempt = null;
   const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
+  const allowVisionFallback = /^true$/i.test(process.env.TELECOM_VISION_FALLBACK || '');
 
-  const tryVisionSolve = async () => {
-    if (!visionConfigured()) return null;
-    const visionDeadline = Date.now() + 45000;
-    let rateLimitHits = 0;
+  const matchDeadline = Date.now() + 20000;
+  let refreshed = false;
+  while (Date.now() < matchDeadline) {
+    info = await readLocalConfirmationSlider(client);
+    if (info?.moveX >= 40) break;
+    if (!refreshed && Date.now() >= matchDeadline - 8000) {
+      refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
+      console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
+      await wait(refreshed ? 2000 : 500);
+      continue;
+    }
+    await wait(500);
+  }
+
+  if (!(info?.moveX >= 40) && allowVisionFallback && visionConfigured()) {
+    console.log('Native Chrome local puzzle match missed; optional vision fallback enabled');
+    const visionDeadline = Date.now() + 30000;
     while (Date.now() < visionDeadline) {
-      visionAttempt = await solvePuzzleWithVisionFallback(client);
-      console.log('Native Chrome vision-first slider attempt', {
+      const visionAttempt = await solvePuzzleWithVisionFallback(client);
+      console.log('Native Chrome vision fallback slider attempt', {
         ok: visionAttempt?.ok,
         reason: visionAttempt?.reason,
-        confidence: visionAttempt?.confidence ?? visionAttempt?.vision?.confidence,
-        method: visionAttempt?.method,
         moveX: visionAttempt?.moveX,
-        moveCandidates: visionAttempt?.moveCandidates || visionAttempt?.candidates,
-        cssFromCrop: visionAttempt?.cssFromCrop,
-        visionNaturalX: visionAttempt?.vision?.naturalX,
-        naturalX: visionAttempt?.naturalX,
-        gapCssX: visionAttempt?.gapCssX,
-        startX: visionAttempt?.startX,
-        sliderX: visionAttempt?.sliderX,
-        screenshotScaleX: visionAttempt?.screenshotScaleX,
-        imageWidth: visionAttempt?.imageWidth,
-        canvasWidth: visionAttempt?.canvasWidth,
-        sourceWidth: visionAttempt?.sourceWidth,
-        slider: visionAttempt?.slider,
-        visionParsed: visionAttempt?.visionParsed,
-        visionBody: visionAttempt?.visionBody,
+        method: visionAttempt?.method,
+        confidence: visionAttempt?.confidence ?? visionAttempt?.vision?.confidence,
       });
-      if (visionAttempt?.ok && visionAttempt.moveX >= 40) return visionAttempt;
-      if (visionAttempt?.reason === 'vision-http-429' || visionAttempt?.reason === 'vision-http-404') {
-        rateLimitHits += 1;
-        if (rateLimitHits >= 3) {
-          console.log('Native Chrome vision unavailable; falling back to local match', {
-            reason: visionAttempt.reason,
-            rateLimitHits,
-          });
-          return null;
-        }
-        await wait(visionAttempt.reason === 'vision-http-404' ? 1500 : (10000 * rateLimitHits));
-        continue;
+      if (visionAttempt?.ok && visionAttempt.moveX >= 40) {
+        info = visionAttempt;
+        break;
       }
       if (
-        visionAttempt?.reason === 'puzzle-assets-missing'
-        || visionAttempt?.reason === 'puzzle-still-loading'
-        || visionAttempt?.reason === 'vision-gateway-and-http-failed'
-        || visionAttempt?.reason === 'vision-x-out-of-range'
+        visionAttempt?.reason === 'puzzle-still-loading'
+        || visionAttempt?.reason === 'puzzle-assets-missing'
         || visionAttempt?.reason === 'low-confidence'
+        || visionAttempt?.reason === 'vision-x-out-of-range'
         || /^vision-http-/.test(visionAttempt?.reason || '')
-        || /^vision-finish-/.test(visionAttempt?.reason || '')
       ) {
-        await wait(visionAttempt?.reason === 'puzzle-still-loading' ? 2000 : 1200);
+        await wait(visionAttempt?.reason === 'puzzle-still-loading' ? 2000 : 1000);
         continue;
       }
-      return null;
-    }
-    return null;
-  };
-
-  if (visionConfigured()) {
-    info = await tryVisionSolve();
-  } else {
-    console.log('Native Chrome vision solver skipped: set CODEX_GATEWAY_SERVICE_URL (preferred) or CODEX_GATEWAY_COMMAND / GEMINI_API_KEY');
-  }
-
-  if (!info || info.moveX < 40) {
-    const matchDeadline = Date.now() + 12000;
-    let refreshed = false;
-    while (Date.now() < matchDeadline) {
-      const rawInfo = await readConfirmationSliderInfo(client);
-      if (rawInfo?.moveX >= 40) {
-        info = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null) || rawInfo;
-        if (info?.moveX >= 40) break;
-      }
-      if (!refreshed && Date.now() >= matchDeadline - 6000) {
-        refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
-        console.log('Native Chrome confirmation slider assets still incomplete', { refreshed });
-        await wait(refreshed ? 2000 : 500);
-        continue;
-      }
-      await wait(500);
+      break;
     }
   }
 
-  if (!info || info.moveX < 40) {
+  if (!(info?.moveX >= 40)) {
     console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
-    throw new Error(
-      visionConfigured()
-        ? `Native Chrome confirmation slider target missing after vision-first solve (${visionAttempt?.reason || 'no-match'})`
-        : 'Native Chrome confirmation slider target missing: vision not configured and local match failed',
-    );
+    throw new Error('Native Chrome confirmation slider target missing after local canvas match');
   }
 
   const maxAttempts = 5;
   let lastOutcome = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (attempt > 0) {
-      const refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon', '[class*="refresh" i]']);
-      await wait(refreshed ? 1800 : 1000);
-      const next = await tryVisionSolve();
-      if (!next?.ok || !(next.moveX >= 40)) {
-        console.log('Native Chrome vision retry missing assets', { attempt: attempt + 1, next });
+      const didRefresh = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon', '[class*="refresh" i]']);
+      await wait(didRefresh ? 1800 : 1000);
+      const next = await readLocalConfirmationSlider(client);
+      if (!(next?.moveX >= 40)) {
+        console.log('Native Chrome local confirmation retry missing assets', { attempt: attempt + 1, next });
         continue;
       }
       info = next;
     }
 
-    // Always drag the distance for THIS challenge. Prefer model-reported move.
     const moveX = Math.round(Number(info.moveX));
     console.log('Native Chrome confirmation slider match', {
       method: info.method,
       moveX,
-      cssFromCrop: info.cssFromCrop,
-      moveCandidates: info.moveCandidates,
       naturalX: info.naturalX,
-      visionNaturalX: info.vision?.naturalX,
       startX: info.startX,
-      sliderX: info.sliderX,
-      screenshotScaleX: info.screenshotScaleX,
-      imageWidth: info.imageWidth,
-      canvasWidth: info.canvasWidth,
       slider: info.slider,
       attempt: attempt + 1,
       attemptCount: maxAttempts,
     });
+    const dragStartedAt = Date.now();
     await drag(client, { startX: info.startX, startY: info.startY, moveX });
     const deadline = Date.now() + 12000;
     let hiddenSince = 0;
@@ -1956,10 +1915,23 @@ async function solveConfirmationSlider(client) {
       })()`);
       if (!visible) {
         if (!hiddenSince) hiddenSince = Date.now();
-        if (Date.now() - hiddenSince >= 4000) return moveX;
+        if (Date.now() - hiddenSince >= 2500) return moveX;
       } else {
         hiddenSince = 0;
       }
+      const network = client.recentNetworkEvents()
+        .filter(event => Number(event.at || 0) >= dragStartedAt);
+      const sliderAccepted = network.some(event => (
+        /validSlider/i.test(event.pathname || '')
+        && event.status >= 200
+        && event.status < 300
+      ));
+      const smsRequested = network.some(event => (
+        /sendRand|SecondConfirmation/i.test(event.pathname || '')
+        && event.status >= 200
+        && event.status < 300
+      ));
+      if (sliderAccepted && smsRequested) return moveX;
       await wait(400);
     }
 
