@@ -21,6 +21,7 @@ const { SmsInboxClient } = require('../src/sms-inbox-client');
 const { classifyPackageGate, summarizePackageGate, productMatchAliases } = require('../src/package-gate');
 const {
   pageFamilyFromUrl,
+  summarizeEntryFingerprint,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
 } = require('../src/offer-inventory');
@@ -515,6 +516,7 @@ async function fillNativePhoneInput(client, phoneValue, timeoutMs = 15000) {
 }
 
 async function navigateToEntryPage(client) {
+  console.log('Native Chrome entry fingerprint', summarizeEntryFingerprint(entryUrl));
   let documentStatus = null;
   let lastState = null;
   const startedAt = Date.now();
@@ -972,6 +974,43 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
   throw new Error(`${errorMessage} (evaluationTimeouts=${evaluationTimeouts})`);
 }
 
+function logPostLoginRouteDiagnostics(client, since, entryUrl) {
+  const href = '';
+  const pageState = client.evaluate(`(() => ({
+    href: location.href,
+    path: location.pathname,
+    referrerPath: (() => {
+      try { return new URL(document.referrer || '').pathname; } catch { return ''; }
+    })(),
+  }))()`).catch(() => null);
+  return Promise.resolve(pageState).then(async (state) => {
+    const telecomApi = await client.recentTelecomApiDiagnostics(since).catch(() => []);
+    const documents = client.recentResourceDiagnostics(since)
+      .filter(event => event.type === 'Document')
+      .map(event => ({
+        pathname: event.pathname,
+        status: event.status || 0,
+        failed: !!event.failed,
+      }))
+      .slice(-12);
+    const initTrail = (telecomApi || [])
+      .filter(event => /validRand|preDepositInit|preActiveMeta|preCommonCheck|qryLoginAccno|channelCache|optConfirm/i.test(event.pathname || ''))
+      .map(event => ({
+        pathname: event.pathname,
+        status: event.status || 0,
+        retCode: event.retCode || event.resultCode || '',
+        message: event.message || '',
+      }));
+    console.log('Native Chrome post-login route diagnostics', {
+      entry: summarizeEntryFingerprint(entryUrl),
+      pageFamily: pageFamilyFromUrl(state?.href || href),
+      path: String(state?.path || '').replace(/\d{4,}/g, '***').slice(0, 160),
+      referrerPath: String(state?.referrerPath || '').replace(/\d{4,}/g, '***').slice(0, 160),
+      documents,
+      initTrail,
+    });
+  });
+}
 
 async function dismissBenignDialogs(client) {
   return !!await client.evaluate(`(() => {
@@ -2011,9 +2050,11 @@ async function main() {
         pollMs: config.smsPollMs,
       });
       if (!sms?.code) throw new Error('Native Chrome login SMS was not received');
+      const loginSubmitStartedAt = Date.now();
       await submitLoginCode(cdp, sms.code);
       console.log('Native Chrome login completed before Playwright attachment');
       await dismissBenignDialogs(cdp);
+      await logPostLoginRouteDiagnostics(cdp, loginSubmitStartedAt - 5000, entryUrl);
       const pageFamilyAfterLogin = await cdp.evaluate('location.href').then(pageFamilyFromUrl).catch(() => 'unknown');
       console.log('Native Chrome post-login page family', { pageFamily: pageFamilyAfterLogin });
       const packageResult = await selectTargetPackage(cdp, config.productName);

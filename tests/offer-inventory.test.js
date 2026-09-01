@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   pageFamilyFromUrl,
+  summarizeEntryFingerprint,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
 } = require('../src/offer-inventory');
@@ -10,6 +11,20 @@ test('classifies page families from telecom urls', () => {
   assert.equal(pageFamilyFromUrl('https://wapbj.189.cn/echnwap/preDepositCfq_list'), 'echnwap');
   assert.equal(pageFamilyFromUrl('https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html'), 'wap2017');
   assert.equal(pageFamilyFromUrl('https://example.test/other'), 'unknown');
+});
+
+test('summarizes entry fingerprint without raw secrets', () => {
+  const fingerprint = summarizeEntryFingerprint(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=abcdef1234567890deadbeef',
+  );
+  assert.equal(fingerprint.pageFamily, 'wap2017');
+  assert.equal(fingerprint.channelId, 'dx531');
+  assert.equal(fingerprint.version, 'V1');
+  assert.equal(fingerprint.hasWxopenid, true);
+  assert.equal(fingerprint.hasCampaignId, true);
+  assert.equal(fingerprint.campaignIdHint, '1623***7085');
+  assert.deepEqual(fingerprint.queryKeys, ['campaignId', 'channelId', 'version', 'wxopenid']);
+  assert.doesNotMatch(JSON.stringify(fingerprint), /abcdef1234567890deadbeef/);
 });
 
 test('extracts offer labels from preActiveMeta-like payloads', () => {

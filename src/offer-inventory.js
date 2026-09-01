@@ -9,6 +9,39 @@ function pageFamilyFromUrl(url) {
   return 'unknown';
 }
 
+function summarizeEntryFingerprint(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    const params = parsed.searchParams;
+    const channelId = String(params.get('channelId') || '').slice(0, 32);
+    const version = String(params.get('version') || '').slice(0, 16);
+    const campaignId = String(params.get('campaignId') || '');
+    return {
+      pageFamily: pageFamilyFromUrl(parsed.href),
+      path: parsed.pathname.replace(/\d{4,}/g, '***').slice(0, 120),
+      channelId,
+      version,
+      hasCampaignId: !!campaignId,
+      campaignIdHint: campaignId
+        ? `${campaignId.slice(0, 4)}***${campaignId.slice(-4)}`
+        : '',
+      hasWxopenid: !!params.get('wxopenid'),
+      queryKeys: [...params.keys()].sort().slice(0, 12),
+    };
+  } catch {
+    return {
+      pageFamily: 'unknown',
+      path: '',
+      channelId: '',
+      version: '',
+      hasCampaignId: false,
+      campaignIdHint: '',
+      hasWxopenid: false,
+      queryKeys: [],
+    };
+  }
+}
+
 function looksLikeOfferLabel(text) {
   const value = compactText(text);
   if (!value || value.length < 4 || value.length > 80) return false;
@@ -56,6 +89,7 @@ function mergeOfferLabels(...lists) {
 
 module.exports = {
   pageFamilyFromUrl,
+  summarizeEntryFingerprint,
   looksLikeOfferLabel,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
