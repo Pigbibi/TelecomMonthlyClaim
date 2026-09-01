@@ -530,24 +530,31 @@ async function openSliderChallenge(client, phone) {
   }
   // Telecom's login UI often keeps the SMS button hidden/disabled until the phone
   // field commits a valid 11-digit value via change/blur.
-  const phoneCommit = await client.evaluate(`(() => {
-    const input = ${nativePhoneInputExpression()};
-    if (!input) return { ok: false, reason: 'missing-input' };
-    const expected = ${JSON.stringify(String(phone || ''))};
-    if (String(input.value || '') !== expected) {
-      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-      if (setter) setter.call(input, expected); else input.value = expected;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.blur();
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
-    return {
-      ok: true,
-      valueLength: String(input.value || '').length,
-      matchesExpected: String(input.value || '') === expected,
-    };
-  })()`);
+  let phoneCommit = null;
+  const commitDeadline = Date.now() + 15000;
+  while (Date.now() < commitDeadline) {
+    await readNativePhoneState(client, { clickSmsTab: true });
+    phoneCommit = await client.evaluate(`(() => {
+      const input = ${nativePhoneInputExpression()};
+      if (!input) return { ok: false, reason: 'missing-input' };
+      const expected = ${JSON.stringify(String(phone || ''))};
+      if (String(input.value || '') !== expected) {
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+        if (setter) setter.call(input, expected); else input.value = expected;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.blur();
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
+      return {
+        ok: true,
+        valueLength: String(input.value || '').length,
+        matchesExpected: String(input.value || '') === expected,
+      };
+    })()`);
+    if (phoneCommit?.ok && phoneCommit.matchesExpected && phoneCommit.valueLength === 11) break;
+    await wait(300);
+  }
   if (!phoneCommit?.ok || !phoneCommit.matchesExpected || phoneCommit.valueLength !== 11) {
     throw new Error(`Native Chrome phone input did not commit before SMS send: ${JSON.stringify(phoneCommit)}`);
   }
