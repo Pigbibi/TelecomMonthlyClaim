@@ -427,6 +427,9 @@ async function readNativePhoneState(client, { clickSmsTab = false, phoneValue = 
       loginSwitch: smsTab ? 'sms' : (otherLogin ? 'other' : ''),
       hasSmsTab: !!smsTab,
       hasOtherLogin: !!otherLogin,
+      visibleActions: [...new Set(actions
+        .map(element => String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim())
+        .filter(text => text && text.length <= 40))].slice(0, 20),
       hostname: location.hostname,
       path: location.pathname,
       title: document.title || '',
