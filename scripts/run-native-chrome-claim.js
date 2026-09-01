@@ -381,12 +381,24 @@ function nativePhoneInputExpression() {
   })()`;
 }
 
-async function readNativePhoneState(client, { clickSmsTab = false } = {}) {
+async function readNativePhoneState(client, { clickSmsTab = false, phoneValue = null } = {}) {
   return client.evaluate(`(() => {
     const input = ${nativePhoneInputExpression()};
     if (input) {
+      const expected = ${phoneValue == null ? 'null' : JSON.stringify(String(phoneValue))};
+      if (expected !== null) {
+        input.focus();
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+        if (setter) setter.call(input, expected); else input.value = expected;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.blur();
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+      }
       return {
         ready: true,
+        phonePrimed: expected !== null && String(input.value || '') === expected,
+        valueLength: String(input.value || '').length,
         hostname: location.hostname,
         path: location.pathname,
         title: document.title || '',
@@ -438,15 +450,15 @@ async function readNativePhoneState(client, { clickSmsTab = false } = {}) {
   })()`);
 }
 
-async function waitForPhoneInput(client, timeoutMs = 45000) {
+async function fillNativePhoneInput(client, phoneValue, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   let lastState = null;
   while (Date.now() < deadline) {
-    lastState = await readNativePhoneState(client, { clickSmsTab: true });
-    if (lastState?.ready) return lastState;
+    lastState = await readNativePhoneState(client, { clickSmsTab: true, phoneValue });
+    if (lastState?.ready && lastState.phonePrimed && lastState.valueLength === 11) return lastState;
     await wait(lastState?.clickedLoginSwitch ? 1000 : 500);
   }
-  throw new Error(`Native Chrome phone input did not become ready: ${JSON.stringify(lastState)}`);
+  throw new Error(`Native Chrome phone input did not commit before SMS send: ${JSON.stringify(lastState)}`);
 }
 
 async function navigateToEntryPage(client) {
@@ -507,57 +519,9 @@ async function openSliderChallenge(client, phone) {
     }
   });
   await client.send('Network.enable');
-  await waitForPhoneInput(client);
-  let focused = false;
-  const focusDeadline = Date.now() + 15000;
-  while (!focused && Date.now() < focusDeadline) {
-    await readNativePhoneState(client, { clickSmsTab: true });
-    focused = await client.evaluate(`(() => {
-      const input = ${nativePhoneInputExpression()};
-      if (!input) return false;
-      input.focus();
-      const expected = ${JSON.stringify(String(phone || ''))};
-      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-      if (setter) setter.call(input, expected); else input.value = expected;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      input.blur();
-      input.dispatchEvent(new Event('blur', { bubbles: true }));
-      return String(input.value || '') === expected;
-    })()`);
-    if (!focused) await wait(300);
-  }
-  if (!focused) throw new Error('Native Chrome phone input missing');
-  // Telecom's login UI often keeps the SMS button hidden/disabled until the phone
-  // field commits a valid 11-digit value via change/blur.
-  let phoneCommit = null;
-  const commitDeadline = Date.now() + 15000;
-  while (Date.now() < commitDeadline) {
-    await readNativePhoneState(client, { clickSmsTab: true });
-    phoneCommit = await client.evaluate(`(() => {
-      const input = ${nativePhoneInputExpression()};
-      if (!input) return { ok: false, reason: 'missing-input' };
-      const expected = ${JSON.stringify(String(phone || ''))};
-      if (String(input.value || '') !== expected) {
-        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-        if (setter) setter.call(input, expected); else input.value = expected;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      input.blur();
-      input.dispatchEvent(new Event('blur', { bubbles: true }));
-      return {
-        ok: true,
-        valueLength: String(input.value || '').length,
-        matchesExpected: String(input.value || '') === expected,
-      };
-    })()`);
-    if (phoneCommit?.ok && phoneCommit.matchesExpected && phoneCommit.valueLength === 11) break;
-    await wait(300);
-  }
-  if (!phoneCommit?.ok || !phoneCommit.matchesExpected || phoneCommit.valueLength !== 11) {
-    throw new Error(`Native Chrome phone input did not commit before SMS send: ${JSON.stringify(phoneCommit)}`);
-  }
+  // Detect and fill in one runtime task: the Vue login component replaces its
+  // input node immediately after the first input event.
+  await fillNativePhoneInput(client, phone);
 
   const findAndClickSmsButton = `(() => {
     const selectors = [
