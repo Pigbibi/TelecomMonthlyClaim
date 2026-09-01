@@ -92,10 +92,15 @@ slider challenge.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | unset | Credential for the default visual provider |
-| `TELECOM_VISION_URL` | Gemini generate-content endpoint | API endpoint |
+Slider geometry defaults to **local canvas matching** (`flat-component` /
+rendered crop). Vision AI is off unless `TELECOM_VISION_FALLBACK=true`.
+CodexGateway is not injected by the monthly claim workflow.
+
+| `GEMINI_API_KEY` | unset | Only used when vision fallback is explicitly enabled |
+| `TELECOM_VISION_FALLBACK` | unset/`false` | Set `true` to allow Gemini/HTTP after local match fails |
+| `TELECOM_VISION_URL` | Gemini generate-content endpoint | API endpoint for optional fallback |
 | `TELECOM_VISION_MODE` | `gemini` | `gemini`, `openai`, or `anthropic` request format |
-| `TELECOM_VISION_MODEL` | `gemini-3.5-flash` | Provider model name |
+| `TELECOM_VISION_MODEL` | provider default | Provider model name |
 
 Using an external visual service sends challenge image data to that provider.
 Review its data policy and do not assume it will improve every challenge.
@@ -149,10 +154,6 @@ Recovery options, in order:
    a correct Cfg entry/session is available.
 
 Do not treat a warm local session as proof that CI will see the same packages.
-
-Slider vision (CodexGateway / Gemini) stays enabled: the Sep login puzzle no
-longer exposes the legacy image DOM, so local template match alone is not
-enough. Vision is only for slider geometry, not for choosing packages.
 
 ## Additional guides
 

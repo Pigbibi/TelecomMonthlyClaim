@@ -235,10 +235,6 @@ jobs:
           fi
 
       - name: Run claim via real Chrome CDP
-        env:
-          CODEX_GATEWAY_SERVICE_URL: ${{ vars.CODEX_GATEWAY_SERVICE_URL }}
-          CODEX_GATEWAY_SERVICE_AUDIENCE: ${{ vars.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway' }}
-          CODEX_GATEWAY_MODEL: ${{ vars.CAPTCHA_CODEX_MODEL || vars.CODEX_GATEWAY_MODEL || '' }}
         run: bash scripts/run-real-chrome-claim.sh
 
       - name: Release workflow-scoped SMS intercept lease

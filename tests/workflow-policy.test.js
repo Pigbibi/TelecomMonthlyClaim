@@ -24,12 +24,10 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
   assert.doesNotMatch(workflowText, /uses:\s\.\/actions\/setup-home-proxy/);
 });
 
-test('monthly workflow prefers CodexGateway then Gemini for slider vision', () => {
-  assert.match(workflowText, /id-token:\s+write/);
-  assert.match(workflowText, /CODEX_GATEWAY_SERVICE_URL/);
-  assert.match(workflowText, /CODEX_GATEWAY_SERVICE_AUDIENCE/);
+test('monthly workflow uses Gemini credentials optionally; slider defaults to local canvas match', () => {
   assert.match(workflowText, /GEMINI_API_KEY/);
-  // Public repos cannot use the private AIGateway action; call the service over HTTP.
+  // CodexGateway is no longer injected into the claim step; captcha geometry is local-first.
+  assert.doesNotMatch(workflowText, /CODEX_GATEWAY_SERVICE_URL:\s+\$\{\{\s*vars\.CODEX_GATEWAY_SERVICE_URL/);
   assert.doesNotMatch(workflowText, /Pigbibi\/AIGateway\/actions\/setup-codex-gateway/);
 });
 
@@ -210,7 +208,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /visibleActions:/);
   assert.match(script, /inputs: \[\.\.\.document\.querySelectorAll\('input'\)\]/);
   assert.match(script, /computeSliderImageMatchInPage/);
-  assert.match(script, /legacy login slider images unavailable; using vision-first puzzle solver/);
+  assert.match(script, /legacy login slider images unavailable; using local canvas puzzle solver/);
   assert.match(script, /return solveConfirmationSlider\(client\)/);
   assert.match(script, /SmsInboxClient/);
   assert.match(script, /preDepositC\\\\w\*_list/);
@@ -250,8 +248,11 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /input\[type="range"\]/);
   assert.match(script, /--proxy-server=/);
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
-  assert.match(script, /Native Chrome vision-first slider attempt/);
-  assert.match(script, /vision solver skipped: set CODEX_GATEWAY_SERVICE_URL/);
+  assert.match(script, /Native Chrome vision fallback slider attempt/);
+  assert.match(script, /TELECOM_VISION_FALLBACK/);
+  assert.match(script, /optional vision fallback enabled/);
+  assert.match(script, /readLocalConfirmationSlider/);
+  assert.match(script, /local confirmation retry missing assets/);
   assert.match(script, /visionProvidersConfigured/);
   assert.match(vision, /CODEX_GATEWAY_SERVICE_URL/);
   assert.match(vision, /codex-gateway-service/);
@@ -261,8 +262,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /visionMoveX/);
   assert.match(script, /cssWidth/);
   assert.match(script, /vision-x-out-of-range/);
-  assert.match(script, /vision unavailable; falling back to local match/);
-  assert.match(script, /Always drag the distance for THIS challenge/);
+  assert.match(script, /confirmation slider target missing after local canvas match/);
   assert.match(script, /puzzle-still-loading/);
   assert.match(script, /waitForPuzzleCanvasReady/);
   assert.match(script, /vision-gateway-and-http-failed/);
