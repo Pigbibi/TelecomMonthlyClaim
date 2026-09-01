@@ -18,7 +18,34 @@
  *   GEMINI_API_KEY=...
  *   TELECOM_VISION_MODE=gemini
  */
-async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, imageWidth = 280, correctY = null }) {
+
+function coerceNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const match = value.replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+    if (match) return Number(match[0]);
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : NaN;
+}
+
+function pickFirstNumber(obj, keys) {
+  for (const key of keys) {
+    if (obj && Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = coerceNumber(obj[key]);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return NaN;
+}
+
+async function estimateSliderDistanceWithVision({
+  bgPngBase64,
+  blockPngBase64,
+  imageWidth = 280,
+  cssWidth = null,
+  correctY = null,
+}) {
   const url = process.env.TELECOM_VISION_URL || '';
   const key = process.env.TELECOM_VISION_API_KEY
     || process.env.GEMINI_API_KEY
@@ -35,12 +62,16 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
     return { ok: false, reason: 'vision-not-configured' };
   }
 
+  const cssHint = Number.isFinite(Number(cssWidth)) && Number(cssWidth) > 40
+    ? Number(cssWidth)
+    : null;
   const prompt = [
-    `这是北京电信滑块验证码截图。图片宽度为 ${imageWidth} 像素。`,
+    `这是北京电信滑块验证码截图。截图宽度 imageWidth=${imageWidth} 像素。`,
+    cssHint ? `拼图区域 CSS 宽度约 cssWidth=${cssHint}。` : '',
     correctY != null ? `缺口大致纵坐标 correctY=${correctY}。` : '',
     '请同时给出：',
-    '1) x：拼图缺口左边缘相对本图左边缘的水平像素坐标；',
-    '2) move：底部滑块按钮需要向右拖动的像素距离（通常约 40-260）。',
+    '1) x：拼图缺口左边缘相对本截图左边缘的水平像素坐标（相对 imageWidth）；',
+    '2) move：底部滑块按钮需要向右拖动的 CSS 像素距离（通常约 60-220，绝不要等于 x，也绝不要接近 imageWidth）。',
     '只输出 JSON：{"x":number,"move":number,"confidence":number,"reason":string}',
   ].filter(Boolean).join('');
 
@@ -113,9 +144,9 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
 
   let requestUrl = url;
   if (mode === 'gemini') {
-    const parsed = new URL(url);
-    if (!parsed.searchParams.has('key')) parsed.searchParams.set('key', key);
-    requestUrl = parsed.toString();
+    const parsedUrl = new URL(url);
+    if (!parsedUrl.searchParams.has('key')) parsedUrl.searchParams.set('key', key);
+    requestUrl = parsedUrl.toString();
     delete headers.Authorization;
   } else {
     headers.Authorization = mode === 'anthropic' ? undefined : `Bearer ${key}`;
@@ -135,6 +166,13 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
   if (Array.isArray(data.candidates)) {
     const parts = data.candidates[0]?.content?.parts || [];
     outText = parts.map(part => part.text || '').join('\n');
+    if (!outText && data.candidates[0]?.finishReason) {
+      return {
+        ok: false,
+        reason: `vision-finish-${String(data.candidates[0].finishReason).toLowerCase()}`,
+        body: text.slice(0, 300),
+      };
+    }
   } else if (Array.isArray(data.content)) {
     outText = data.content.filter(c => c.type === 'text').map(c => c.text || '').join('\n');
   } else if (data.choices?.[0]?.message?.content) {
@@ -155,20 +193,36 @@ async function estimateSliderDistanceWithVision({ bgPngBase64, blockPngBase64, i
   try { parsed = JSON.parse(jsonText); } catch {
     return { ok: false, reason: 'vision-bad-json', body: outText.slice(0, 300) };
   }
-  const x = Math.round(Number(parsed.x));
-  const move = Math.round(Number(parsed.move ?? parsed.distance ?? parsed.sliderDistance));
+  let x = Math.round(pickFirstNumber(parsed, ['x', 'gapX', 'holeX', 'targetX', 'offsetX']));
+  let move = Math.round(pickFirstNumber(parsed, ['move', 'distance', 'sliderDistance', 'drag', 'dragX']));
+  // Models sometimes put the gap X into "move". Treat oversized move as x.
+  if (!Number.isFinite(x) && Number.isFinite(move) && move > 280 && move <= Math.max(80, imageWidth - 20)) {
+    x = move;
+    move = NaN;
+  }
+  if (Number.isFinite(move) && Number.isFinite(x) && Math.abs(move - x) <= 2 && move > 280) {
+    move = NaN;
+  }
+  const maxX = Math.max(80, imageWidth - 20);
   const hasMove = Number.isFinite(move) && move >= 40 && move <= 280;
-  const hasX = Number.isFinite(x) && x >= 40 && x <= Math.max(80, imageWidth - 20);
+  const hasX = Number.isFinite(x) && x >= 40 && x <= maxX;
   if (!hasMove && !hasX) {
-    return { ok: false, reason: 'vision-x-out-of-range', parsed, imageWidth };
+    return {
+      ok: false,
+      reason: 'vision-x-out-of-range',
+      parsed,
+      imageWidth,
+      body: outText.slice(0, 300),
+    };
   }
   return {
     ok: true,
     naturalX: hasX ? x : move,
     moveX: hasMove ? move : undefined,
-    confidence: Number(parsed.confidence) || 0,
+    confidence: coerceNumber(parsed.confidence) || 0.7,
     reason: parsed.reason || '',
     method: 'vision',
+    parsed,
   };
 }
 

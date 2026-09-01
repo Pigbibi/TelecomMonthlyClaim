@@ -56,6 +56,31 @@ test('uses Gemini API key and request format when configured', async () => {
   assert.equal(body.generationConfig.responseMimeType, 'application/json');
 });
 
+test('treats oversized move as gap x when x is missing', async () => {
+  global.fetch = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({
+      candidates: [{
+        content: { parts: [{ text: '{"move":458,"confidence":0.8,"reason":"gap"}' }] },
+      }],
+    }),
+  });
+
+  const result = await withVisionEnv({
+    TELECOM_VISION_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    GEMINI_API_KEY: 'gemini-test-key',
+    TELECOM_VISION_MODE: 'gemini',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: 'data:image/png;base64,bg-data',
+    imageWidth: 903,
+    cssWidth: 450,
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.naturalX, 458);
+  assert.equal(result.moveX, undefined);
+});
+
 test('falls back to TELECOM_VISION_API_KEY for non-Gemini providers', async () => {
   const calls = [];
   global.fetch = async (url, init) => {
