@@ -1618,7 +1618,7 @@ async function solveConfirmationSlider(client) {
   if (visionConfigured()) {
     info = await tryVisionSolve();
   } else {
-    console.log('Native Chrome vision solver skipped: set CODEX_GATEWAY_COMMAND (preferred) or GEMINI_API_KEY with TELECOM_VISION_URL');
+    console.log('Native Chrome vision solver skipped: set CODEX_GATEWAY_SERVICE_URL (preferred) or CODEX_GATEWAY_COMMAND / GEMINI_API_KEY');
   }
 
   if (!info || info.moveX < 40) {

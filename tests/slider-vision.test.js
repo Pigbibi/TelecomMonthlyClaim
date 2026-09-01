@@ -56,7 +56,45 @@ test('uses Gemini API key and request format when configured', async () => {
   assert.equal(body.generationConfig.responseMimeType, 'application/json');
 });
 
-test('uses CodexGateway before direct Gemini when CODEX_GATEWAY_COMMAND is set', async () => {
+test('uses CodexGateway service HTTP before direct Gemini when SERVICE_URL is set', async () => {
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).includes('audience=')) {
+      return { ok: true, text: async () => JSON.stringify({ value: 'oidc-token' }) };
+    }
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        output: '{"x":156,"move":118,"confidence":0.9,"reason":"service"}',
+      }),
+    };
+  };
+
+  const result = await withVisionEnv({
+    CODEX_GATEWAY_SERVICE_URL: 'https://gateway.example.invalid',
+    CODEX_GATEWAY_SERVICE_AUDIENCE: 'codex-gateway',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://oidc.example.invalid/token',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'req-token',
+    GEMINI_API_KEY: 'should-not-be-used',
+    TELECOM_VISION_URL: 'https://example.invalid/v1',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    imageWidth: 280,
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codex-gateway-service');
+  assert.equal(result.moveX, 118);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /\/v1\/codex$/);
+  assert.equal(calls[1].init.headers.Authorization, 'Bearer oidc-token');
+  const body = JSON.parse(calls[1].init.body);
+  assert.equal(body.provider_chain, 'codex');
+  assert.equal(body.task, 'captcha');
+});
+
+test('uses CodexGateway CLI before direct Gemini when CODEX_GATEWAY_COMMAND is set', async () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
