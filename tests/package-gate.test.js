@@ -59,3 +59,14 @@ test('summary includes package labels for waiting pages', () => {
   assert.equal(summary.state, 'waiting');
   assert.deepEqual(summary.packageLabels, ['未知套餐A', '未知套餐B']);
 });
+
+test('marks non-matching offers as unavailable instead of claiming them', () => {
+  const gate = classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '3GB通用流量-网龄活动专用 提交订单',
+    packageLabels: ['3GB通用流量-网龄活动专用', '提交订单'],
+    productName: '互联网卡网龄享200分钟国内语音',
+  });
+  assert.equal(gate.state, 'unavailable');
+  assert.deepEqual(gate.packageLabels, ['3GB通用流量-网龄活动专用']);
+});

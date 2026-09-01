@@ -1031,6 +1031,12 @@ async function selectTargetPackage(client, productName) {
     if (gate.state === 'already_claimed') {
       return { alreadyClaimed: true, diagnostic: summarizePackageGate(gate) };
     }
+    if (gate.state === 'unavailable') {
+      throw new Error(`Native Chrome configured package unavailable (not claiming alternatives): ${JSON.stringify({
+        productName,
+        ...summarizePackageGate(gate),
+      })}`);
+    }
     if (gate.state === 'blocked') {
       const dismissed = await dismissBenignDialogs(client);
       if (dismissed) {
