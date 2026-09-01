@@ -516,18 +516,18 @@ async function openSliderChallenge(client, phone) {
       const input = ${nativePhoneInputExpression()};
       if (!input) return false;
       input.focus();
+      const expected = ${JSON.stringify(String(phone || ''))};
       const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-      if (setter) setter.call(input, ''); else input.value = '';
+      if (setter) setter.call(input, expected); else input.value = expected;
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      return true;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.blur();
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
+      return String(input.value || '') === expected;
     })()`);
     if (!focused) await wait(300);
   }
   if (!focused) throw new Error('Native Chrome phone input missing');
-  for (const digit of String(phone || '')) {
-    await client.send('Input.insertText', { text: digit });
-    await wait(70 + Math.floor(Math.random() * 90));
-  }
   // Telecom's login UI often keeps the SMS button hidden/disabled until the phone
   // field commits a valid 11-digit value via change/blur.
   let phoneCommit = null;

@@ -189,6 +189,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /clickedLoginSwitch/);
   assert.match(script, /commitDeadline/);
   assert.match(script, /focusDeadline = Date\.now\(\) \+ 15000/);
+  assert.doesNotMatch(script, /for \(const digit of String\(phone/);
   assert.match(script, /readNativePhoneState/);
   assert.match(script, /Native Chrome entry page did not render:.*JSON\.stringify\(diagnostics\)/);
   assert.match(script, /bodyTextLength:/);
