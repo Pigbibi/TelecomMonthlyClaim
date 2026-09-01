@@ -450,6 +450,11 @@ async function readNativePhoneState(client, {
       scriptCount: document.scripts.length,
       htmlLength: document.documentElement?.outerHTML?.length || 0,
       bodyTextLength: (document.body?.innerText || '').length,
+      bodySummary: (document.body?.innerText || '')
+        .replace(/\\b\\d{4,11}\\b/g, '***')
+        .replace(/\\s+/g, ' ')
+        .trim()
+        .slice(0, 300),
       inputs: [...document.querySelectorAll('input')].slice(0, 8).map(element => ({
         type: element.type || '',
         id: element.id || '',

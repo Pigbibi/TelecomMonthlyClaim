@@ -195,6 +195,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /readNativePhoneState/);
   assert.match(script, /Native Chrome entry page did not render:.*JSON\.stringify\(diagnostics\)/);
   assert.match(script, /bodyTextLength:/);
+  assert.match(script, /bodySummary:/);
   assert.match(script, /visibleActions:/);
   assert.match(script, /inputs: \[\.\.\.document\.querySelectorAll\('input'\)\]/);
   assert.match(script, /computeSliderImageMatchInPage/);
