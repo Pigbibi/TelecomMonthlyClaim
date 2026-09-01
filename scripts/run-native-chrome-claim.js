@@ -1623,26 +1623,37 @@ async function solveConfirmationSlider(client) {
     );
   }
 
-  const moveAttempts = [];
-  const pushMove = value => {
-    const moveX = Math.round(Number(value));
-    if (!Number.isFinite(moveX) || moveX < 40 || moveX > 360) return;
-    if (moveAttempts.includes(moveX)) return;
-    moveAttempts.push(moveX);
-  };
-  pushMove(info.moveX);
-  for (const value of info.moveCandidates || []) pushMove(value);
-  pushMove(info.cssFromCrop);
-  for (const delta of [-12, 12, -24, 24, -36, 36]) pushMove(info.moveX + delta);
-
+  const maxAttempts = 5;
   let lastOutcome = null;
-  for (let attempt = 0; attempt < moveAttempts.length; attempt += 1) {
-    const moveX = moveAttempts[attempt];
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) {
+      const refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon', '[class*="refresh" i]']);
+      await wait(refreshed ? 1800 : 1000);
+      const next = await tryVisionSolve();
+      if (!next?.ok || !(next.moveX >= 40)) {
+        console.log('Native Chrome vision retry missing assets', { attempt: attempt + 1, next });
+        continue;
+      }
+      info = next;
+    }
+
+    // Always drag the distance for THIS challenge. Prefer crop-relative geometry.
+    const moveX = Math.round(Number(info.cssFromCrop >= 40 ? info.cssFromCrop : info.moveX));
     console.log('Native Chrome confirmation slider match', {
-      ...info,
-      attempt: attempt + 1,
-      attemptCount: moveAttempts.length,
+      method: info.method,
       moveX,
+      cssFromCrop: info.cssFromCrop,
+      moveCandidates: info.moveCandidates,
+      naturalX: info.naturalX,
+      visionNaturalX: info.vision?.naturalX,
+      startX: info.startX,
+      sliderX: info.sliderX,
+      screenshotScaleX: info.screenshotScaleX,
+      imageWidth: info.imageWidth,
+      canvasWidth: info.canvasWidth,
+      slider: info.slider,
+      attempt: attempt + 1,
+      attemptCount: maxAttempts,
     });
     await drag(client, { startX: info.startX, startY: info.startY, moveX });
     const deadline = Date.now() + 12000;
@@ -1671,20 +1682,6 @@ async function solveConfirmationSlider(client) {
       outcome: lastOutcome,
       network: await client.recentNetworkDiagnostics(),
     });
-    if (attempt >= moveAttempts.length - 1) break;
-    const refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon', '[class*="refresh" i]']);
-    await wait(refreshed ? 1500 : 800);
-    // Re-acquire handle position after refresh; keep distance candidates from first vision.
-    const refreshedVision = await tryVisionSolve().catch(() => null);
-    if (refreshedVision?.ok) {
-      info = {
-        ...info,
-        ...refreshedVision,
-        moveCandidates: [...new Set([...(refreshedVision.moveCandidates || []), ...moveAttempts])],
-      };
-      pushMove(refreshedVision.moveX);
-      pushMove(refreshedVision.cssFromCrop);
-    }
   }
 
   console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
