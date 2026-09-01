@@ -947,6 +947,41 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
   throw new Error(`${errorMessage} (evaluationTimeouts=${evaluationTimeouts})`);
 }
 
+
+async function dismissBenignDialogs(client) {
+  return !!await client.evaluate(`(() => {
+    const pattern = /验证码已下发|请注意查收|服务繁忙|稍后|我知道了|温馨提示/;
+    const confirmPattern = /确定|确认|我知道了|知道了/;
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const dialogSelectors = [
+      '#wap-dialog', '.wap-dialog', '.diaog-popup', '#dialog-box',
+      '[role="dialog"]', '.van-dialog', '[class*="dialog" i]', '[class*="modal" i]', '[class*="popup" i]',
+    ];
+    let closed = 0;
+    for (const dialog of [...new Set(dialogSelectors.flatMap(selector => [...document.querySelectorAll(selector)]))].filter(visible)) {
+      if (dialog.id === 'secondPopCombo') continue;
+      const text = dialog.innerText || '';
+      if (!pattern.test(text)) continue;
+      const button = [...dialog.querySelectorAll('button,div,span,a')]
+        .reverse()
+        .find(node => visible(node) && confirmPattern.test((node.innerText || '').replace(/\\s+/g, '')));
+      if (button) {
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        closed += 1;
+        continue;
+      }
+      dialog.style.display = 'none';
+      closed += 1;
+    }
+    return closed > 0;
+  })()`, 5000);
+}
+
 async function selectTargetPackage(client, productName) {
   const packageStartedAt = Date.now();
   const packageDiagnosticsStartedAt = packageStartedAt - 10000;
@@ -989,6 +1024,14 @@ async function selectTargetPackage(client, productName) {
     if (gate.state === 'ready') break;
     if (gate.state === 'already_claimed') {
       return { alreadyClaimed: true, diagnostic: summarizePackageGate(gate) };
+    }
+    if (gate.state === 'blocked') {
+      const dismissed = await dismissBenignDialogs(client);
+      if (dismissed) {
+        console.log('Native Chrome dismissed package-page dialog', summarizePackageGate(gate));
+        await wait(400);
+        continue;
+      }
     }
     await wait(500);
   }
@@ -1804,6 +1847,7 @@ async function main() {
       if (!sms?.code) throw new Error('Native Chrome login SMS was not received');
       await submitLoginCode(cdp, sms.code);
       console.log('Native Chrome login completed before Playwright attachment');
+      await dismissBenignDialogs(cdp);
       const packageResult = await selectTargetPackage(cdp, config.productName);
       alreadyClaimed = packageResult.alreadyClaimed;
       if (alreadyClaimed) {
