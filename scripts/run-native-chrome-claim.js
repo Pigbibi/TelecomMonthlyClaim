@@ -1499,7 +1499,15 @@ async function solveConfirmationSlider(client) {
         reason: visionAttempt?.reason,
         confidence: visionAttempt?.confidence || visionAttempt?.vision?.confidence,
         method: visionAttempt?.method,
+        moveX: visionAttempt?.moveX,
+        visionNaturalX: visionAttempt?.vision?.naturalX,
+        gapCssX: visionAttempt?.gapCssX,
+        startX: visionAttempt?.startX,
+        sliderX: visionAttempt?.sliderX,
+        screenshotScaleX: visionAttempt?.screenshotScaleX,
+        imageWidth: visionAttempt?.imageWidth,
         slider: visionAttempt?.slider,
+        raw: visionAttempt?.raw,
       });
       if (visionAttempt?.ok && visionAttempt.moveX >= 40) {
         info = visionAttempt;
