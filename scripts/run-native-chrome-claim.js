@@ -417,9 +417,14 @@ async function readNativePhoneState(client, {
         && style.visibility !== 'hidden';
     };
     const normalize = text => String(text || '').replace(/\\s+/g, '');
-    const actions = [...document.querySelectorAll('button,a,span,div')].filter(visible);
+    const actions = [...(document.body?.querySelectorAll('*') || [])].filter(visible);
     const findAction = label => actions
-      .find(element => normalize(element.innerText || element.textContent) === label);
+      .filter(element => normalize(element.innerText || element.textContent) === label)
+      .sort((left, right) => {
+        const a = left.getBoundingClientRect();
+        const b = right.getBoundingClientRect();
+        return (a.width * a.height) - (b.width * b.height);
+      })[0];
     const smsTab = findAction('短信验证码登录');
     const otherLogin = smsTab ? null : findAction('其他登录方式');
     const oneClickLogin = (smsTab || otherLogin) ? null : findAction('本机号码一键登录');
