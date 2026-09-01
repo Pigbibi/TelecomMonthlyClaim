@@ -22,10 +22,19 @@ test('rejects echnwap Cfq divert as wrong activity instead of ready', () => {
 
 test('classifies explicit duplicate claim wording', () => {
   assert.equal(classifyPackageGate({
-    url: 'https://wapbj.189.cn/wap2017/index',
+    url: 'https://wapbj.189.cn/wap2017/index/preDepositCfg_list.html',
     dialogText: '该优惠本月已办理，无需重复办理',
     productName: '互联网卡网龄享5GB国内通用流量',
   }).state, 'already_claimed');
+});
+
+test('does not treat Cfq already-claimed wording as success', () => {
+  const gate = classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    dialogText: '该优惠本月已办理，无需重复办理',
+    productName: '互联网卡网龄享200分钟国内语音',
+  });
+  assert.equal(gate.state, 'wrong_activity');
 });
 
 test('keeps an unknown modal blocked and masks sensitive diagnostics', () => {

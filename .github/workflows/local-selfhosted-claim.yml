@@ -56,10 +56,11 @@ jobs:
       PUSHPLUS_DEBUG: ${{ vars.PUSHPLUS_DEBUG || 'false' }}
       PUSHPLUS_RELAY_INBOX_URL: ${{ vars.PUSHPLUS_RELAY_INBOX_URL || '' }}
       PUSHPLUS_RELAY_INBOX_TOKEN: ${{ secrets.PUSHPLUS_RELAY_INBOX_TOKEN }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent' }}
-      TELECOM_VISION_MODE: ${{ vars.TELECOM_VISION_MODE || 'gemini' }}
-      TELECOM_VISION_MODEL: ${{ vars.TELECOM_VISION_MODEL || 'gemini-3.6-flash' }}
+      TELECOM_VISION_FALLBACK: ${{ vars.TELECOM_VISION_FALLBACK || '' }}
+      GEMINI_API_KEY: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && secrets.GEMINI_API_KEY || '' }}
+      TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && (vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent') || '' }}
+      TELECOM_VISION_MODE: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && (vars.TELECOM_VISION_MODE || 'gemini') || '' }}
+      TELECOM_VISION_MODEL: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && (vars.TELECOM_VISION_MODEL || 'gemini-3.6-flash') || '' }}
       SEND_CODE_ATTEMPTS: "1"
       SMS_TIMEOUT_MS: ${{ vars.SMS_TIMEOUT_MS || '' }}
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}

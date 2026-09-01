@@ -96,7 +96,7 @@ Repository variables：
 | --- | --- | --- |
 | `TELECOM_TARGET_PACKAGE` | `voice200` | `voice200` 或 `5g` preset |
 | `TELECOM_ENTRY_REQUIRED_PARAMS` | `campaignId,channelId,wxopenid` | 入口 URL 必须带有的 query **键名** |
-| `TELECOM_EXPECTED_CHANNEL_ID` | `dx531` | 可选：你的部署固定 `channelId` |
+| `TELECOM_EXPECTED_CHANNEL_ID` | *（默认不设）* | 可选：仅你的 fork 钉死 `channelId` |
 | `SMS_INBOX_PROVIDER` | `pushplus` | `pushplus` 或 `http` |
 | `TELECOM_CONNECTIVITY_MODE` | `direct` | 网络入口模式 |
 

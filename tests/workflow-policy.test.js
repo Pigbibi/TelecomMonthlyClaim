@@ -25,7 +25,8 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
 });
 
 test('monthly workflow uses Gemini credentials optionally; slider defaults to local canvas match', () => {
-  assert.match(workflowText, /GEMINI_API_KEY/);
+  assert.match(workflowText, /TELECOM_VISION_FALLBACK:/);
+  assert.match(workflowText, /vars\.TELECOM_VISION_FALLBACK == 'true' && secrets\.GEMINI_API_KEY/);
   // CodexGateway is no longer injected into the claim step; captcha geometry is local-first.
   assert.doesNotMatch(workflowText, /CODEX_GATEWAY_SERVICE_URL:\s+\$\{\{\s*vars\.CODEX_GATEWAY_SERVICE_URL/);
   assert.doesNotMatch(workflowText, /Pigbibi\/AIGateway\/actions\/setup-codex-gateway/);
@@ -251,6 +252,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /Native Chrome confirmation slider assets still incomplete/);
   assert.match(script, /Native Chrome vision fallback slider attempt/);
   assert.match(script, /TELECOM_VISION_FALLBACK/);
+  assert.match(script, /visionFallbackAllowed/);
   assert.match(script, /optional vision fallback enabled/);
   assert.match(script, /readLocalConfirmationSlider/);
   assert.match(script, /local confirmation retry missing assets/);
