@@ -1,0 +1,31 @@
+{
+  "status": "skipped_unavailable",
+  "month": "2026-09",
+  "beijing": {
+    "year": "2026",
+    "month": "09",
+    "day": 1,
+    "hour": 23,
+    "minute": 27
+  },
+  "targetPackage": "voice200",
+  "productName": "互联网卡网龄享200分钟国内语音",
+  "expectedPlanId": "24BJ102053",
+  "pageFamily": "echnwap",
+  "offerLabels": [
+    "名称：1GB全国流量(High直盒)",
+    "价格：月缴费0元",
+    "包含内容：包含1GB全国流量，流量不可结转，主副卡不可共享",
+    "名称：2GB通用流量-网龄活动专用",
+    "价格：月缴费0元",
+    "包含内容：包含2GB全国流量，流量不可结转，主副卡不可共享",
+    "名称：3GB通用流量-网龄活动专用",
+    "价格：月缴费0元",
+    "包含内容：包含3GB全国流量，流量不可结转，主副卡不可共享",
+    "变更/退订：可退订，无违约金",
+    "重复订购：不可重复订购",
+    "主副卡分享：主副卡不共享，副卡可单独订购",
+    "流量有效期：有效期1个月，流量不可结转，生效当月月底失效"
+  ],
+  "successEvidence": "configured_package_unavailable"
+}
