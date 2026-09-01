@@ -229,6 +229,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /solvePuzzleWithVisionFallback/);
   assert.match(script, /chooseVisionMoveX/);
   assert.match(script, /findPuzzleSlider/);
+  assert.match(script, /puzzle-still-loading/);
   assert.match(script, /moveCandidates/);
   assert.match(script, /slider attempt rejected/);
   assert.match(script, /vision-direct/);
