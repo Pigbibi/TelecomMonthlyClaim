@@ -975,15 +975,13 @@ async function waitForPageState(client, expression, timeoutMs, errorMessage) {
 }
 
 function logPostLoginRouteDiagnostics(client, since, entryUrl) {
-  const href = '';
-  const pageState = client.evaluate(`(() => ({
+  return client.evaluate(`(() => ({
     href: location.href,
     path: location.pathname,
     referrerPath: (() => {
       try { return new URL(document.referrer || '').pathname; } catch { return ''; }
     })(),
-  }))()`).catch(() => null);
-  return Promise.resolve(pageState).then(async (state) => {
+  }))()`).catch(() => null).then(async (state) => {
     const telecomApi = await client.recentTelecomApiDiagnostics(since).catch(() => []);
     const documents = client.recentResourceDiagnostics(since)
       .filter(event => event.type === 'Document')
@@ -1003,7 +1001,7 @@ function logPostLoginRouteDiagnostics(client, since, entryUrl) {
       }));
     console.log('Native Chrome post-login route diagnostics', {
       entry: summarizeEntryFingerprint(entryUrl),
-      pageFamily: pageFamilyFromUrl(state?.href || href),
+      pageFamily: pageFamilyFromUrl(state?.href || ''),
       path: String(state?.path || '').replace(/\d{4,}/g, '***').slice(0, 160),
       referrerPath: String(state?.referrerPath || '').replace(/\d{4,}/g, '***').slice(0, 160),
       documents,
