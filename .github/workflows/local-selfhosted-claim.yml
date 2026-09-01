@@ -55,9 +55,6 @@ jobs:
       PUSHPLUS_RELAY_INBOX_URL: ${{ vars.PUSHPLUS_RELAY_INBOX_URL || '' }}
       PUSHPLUS_RELAY_INBOX_TOKEN: ${{ secrets.PUSHPLUS_RELAY_INBOX_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      CODEX_GATEWAY_SERVICE_URL: ${{ vars.CODEX_GATEWAY_SERVICE_URL }}
-      CODEX_GATEWAY_SERVICE_AUDIENCE: ${{ vars.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway' }}
-      CODEX_GATEWAY_MODEL: ${{ vars.CAPTCHA_CODEX_MODEL || vars.CODEX_GATEWAY_MODEL || '' }}
       TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent' }}
       TELECOM_VISION_MODE: ${{ vars.TELECOM_VISION_MODE || 'gemini' }}
       TELECOM_VISION_MODEL: ${{ vars.TELECOM_VISION_MODEL || 'gemini-3.6-flash' }}
@@ -232,6 +229,10 @@ jobs:
         run: node scripts/manage-intercept-lease.js acquire telecom-claim-silent
 
       - name: Run claim via real Chrome CDP
+        env:
+          CODEX_GATEWAY_SERVICE_URL: ${{ vars.CODEX_GATEWAY_SERVICE_URL }}
+          CODEX_GATEWAY_SERVICE_AUDIENCE: ${{ vars.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway' }}
+          CODEX_GATEWAY_MODEL: ${{ vars.CAPTCHA_CODEX_MODEL || vars.CODEX_GATEWAY_MODEL || '' }}
         run: bash scripts/run-real-chrome-claim.sh
 
       - name: Release workflow-scoped SMS intercept lease
