@@ -1113,6 +1113,21 @@ async function openConfirmationSlider(client) {
   throw new Error('Native Chrome confirmation slider did not become ready');
 }
 
+const puzzleRootSelector = '#secondPop_puzzle_check,.puzzle-verify-popup,.puzzle-verify-container,.captcha-wrapper,#slider_check,.slider-check-box';
+const puzzleSliderSelectors = [
+  '#slider_track_btn', '.slider-btn', '.slider', '[role="slider"]',
+  'input[type="range"]', '[class*="slider" i]', '[class*="drag" i]', '[class*="handle" i]',
+];
+
+function visionConfigured() {
+  const key = process.env.GEMINI_API_KEY
+    || process.env.TELECOM_VISION_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.ANTHROPIC_AUTH_TOKEN
+    || '';
+  return !!(key && process.env.TELECOM_VISION_URL);
+}
+
 async function readConfirmationSliderInfo(client) {
   return client.evaluate(`(() => {
     const visible = element => {
@@ -1121,7 +1136,7 @@ async function readConfirmationSliderInfo(client) {
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
-    const root = document.querySelector('#secondPop_puzzle_check') || document;
+    const root = document.querySelector(${JSON.stringify(puzzleRootSelector)}) || document;
     const canvas = [...root.querySelectorAll('canvas:not(.block),canvas')]
       .find(item => visible(item) && item.width >= 100 && item.height >= 50);
     if (!canvas) return null;
@@ -1136,7 +1151,7 @@ async function readConfirmationSliderInfo(client) {
         }
       }
     }
-    const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+    const slider = ${JSON.stringify(puzzleSliderSelectors)}
       .map(selector => root.querySelector(selector))
       .find(visible);
     const naturalX = flat.ok ? flat.x : minx;
@@ -1180,10 +1195,11 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
         const style = getComputedStyle(element);
         return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
       };
-      const root = document.querySelector('#secondPop_puzzle_check') || document;
+      const root = document.querySelector(${JSON.stringify(puzzleRootSelector)}) || document;
       const source = [...root.querySelectorAll('canvas:not(.block),canvas')]
-        .find(item => visible(item) && item.width >= 100 && item.height >= 50);
-      const slider = ['#slider_track_btn', '.slider-btn', '.slider', '[class*="slider" i]']
+        .find(item => visible(item) && item.width >= 100 && item.height >= 50)
+        || (visible(root) && root !== document ? root : null);
+      const slider = ${JSON.stringify(puzzleSliderSelectors)}
         .map(selector => root.querySelector(selector))
         .find(visible);
       if (!source || !slider) return resolve(null);
@@ -1207,21 +1223,22 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
       );
       const pixels = crop.getContext('2d').getImageData(0, 0, crop.width, crop.height).data;
       const flat = (${findFlatCanvasTarget.toString()})(pixels, crop.width, crop.height);
-      if (!flat.ok) return resolve(null);
-      const targetX = sourceRect.x + flat.x / screenshotScaleX;
-      const moveX = (${renderedPuzzleMoveX.toString()})(sourceRect.x, flat.x, screenshotScaleX, sliderRect.x, source.width);
+      const canvasWidth = source.width || Math.round(sourceRect.width);
+      const moveX = flat.ok
+        ? (${renderedPuzzleMoveX.toString()})(sourceRect.x, flat.x, screenshotScaleX, sliderRect.x, canvasWidth)
+        : 0;
       resolve({
-        method: 'rendered-flat-component',
+        method: flat.ok ? 'rendered-flat-component' : 'rendered-crop-only',
         naturalX: moveX,
         moveX,
-        targetX: Math.round(targetX),
+        targetX: flat.ok ? Math.round(sourceRect.x + flat.x / screenshotScaleX) : null,
         flat,
         cropPng: crop.toDataURL('image/png'),
         imageWidth: crop.width,
         sourceX: sourceRect.x,
         screenshotScaleX,
         sliderX: sliderRect.x,
-        canvasWidth: source.width,
+        canvasWidth,
         raw: ${JSON.stringify(rawInfo)},
         startX: sliderRect.x + sliderRect.width / 2,
         startY: sliderRect.y + sliderRect.height / 2,
@@ -1242,12 +1259,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
     ...local
   } = rendered;
   local.localReliable = isFlatPuzzleCandidateReliable(local.flat);
-  const visionKey = process.env.GEMINI_API_KEY
-    || process.env.TELECOM_VISION_API_KEY
-    || process.env.OPENAI_API_KEY
-    || process.env.ANTHROPIC_AUTH_TOKEN
-    || '';
-  if (!local.localReliable && visionKey && process.env.TELECOM_VISION_URL) {
+  if ((!local.localReliable || !(local.moveX >= 40)) && visionConfigured()) {
     const vision = await estimateSliderDistanceWithVision({ bgPngBase64: cropPng, imageWidth });
     if (vision.ok && vision.confidence >= 0.55) {
       const moveX = renderedPuzzleMoveX(sourceX, vision.naturalX, screenshotScaleX, sliderX, canvasWidth);
@@ -1265,6 +1277,111 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
   return preferCanvasTransparentMatch(local, rawInfo);
 }
 
+async function solvePuzzleWithVisionFallback(client) {
+  if (!visionConfigured()) {
+    return { ok: false, reason: 'vision-not-configured' };
+  }
+  const screenshot = await client.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+  });
+  if (!screenshot?.data) return { ok: false, reason: 'screenshot-missing' };
+  const crop = await client.evaluate(`new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => {
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const root = document.querySelector(${JSON.stringify(puzzleRootSelector)}) || document;
+      const source = [...root.querySelectorAll('canvas:not(.block),canvas')]
+        .find(item => visible(item) && item.width >= 80 && item.height >= 40)
+        || (visible(root) && root !== document ? root : null);
+      const slider = ${JSON.stringify(puzzleSliderSelectors)}
+        .map(selector => root.querySelector(selector))
+        .find(visible);
+      if (!source || !slider) {
+        return resolve({
+          ok: false,
+          reason: 'puzzle-assets-missing',
+          rootClass: root === document ? '' : String(root.className || '').slice(0, 120),
+          hasSource: !!source,
+          hasSlider: !!slider,
+        });
+      }
+      const sourceRect = source.getBoundingClientRect();
+      const sliderRect = slider.getBoundingClientRect();
+      const screenshotScaleX = image.naturalWidth / Math.max(1, window.innerWidth);
+      const screenshotScaleY = image.naturalHeight / Math.max(1, window.innerHeight);
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = Math.max(1, Math.round(Math.min(sourceRect.width, window.innerWidth - sourceRect.x) * screenshotScaleX));
+      cropCanvas.height = Math.max(1, Math.round(Math.min(sourceRect.height, window.innerHeight - sourceRect.y) * screenshotScaleY));
+      cropCanvas.getContext('2d').drawImage(
+        image,
+        Math.max(0, sourceRect.x * screenshotScaleX),
+        Math.max(0, sourceRect.y * screenshotScaleY),
+        cropCanvas.width,
+        cropCanvas.height,
+        0,
+        0,
+        cropCanvas.width,
+        cropCanvas.height,
+      );
+      resolve({
+        ok: true,
+        cropPng: cropCanvas.toDataURL('image/png'),
+        imageWidth: cropCanvas.width,
+        sourceX: sourceRect.x,
+        screenshotScaleX,
+        sliderX: sliderRect.x,
+        canvasWidth: source.width || Math.round(sourceRect.width),
+        startX: sliderRect.x + sliderRect.width / 2,
+        startY: sliderRect.y + sliderRect.height / 2,
+        slider: { tag: slider.tagName, id: slider.id || '', className: String(slider.className || '').slice(0, 80) },
+      });
+    };
+    image.onerror = () => resolve({ ok: false, reason: 'screenshot-decode-failed' });
+    image.src = ${JSON.stringify(`data:image/png;base64,${screenshot.data}`)};
+  })`, 30000);
+  if (!crop?.ok) return crop || { ok: false, reason: 'crop-failed' };
+  const vision = await estimateSliderDistanceWithVision({
+    bgPngBase64: crop.cropPng,
+    imageWidth: crop.imageWidth,
+  });
+  if (!vision.ok || vision.confidence < 0.55) {
+    return {
+      ok: false,
+      reason: vision.reason || 'low-confidence',
+      confidence: vision.confidence || 0,
+      slider: crop.slider,
+    };
+  }
+  const moveX = renderedPuzzleMoveX(
+    crop.sourceX,
+    vision.naturalX,
+    crop.screenshotScaleX,
+    crop.sliderX,
+    crop.canvasWidth,
+  );
+  if (!(moveX >= 40)) {
+    return { ok: false, reason: 'vision-move-too-small', moveX, vision };
+  }
+  return {
+    ok: true,
+    method: 'vision-direct',
+    naturalX: moveX,
+    moveX,
+    targetX: Math.round(crop.sourceX + vision.naturalX / crop.screenshotScaleX),
+    startX: crop.startX,
+    startY: crop.startY,
+    slider: crop.slider,
+    vision: { confidence: vision.confidence, reason: vision.reason },
+  };
+}
+
 async function solveConfirmationSlider(client) {
   const matchDeadline = Date.now() + 20000;
   let info = null;
@@ -1273,7 +1390,7 @@ async function solveConfirmationSlider(client) {
     const rawInfo = await readConfirmationSliderInfo(client);
     if (rawInfo?.moveX >= 40) {
       info = await readRenderedConfirmationSliderInfo(client, rawInfo).catch(() => null) || rawInfo;
-      break;
+      if (info?.moveX >= 40) break;
     }
     if (!refreshed && Date.now() >= matchDeadline - 12000) {
       refreshed = await clickPageElement(client, ['.refreshIcon', '#slider_refresh_icon', '.slider-refresh-icon']);
@@ -1282,6 +1399,18 @@ async function solveConfirmationSlider(client) {
       continue;
     }
     await wait(500);
+  }
+  if (!info || info.moveX < 40) {
+    console.log('Native Chrome local slider match unavailable; using vision fallback');
+    const visionInfo = await solvePuzzleWithVisionFallback(client);
+    console.log('Native Chrome vision slider fallback', {
+      ok: visionInfo?.ok,
+      reason: visionInfo?.reason,
+      confidence: visionInfo?.confidence || visionInfo?.vision?.confidence,
+      method: visionInfo?.method,
+      slider: visionInfo?.slider,
+    });
+    if (visionInfo?.ok && visionInfo.moveX >= 40) info = visionInfo;
   }
   if (!info || info.moveX < 40) {
     console.log('Native Chrome confirmation network diagnostics', await client.recentNetworkDiagnostics());
@@ -1295,7 +1424,7 @@ async function solveConfirmationSlider(client) {
   while (Date.now() < deadline) {
     const state = await client.evaluate(`(() => {
       const text = document.body?.innerText || '';
-      const popup = document.querySelector('#secondPop_puzzle_check');
+      const popup = document.querySelector(${JSON.stringify(puzzleRootSelector)});
       const rect = popup?.getBoundingClientRect();
       const visible = !!(popup && rect.width > 0 && rect.height > 0 && getComputedStyle(popup).display !== 'none');
       return {
