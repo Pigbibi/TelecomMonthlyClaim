@@ -414,6 +414,10 @@ async function readNativePhoneState(client, { clickSmsTab = false } = {}) {
       title: document.title || '',
       readyState: document.readyState,
       inputCount: document.querySelectorAll('input').length,
+      iframeCount: document.querySelectorAll('iframe').length,
+      scriptCount: document.scripts.length,
+      htmlLength: document.documentElement?.outerHTML?.length || 0,
+      bodyTextLength: (document.body?.innerText || '').length,
     };
   })()`);
 }
@@ -431,6 +435,8 @@ async function waitForPhoneInput(client, timeoutMs = 45000) {
 
 async function navigateToEntryPage(client) {
   let documentStatus = null;
+  let lastState = null;
+  const startedAt = Date.now();
   client.on('Network.responseReceived', event => {
     try {
       const url = new URL(event.response?.url);
@@ -446,14 +452,20 @@ async function navigateToEntryPage(client) {
   if (navigation.errorText) throw new Error(`Native Chrome entry navigation failed: ${navigation.errorText}`);
   const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
-    const state = await readNativePhoneState(client, { clickSmsTab: true });
-    if (state?.hostname === 'wapbj.189.cn' && state?.ready) return;
+    lastState = await readNativePhoneState(client, { clickSmsTab: true });
+    if (lastState?.hostname === 'wapbj.189.cn' && lastState?.ready) return;
     // HTTP 400/412 is also used by the site's JavaScript browser-check page.
     // Keep the real browser alive so that challenge can set its cookie and
     // navigate to the application instead of aborting on the intermediate URL.
     await wait(500);
   }
-  throw new Error(`Native Chrome entry page did not render${documentStatus == null ? '' : ` (HTTP ${documentStatus})`}`);
+  const diagnostics = {
+    documentStatus,
+    state: lastState,
+    runtime: client.recentRuntimeDiagnostics(startedAt),
+    resources: client.recentResourceDiagnostics(startedAt),
+  };
+  throw new Error(`Native Chrome entry page did not render: ${JSON.stringify(diagnostics)}`);
 }
 
 async function openSliderChallenge(client, phone) {
