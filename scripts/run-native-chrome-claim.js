@@ -1381,6 +1381,28 @@ async function solvePuzzleWithVisionFallback(client) {
         });
       const source = canvases[0] || (visible(root) && root !== document ? root : null);
       const slider = findPuzzleSlider(root, ${JSON.stringify(puzzleSliderSelectors)});
+      if (source && source.tagName === 'CANVAS') {
+        try {
+          const sample = source.getContext('2d').getImageData(0, 0, Math.min(source.width, 80), Math.min(source.height, 40)).data;
+          let colorful = 0;
+          for (let i = 0; i < sample.length; i += 16) {
+            const r = sample[i]; const g = sample[i + 1]; const b = sample[i + 2];
+            if (Math.max(r, g, b) - Math.min(r, g, b) > 12 || r < 245 || g < 245 || b < 245) colorful += 1;
+          }
+          if (colorful < 8) {
+            return resolve({
+              ok: false,
+              reason: 'puzzle-still-loading',
+              rootClass: root === document ? '' : String(root.className || '').slice(0, 120),
+              hasSource: true,
+              hasSlider: !!slider,
+              canvasCount: canvases.length,
+            });
+          }
+        } catch (error) {
+          // tainted/empty canvas: keep going and let vision decide
+        }
+      }
       if (!source || !slider) {
         return resolve({
           ok: false,
@@ -1442,6 +1464,17 @@ async function solvePuzzleWithVisionFallback(client) {
     bgPngBase64: crop.cropPng,
     imageWidth: crop.imageWidth,
   });
+  const loadingHint = `${vision.reason || ''} ${vision.body || ''}`.toLowerCase();
+  if (/loading|spinner|not yet visible|加载中|请稍候/.test(loadingHint)) {
+    return {
+      ok: false,
+      reason: 'puzzle-still-loading',
+      confidence: vision.confidence || 0,
+      slider: crop.slider,
+      imageWidth: crop.imageWidth,
+      visionReason: vision.reason || '',
+    };
+  }
   if (!vision.ok || vision.confidence < 0.55) {
     return {
       ok: false,
@@ -1525,7 +1558,7 @@ async function solveConfirmationSlider(client) {
 
   const tryVisionSolve = async () => {
     if (!visionConfigured()) return null;
-    const visionDeadline = Date.now() + 15000;
+    const visionDeadline = Date.now() + 25000;
     while (Date.now() < visionDeadline) {
       visionAttempt = await solvePuzzleWithVisionFallback(client);
       console.log('Native Chrome vision-first slider attempt', {
@@ -1547,8 +1580,8 @@ async function solveConfirmationSlider(client) {
         slider: visionAttempt?.slider,
       });
       if (visionAttempt?.ok && visionAttempt.moveX >= 40) return visionAttempt;
-      if (visionAttempt?.reason === 'puzzle-assets-missing') {
-        await wait(500);
+      if (visionAttempt?.reason === 'puzzle-assets-missing' || visionAttempt?.reason === 'puzzle-still-loading') {
+        await wait(1000);
         continue;
       }
       return null;
