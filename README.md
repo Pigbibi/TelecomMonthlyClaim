@@ -159,6 +159,8 @@ reviewed diagnostic or operator-requested rerun.
 ## Documentation
 
 - [Configuration](docs/configuration.md)
+- [Beijing campaign setup (5GB / 200 min)](docs/beijing-campaign-setup.md)
+- [北京电信 5GB/200 分钟配置指南](docs/beijing-campaign-setup.zh-CN.md)
 - [Connectivity](docs/connectivity.md)
 - [SMS providers](docs/sms-providers.md)
 - [Development and troubleshooting](docs/development.md)

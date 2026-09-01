@@ -181,6 +181,8 @@ Do not treat a warm local session as proof that CI will see the same packages.
 
 ## Additional guides
 
+- [Beijing campaign setup (5GB / 200 min)](beijing-campaign-setup.md)
+- [北京电信 5GB/200 分钟配置指南](beijing-campaign-setup.zh-CN.md)
 - [Connectivity](connectivity.md)
 - [SMS providers](sms-providers.md)
 - [Development and troubleshooting](development.md)
