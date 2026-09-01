@@ -1592,13 +1592,16 @@ async function solveConfirmationSlider(client) {
         visionBody: visionAttempt?.visionBody,
       });
       if (visionAttempt?.ok && visionAttempt.moveX >= 40) return visionAttempt;
-      if (visionAttempt?.reason === 'vision-http-429') {
+      if (visionAttempt?.reason === 'vision-http-429' || visionAttempt?.reason === 'vision-http-404') {
         rateLimitHits += 1;
         if (rateLimitHits >= 3) {
-          console.log('Native Chrome vision rate-limited; falling back to local match', { rateLimitHits });
+          console.log('Native Chrome vision unavailable; falling back to local match', {
+            reason: visionAttempt.reason,
+            rateLimitHits,
+          });
           return null;
         }
-        await wait(10000 * rateLimitHits);
+        await wait(visionAttempt.reason === 'vision-http-404' ? 1500 : (10000 * rateLimitHits));
         continue;
       }
       if (
