@@ -1910,7 +1910,7 @@ async function solveConfirmationSlider(client) {
 }
 
 async function redactSensitivePageFields(client) {
-  await client.evaluate(`(() => {
+  return client.evaluate(`(() => {
     for (const element of document.querySelectorAll('input,textarea,[contenteditable="true"]')) {
       if ('value' in element) {
         element.value = '';
@@ -1930,14 +1930,24 @@ async function redactSensitivePageFields(client) {
 async function captureCdpScreenshot(client, label = 'native-chrome-preflight-failed') {
   try {
     await client.send('Page.enable');
-    if (!await redactSensitivePageFields(client)) return;
+    const redacted = await redactSensitivePageFields(client);
     const screenshot = await client.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
-    if (!screenshot?.data) return;
+    if (!screenshot?.data) {
+      console.log('Native Chrome screenshot missing', { label, redacted: !!redacted });
+      return;
+    }
     const artifactDir = path.join(root, 'artifacts', 'claim-debug');
     fs.mkdirSync(artifactDir, { recursive: true });
     const safeLabel = String(label || 'capture').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 64);
-    fs.writeFileSync(path.join(artifactDir, `${Date.now()}-${safeLabel}.png`), Buffer.from(screenshot.data, 'base64'));
-  } catch {}
+    const file = path.join(artifactDir, `${Date.now()}-${safeLabel}.png`);
+    fs.writeFileSync(file, Buffer.from(screenshot.data, 'base64'));
+    console.log('Native Chrome saved debug screenshot', { label: safeLabel, redacted: !!redacted, bytes: screenshot.data.length });
+  } catch (error) {
+    console.log('Native Chrome screenshot failed', {
+      label,
+      message: sanitizeDiagnosticMessage(error?.message || error),
+    });
+  }
 }
 
 function runChild(command, args, options) {
