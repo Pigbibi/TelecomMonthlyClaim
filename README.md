@@ -107,7 +107,7 @@ Repository variables:
 | --- | --- | --- |
 | `TELECOM_TARGET_PACKAGE` | `voice200` | `voice200` or `5g` preset |
 | `TELECOM_ENTRY_REQUIRED_PARAMS` | `campaignId,channelId,wxopenid` | Query keys that must exist on the entry URL |
-| `TELECOM_EXPECTED_CHANNEL_ID` | `dx531` | Optional exact `channelId` pin for your deployment |
+| `TELECOM_EXPECTED_CHANNEL_ID` | *(unset)* | Optional exact `channelId` pin for your fork only |
 | `SMS_INBOX_PROVIDER` | `pushplus` | `pushplus` or `http` |
 | `TELECOM_CONNECTIVITY_MODE` | `direct` | Network entry mode |
 

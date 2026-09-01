@@ -1322,6 +1322,10 @@ function visionConfigured() {
   return visionProvidersConfigured();
 }
 
+function visionFallbackAllowed() {
+  return /^true$/i.test(process.env.TELECOM_VISION_FALLBACK || '');
+}
+
 function chooseVisionMoveX({
   sourceX,
   naturalX,
@@ -1526,7 +1530,7 @@ async function readRenderedConfirmationSliderInfo(client, rawInfo) {
     ...local
   } = rendered;
   local.localReliable = isFlatPuzzleCandidateReliable(local.flat);
-  if ((!local.localReliable || !(local.moveX >= 40)) && visionConfigured()) {
+  if ((!local.localReliable || !(local.moveX >= 40)) && visionFallbackAllowed() && visionConfigured()) {
     const vision = await estimateSliderDistanceWithVision({ bgPngBase64: cropPng, imageWidth });
     if (vision.ok && vision.confidence >= 0.55) {
       const moveX = renderedPuzzleMoveX(sourceX, vision.naturalX, screenshotScaleX, sliderX, canvasWidth);
@@ -1590,6 +1594,9 @@ async function waitForPuzzleCanvasReady(client, timeoutMs = 20000) {
 }
 
 async function solvePuzzleWithVisionFallback(client) {
+  if (!visionFallbackAllowed()) {
+    return { ok: false, reason: 'vision-fallback-disabled' };
+  }
   if (!visionConfigured()) {
     return { ok: false, reason: 'vision-not-configured' };
   }
@@ -1829,7 +1836,7 @@ async function readLocalConfirmationSlider(client) {
 async function solveConfirmationSlider(client) {
   let info = null;
   const drag = process.platform === 'linux' ? dragSliderTrusted : dragSlider;
-  const allowVisionFallback = /^true$/i.test(process.env.TELECOM_VISION_FALLBACK || '');
+  const allowVisionFallback = visionFallbackAllowed();
 
   const matchDeadline = Date.now() + 20000;
   let refreshed = false;

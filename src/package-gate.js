@@ -41,9 +41,6 @@ function classifyPackageGate(input = {}) {
   const targetPackage = String(input.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200');
   const expected = input.expectedActivity || expectedActivityForTarget(targetPackage);
   const combined = `${dialogText}\n${bodyText}\n${packageLabels.join('\n')}`;
-  if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(compactText(combined))) {
-    return { ...input, packageLabels, state: 'already_claimed' };
-  }
   const activity = classifyActivityRoute({
     url,
     phase: 'post_login',
@@ -58,6 +55,9 @@ function classifyPackageGate(input = {}) {
       state: 'wrong_activity',
       activity,
     };
+  }
+  if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(compactText(combined))) {
+    return { ...input, packageLabels, state: 'already_claimed' };
   }
   const productReady = /preDepositCfg_/i.test(url)
     && productName
