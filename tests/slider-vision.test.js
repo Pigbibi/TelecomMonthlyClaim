@@ -6,6 +6,16 @@ const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 function withVisionEnv(env, fn) {
   const originalEnv = { ...process.env };
   const originalFetch = global.fetch;
+  for (const key of [
+    'CODEX_GATEWAY_SERVICE_URL',
+    'CODEX_GATEWAY_SERVICE_AUDIENCE',
+    'CODEX_GATEWAY_COMMAND',
+    'CAPTCHA_CODEX_GATEWAY_COMMAND',
+    'ACTIONS_ID_TOKEN_REQUEST_URL',
+    'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+  ]) {
+    delete process.env[key];
+  }
   Object.assign(process.env, env);
   return Promise.resolve()
     .then(fn)
