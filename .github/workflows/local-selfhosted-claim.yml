@@ -23,6 +23,7 @@ on:
 permissions:
   contents: read
   actions: read
+  id-token: write
 
 jobs:
   claim:
@@ -107,6 +108,17 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+
+      - name: Setup CodexGateway for slider vision
+        continue-on-error: true
+        uses: Pigbibi/AIGateway/actions/setup-codex-gateway@main
+        with:
+          backend: service
+          service-url: ${{ vars.CODEX_GATEWAY_SERVICE_URL }}
+          service-audience: ${{ vars.CODEX_GATEWAY_SERVICE_AUDIENCE || 'codex-gateway' }}
+          provider-chain: codex,gemini-free
+          model: ${{ vars.CAPTCHA_CODEX_MODEL || vars.CODEX_GATEWAY_MODEL }}
+          task: captcha
 
       - name: Validate connectivity
         run: |
