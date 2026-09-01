@@ -54,9 +54,9 @@ jobs:
       PUSHPLUS_RELAY_INBOX_URL: ${{ vars.PUSHPLUS_RELAY_INBOX_URL || '' }}
       PUSHPLUS_RELAY_INBOX_TOKEN: ${{ secrets.PUSHPLUS_RELAY_INBOX_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent' }}
+      TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent' }}
       TELECOM_VISION_MODE: ${{ vars.TELECOM_VISION_MODE || 'gemini' }}
-      TELECOM_VISION_MODEL: ${{ vars.TELECOM_VISION_MODEL || 'gemini-3.5-flash' }}
+      TELECOM_VISION_MODEL: ${{ vars.TELECOM_VISION_MODEL || 'gemini-3.6-flash' }}
       SEND_CODE_ATTEMPTS: "1"
       SMS_TIMEOUT_MS: ${{ vars.SMS_TIMEOUT_MS || '' }}
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
