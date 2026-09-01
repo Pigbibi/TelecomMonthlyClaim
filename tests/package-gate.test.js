@@ -49,15 +49,15 @@ test('accepts shortened redesigned package labels', () => {
   }).state, 'ready');
 });
 
-test('summary includes package labels for waiting pages', () => {
+test('summary keeps waiting when list has not rendered offers yet', () => {
   const summary = summarizePackageGate(classifyPackageGate({
     url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
     bodyText: '加载中',
-    packageLabels: ['未知套餐A', '未知套餐B'],
+    packageLabels: ['加载中'],
     productName: '互联网卡网龄享200分钟国内语音',
   }));
   assert.equal(summary.state, 'waiting');
-  assert.deepEqual(summary.packageLabels, ['未知套餐A', '未知套餐B']);
+  assert.deepEqual(summary.packageLabels, ['加载中']);
 });
 
 test('marks non-matching offers as unavailable instead of claiming them', () => {
