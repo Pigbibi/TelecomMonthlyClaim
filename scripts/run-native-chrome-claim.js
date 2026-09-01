@@ -20,6 +20,15 @@ const root = path.resolve(__dirname, '..');
 const entryUrl = process.env.TELECOM_ENTRY_URL;
 const phone = process.env.TELECOM_PHONE;
 const probeOnly = /^true$/i.test(process.env.TELECOM_PROBE_ONLY || '');
+const nativePhoneSelector = [
+  '#phoneNumber',
+  '#phone',
+  'input.phonenum',
+  'input[type="tel"]',
+  'input[placeholder*="手机号码"]',
+  'input[placeholder*="手机号"]',
+  'input.van-field__control',
+].join(',');
 
 if (!entryUrl) throw new Error('Missing TELECOM_ENTRY_URL');
 if (!phone) throw new Error('Missing TELECOM_PHONE');
@@ -344,19 +353,80 @@ class CdpClient {
   }
 }
 
-async function waitForPhoneInput(client, timeoutMs = 30000) {
+function nativePhoneInputExpression() {
+  return `(() => {
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && !element.disabled;
+    };
+    const candidates = [...document.querySelectorAll(${JSON.stringify(nativePhoneSelector)})]
+      .filter(visible)
+      .filter(element => {
+        const descriptor = [
+          element.id,
+          element.name,
+          element.className,
+          element.getAttribute('placeholder'),
+          element.getAttribute('type'),
+          element.getAttribute('inputmode'),
+        ].join(' ');
+        return !/验证码|校验码|动态码|checknum|(?:^|[^a-z])code(?:[^a-z]|$)/i.test(descriptor);
+      });
+    return candidates[0] || null;
+  })()`;
+}
+
+async function readNativePhoneState(client, { clickSmsTab = false } = {}) {
+  return client.evaluate(`(() => {
+    const input = ${nativePhoneInputExpression()};
+    if (input) {
+      return {
+        ready: true,
+        hostname: location.hostname,
+        path: location.pathname,
+        title: document.title || '',
+      };
+    }
+    const visible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden';
+    };
+    const normalize = text => String(text || '').replace(/\\s+/g, '');
+    const smsTab = [...document.querySelectorAll('button,a,span,div')]
+      .filter(visible)
+      .find(element => normalize(element.innerText || element.textContent) === '短信验证码登录');
+    if (smsTab && ${clickSmsTab ? 'true' : 'false'}) smsTab.click();
+    return {
+      ready: false,
+      clickedSmsTab: !!smsTab && ${clickSmsTab ? 'true' : 'false'},
+      hasSmsTab: !!smsTab,
+      hostname: location.hostname,
+      path: location.pathname,
+      title: document.title || '',
+      readyState: document.readyState,
+      inputCount: document.querySelectorAll('input').length,
+    };
+  })()`);
+}
+
+async function waitForPhoneInput(client, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
+  let lastState = null;
   while (Date.now() < deadline) {
-    const ready = await client.evaluate(`(() => {
-      const input = document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]');
-      if (!input) return false;
-      const rect = input.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    })()`);
-    if (ready) return;
-    await wait(500);
+    lastState = await readNativePhoneState(client, { clickSmsTab: true });
+    if (lastState?.ready) return lastState;
+    await wait(lastState?.clickedSmsTab ? 1000 : 500);
   }
-  throw new Error('Native Chrome phone input did not become ready');
+  throw new Error(`Native Chrome phone input did not become ready: ${JSON.stringify(lastState)}`);
 }
 
 async function navigateToEntryPage(client) {
@@ -376,12 +446,8 @@ async function navigateToEntryPage(client) {
   if (navigation.errorText) throw new Error(`Native Chrome entry navigation failed: ${navigation.errorText}`);
   const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
-    const state = await client.evaluate(`(() => ({
-      readyState: document.readyState,
-      telecom: location.hostname === 'wapbj.189.cn',
-      hasPhone: !!document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]'),
-    }))()`);
-    if (state?.telecom && state?.hasPhone) return;
+    const state = await readNativePhoneState(client, { clickSmsTab: true });
+    if (state?.hostname === 'wapbj.189.cn' && state?.ready) return;
     // HTTP 400/412 is also used by the site's JavaScript browser-check page.
     // Keep the real browser alive so that challenge can set its cookie and
     // navigate to the application instead of aborting on the intermediate URL.
@@ -415,7 +481,7 @@ async function openSliderChallenge(client, phone) {
   await client.send('Network.enable');
   await waitForPhoneInput(client);
   const focused = await client.evaluate(`(() => {
-    const input = document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]');
+    const input = ${nativePhoneInputExpression()};
     if (!input) return false;
     input.focus();
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
@@ -431,7 +497,7 @@ async function openSliderChallenge(client, phone) {
   // Telecom's login UI often keeps the SMS button hidden/disabled until the phone
   // field commits a valid 11-digit value via change/blur.
   const phoneCommit = await client.evaluate(`(() => {
-    const input = document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]');
+    const input = ${nativePhoneInputExpression()};
     if (!input) return { ok: false, reason: 'missing-input' };
     const expected = ${JSON.stringify(String(phone || ''))};
     if (String(input.value || '') !== expected) {
@@ -504,7 +570,7 @@ async function openSliderChallenge(client, phone) {
         href: location.href,
         title: document.title || '',
         bodySnippet: (document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 240),
-        phoneValueLength: String(document.querySelector('#phoneNumber,#phone,input[type="tel"],input[placeholder*="手机"]')?.value || '').length,
+        phoneValueLength: String((${nativePhoneInputExpression()})?.value || '').length,
         candidates,
       };
     }
