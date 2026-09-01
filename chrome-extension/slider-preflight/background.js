@@ -307,7 +307,7 @@ async function submitLoginCode(target, code) {
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
       const state = await evaluate(target, `(() => ({
-        complete: /preDepositC\w*_list/i.test(location.href) || /请选择档位|去办理/.test(document.body?.innerText || ''),
+        complete: /preDepositC\\w*_list/i.test(location.href) || /请选择档位|去办理/.test(document.body?.innerText || ''),
         failed: /短信输入错误|验证码.*错误|验证码.*过期|服务繁忙/.test(document.body?.innerText || ''),
       }))()`);
       if (state?.complete) return true;
