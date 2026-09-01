@@ -218,6 +218,10 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /Native Chrome package page diagnostics/);
   assert.match(script, /dismissBenignDialogs/);
   assert.match(script, /Native Chrome dismissed package-page dialog/);
+  assert.match(script, /configured package unavailable/);
+  assert.match(script, /TELECOM_PACKAGE_UNAVAILABLE/);
+  assert.match(script, /collectMetaOfferLabels/);
+  assert.match(script, /pageFamily/);
 
   assert.match(script, /recentTelecomApiDiagnostics\(packageDiagnosticsStartedAt\)/);
   assert.match(script, /packageDiagnosticsStartedAt = packageStartedAt - 10000/);
@@ -229,7 +233,7 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /Runtime\.exceptionThrown/);
   assert.match(script, /Runtime\\\.evaluate timed out/);
   assert.match(script, /TELECOM_LOGIN_ALREADY_COMPLETE: 'true'/);
-  assert.match(script, /TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true'/);
+  assert.match(script, /TELECOM_CONFIRM_SMS_ALREADY_SENT: packageUnavailable \|\| alreadyClaimed \? 'false' : 'true'/);
   assert.match(script, /Network\.setBlockedURLs/);
   assert.match(script, /sendRandByUnlog/);
   assert.match(script, /Native Chrome slider-load probe passed without submitting the slider/);

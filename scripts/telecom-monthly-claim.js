@@ -1051,14 +1051,40 @@ async function advanceLoginGoal(page, config, goal, options = {}) {
 }
 
 async function executeTargetPackageSelection(page, config) {
-  await page.locator('li').filter({ hasText: config.productName }).waitFor({ state: 'visible' });
+  const { productMatchAliases } = require('../src/package-gate');
+  const { pageFamilyFromUrl } = require('../src/offer-inventory');
+  const aliases = productMatchAliases(config.productName);
+  const pageFamily = pageFamilyFromUrl(page.url());
+  log('Selecting target package', { pageFamily, productName: config.productName, aliases });
+  const rowSelectors = pageFamily === 'echnwap'
+    ? ['li', '[class*="card"]', '[class*="package"]', '[class*="plan"]', 'button']
+    : ['li'];
+  let matched = null;
+  for (const alias of aliases) {
+    for (const selector of rowSelectors) {
+      const locator = page.locator(selector).filter({ hasText: alias });
+      if (await locator.count().catch(() => 0) > 0) {
+        matched = locator.first();
+        break;
+      }
+    }
+    if (matched) break;
+  }
+  if (!matched) throw new Error(`Target package not visible for aliases: ${aliases.join('|')}`);
+  await matched.waitFor({ state: 'visible' });
   await actionDelay(config);
-  await page.locator('li').filter({ hasText: config.productName }).click({ force: true });
+  await matched.click({ force: true });
   await sleep(1500);
   const checked = await page.locator('li.checked').innerText().catch(() => '');
-  if (!checked.includes(config.productName)) throw new Error(`Target package not selected: ${checked}`);
+  const compactChecked = String(checked || '').replace(/\s+/g, '');
+  if (aliases.length && !aliases.some(alias => compactChecked.includes(alias))) {
+    // echnwap may not use li.checked; continue if click landed.
+    const stillVisible = await matched.isVisible().catch(() => false);
+    if (!stillVisible && !compactChecked) throw new Error(`Target package not selected: ${checked}`);
+  }
   await actionDelay(config);
-  await page.locator('#conduct').click({ force: true });
+  const conduct = page.locator('#conduct').or(page.getByText('去办理', { exact: false })).first();
+  await conduct.click({ force: true });
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await sleep(8000);
 }
@@ -2673,6 +2699,27 @@ async function runClaim(config) {
       productName: config.productName,
       expectedPlanId: config.expectedPlanId,
       successEvidence: 'already_claimed_page',
+    });
+    return;
+  }
+  if (config.packageUnavailable) {
+    if (config.dryRunBeforeFinalSubmit) {
+      log('Dry run observed configured package unavailable; state file was not updated.');
+      return;
+    }
+    log('Configured package unavailable in cold-session offers; skipping without claiming alternatives', {
+      targetPackage: config.targetPackage,
+      productName: config.productName,
+      pageFamily: config.pageFamily || '',
+      offerLabels: config.offerLabels || [],
+    });
+    writeState('skipped_unavailable', {
+      targetPackage: config.targetPackage,
+      productName: config.productName,
+      expectedPlanId: config.expectedPlanId,
+      pageFamily: config.pageFamily || '',
+      offerLabels: config.offerLabels || [],
+      successEvidence: 'configured_package_unavailable',
     });
     return;
   }

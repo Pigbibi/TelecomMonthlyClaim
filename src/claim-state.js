@@ -9,8 +9,12 @@ function readClaimStateStatus(file) {
   }
 }
 
-function shouldWriteFailureState(priorStatus) {
-  return priorStatus !== 'success';
+function isSoftTerminalStatus(status) {
+  return status === 'skipped_unavailable' || status === 'success';
 }
 
-module.exports = { readClaimStateStatus, shouldWriteFailureState };
+function shouldWriteFailureState(priorStatus) {
+  return !isSoftTerminalStatus(priorStatus);
+}
+
+module.exports = { readClaimStateStatus, shouldWriteFailureState, isSoftTerminalStatus };

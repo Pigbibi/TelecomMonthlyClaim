@@ -14,7 +14,12 @@ const {
 const { estimateSliderDistanceWithVision, visionProvidersConfigured } = require('../src/slider-vision');
 const { loadConfig } = require('../src/config');
 const { SmsInboxClient } = require('../src/sms-inbox-client');
-const { classifyPackageGate, summarizePackageGate } = require('../src/package-gate');
+const { classifyPackageGate, summarizePackageGate, productMatchAliases } = require('../src/package-gate');
+const {
+  pageFamilyFromUrl,
+  extractOfferLabelsFromMeta,
+  mergeOfferLabels,
+} = require('../src/offer-inventory');
 
 const root = path.resolve(__dirname, '..');
 const entryUrl = process.env.TELECOM_ENTRY_URL;
@@ -309,6 +314,22 @@ class CdpClient {
       diagnostics.push(diagnostic);
     }
     return diagnostics;
+  }
+
+  async collectMetaOfferLabels(since) {
+    const events = this.telecomApiEvents
+      .filter(event => event.at >= since && /preActiveMeta/i.test(event.pathname || ''))
+      .slice(-4);
+    const labels = [];
+    for (const event of events) {
+      if (!event.requestId || event.failed) continue;
+      try {
+        const result = await this.send('Network.getResponseBody', { requestId: event.requestId }, 5000);
+        const payload = JSON.parse(String(result?.body || ''));
+        labels.push(...extractOfferLabelsFromMeta(payload));
+      } catch {}
+    }
+    return mergeOfferLabels(labels);
   }
 
   on(method, listener) {
@@ -988,7 +1009,11 @@ async function selectTargetPackage(client, productName) {
   const deadline = packageStartedAt + 60000;
   let gate = { state: 'waiting' };
   let evaluationTimeouts = 0;
+  let metaOffers = [];
   while (Date.now() < deadline) {
+    if (!metaOffers.length) {
+      metaOffers = await client.collectMetaOfferLabels(packageDiagnosticsStartedAt);
+    }
     let snapshot;
     try {
       snapshot = await client.evaluate(`(() => {
@@ -1008,7 +1033,7 @@ async function selectTargetPackage(client, productName) {
           .filter(Boolean);
         const packageLabels = [...document.querySelectorAll('li,button,[class*="card" i],[class*="package" i],[class*="plan" i]')]
           .filter(visible)
-          .map(node => String(node.innerText || '').replace(/\s+/g, ' ').trim())
+          .map(node => String(node.innerText || '').replace(/\\s+/g, ' ').trim())
           .filter(text => text && text.length <= 80)
           .slice(0, 30);
         return {
@@ -1026,16 +1051,25 @@ async function selectTargetPackage(client, productName) {
       await wait(500);
       continue;
     }
-    gate = classifyPackageGate({ ...snapshot, productName });
+    const pageFamily = pageFamilyFromUrl(snapshot?.url);
+    gate = classifyPackageGate({
+      ...snapshot,
+      productName,
+      metaOffers,
+      pageFamily,
+    });
     if (gate.state === 'ready') break;
     if (gate.state === 'already_claimed') {
       return { alreadyClaimed: true, diagnostic: summarizePackageGate(gate) };
     }
     if (gate.state === 'unavailable') {
-      throw new Error(`Native Chrome configured package unavailable (not claiming alternatives): ${JSON.stringify({
-        productName,
-        ...summarizePackageGate(gate),
-      })}`);
+      console.log('Native Chrome configured package unavailable', summarizePackageGate(gate));
+      return {
+        packageUnavailable: true,
+        diagnostic: summarizePackageGate(gate),
+        pageFamily,
+        offerLabels: gate.packageLabels || [],
+      };
     }
     if (gate.state === 'blocked') {
       const dismissed = await dismissBenignDialogs(client);
@@ -1049,6 +1083,22 @@ async function selectTargetPackage(client, productName) {
   }
   if (gate.state !== 'ready') {
     const telecomApi = await client.recentTelecomApiDiagnostics(packageDiagnosticsStartedAt);
+    if (!metaOffers.length) metaOffers = await client.collectMetaOfferLabels(packageDiagnosticsStartedAt);
+    gate = classifyPackageGate({
+      ...gate,
+      productName,
+      metaOffers,
+      pageFamily: pageFamilyFromUrl(gate.url),
+    });
+    if (gate.state === 'unavailable') {
+      console.log('Native Chrome configured package unavailable after wait', summarizePackageGate(gate));
+      return {
+        packageUnavailable: true,
+        diagnostic: summarizePackageGate(gate),
+        pageFamily: gate.pageFamily,
+        offerLabels: gate.packageLabels || [],
+      };
+    }
     const runtimeState = await client.evaluate(`(() => {
       const externalScriptPaths = [...document.scripts]
         .map(script => script.src)
@@ -1057,7 +1107,7 @@ async function selectTargetPackage(client, productName) {
           try {
             const url = new URL(src, location.href);
             return url.hostname === location.hostname
-              ? url.pathname.replace(/\d{4,}/g, '***').slice(0, 200)
+              ? url.pathname.replace(/\\d{4,}/g, '***').slice(0, 200)
               : '';
           }
           catch { return ''; }
@@ -1069,7 +1119,7 @@ async function selectTargetPackage(client, productName) {
         return !!(rect && rect.width > 0 && rect.height > 0 && getComputedStyle(element).display !== 'none');
       };
       return {
-        path: location.pathname.replace(/\d{4,}/g, '***').slice(0, 200),
+        path: location.pathname.replace(/\\d{4,}/g, '***').slice(0, 200),
         readyState: document.readyState,
         hasSingleSignOnPhoneNo: typeof globalThis.singleSignOnPhoneNo === 'function',
         scriptCount: document.scripts.length,
@@ -1086,26 +1136,33 @@ async function selectTargetPackage(client, productName) {
       runtime: client.recentRuntimeDiagnostics(packageDiagnosticsStartedAt),
       resources: client.recentResourceDiagnostics(packageDiagnosticsStartedAt),
       telecomApi,
+      metaOffers,
     });
     throw new Error(`Native Chrome target package did not render: ${JSON.stringify(summarizePackageGate(gate))}`);
   }
+  const pageFamily = pageFamilyFromUrl(gate.url);
+  console.log('Native Chrome package page ready', {
+    pageFamily,
+    productName,
+    offerLabels: gate.packageLabels || [],
+  });
   const selected = await client.evaluate(`(() => {
-    const name = ${JSON.stringify(productName)};
-    const aliases = [name, name.replace(/^互联网卡网龄享/, '')]
-      .map(value => String(value || '').replace(/\s+/g, ''))
-      .filter(Boolean);
-    if (/200分钟/.test(name)) aliases.push('200分钟国内语音', '网龄享200分钟');
-    if (/5GB|5G/.test(name)) aliases.push('5GB国内通用流量', '网龄享5GB');
+    const aliases = ${JSON.stringify(productMatchAliases(productName))};
+    const family = ${JSON.stringify(pageFamily)};
+    const selectors = family === 'echnwap'
+      ? ['li', 'button', '[class*="card" i]', '[class*="package" i]', '[class*="plan" i]']
+      : ['li'];
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
-    const item = [...document.querySelectorAll('li,button,[class*="card" i],[class*="package" i],[class*="plan" i]')]
+    const item = selectors
+      .flatMap(selector => [...document.querySelectorAll(selector)])
       .find(node => {
         if (!visible(node)) return false;
-        const text = String(node.innerText || '').replace(/\s+/g, '');
+        const text = String(node.innerText || '').replace(/\\s+/g, '');
         return aliases.some(alias => text.includes(alias));
       });
     if (!item) return false;
@@ -1117,14 +1174,16 @@ async function selectTargetPackage(client, productName) {
   await waitForPageState(
     client,
     `(() => {
-      const element = document.querySelector('#conduct');
+      const element = document.querySelector('#conduct')
+        || [...document.querySelectorAll('button,a,div,span')].find(node => /去办理|立即办理/.test((node.innerText || '').replace(/\\s+/g, '')));
       const rect = element?.getBoundingClientRect();
       return !!(rect && rect.width > 0 && rect.height > 0 && getComputedStyle(element).display !== 'none');
     })()`,
     30000,
     'Native Chrome package submit button did not become ready',
   );
-  if (!await schedulePageElementClick(client, ['#conduct'])) {
+  if (!await schedulePageElementClick(client, ['#conduct'])
+    && !await clickPageElement(client, [], '^(去办理|立即办理)$')) {
     throw new Error('Native Chrome package submit button missing');
   }
   console.log('Native Chrome package submit click scheduled');
@@ -1134,7 +1193,7 @@ async function selectTargetPackage(client, productName) {
     30000,
     'Native Chrome confirm page did not become ready',
   );
-  return { alreadyClaimed: false };
+  return { alreadyClaimed: false, pageFamily, offerLabels: gate.packageLabels || [] };
 }
 
 async function openConfirmationSlider(client) {
@@ -1836,6 +1895,9 @@ async function main() {
   if (proxyServer) chromeArgs.splice(chromeArgs.length - 1, 0, `--proxy-server=${proxyServer}`);
   const chrome = spawn(chromeBin, chromeArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
   let alreadyClaimed = false;
+  let packageUnavailable = false;
+  let pageFamily = '';
+  let offerLabels = [];
 
   try {
     const version = await waitForCdp(cdpUrl);
@@ -1870,10 +1932,17 @@ async function main() {
       await submitLoginCode(cdp, sms.code);
       console.log('Native Chrome login completed before Playwright attachment');
       await dismissBenignDialogs(cdp);
+      const pageFamilyAfterLogin = await cdp.evaluate('location.href').then(pageFamilyFromUrl).catch(() => 'unknown');
+      console.log('Native Chrome post-login page family', { pageFamily: pageFamilyAfterLogin });
       const packageResult = await selectTargetPackage(cdp, config.productName);
       alreadyClaimed = packageResult.alreadyClaimed;
+      packageUnavailable = packageResult.packageUnavailable;
+      pageFamily = packageResult.pageFamily || pageFamilyAfterLogin;
+      offerLabels = packageResult.offerLabels || [];
       if (alreadyClaimed) {
         console.log('Native Chrome detected an already-claimed package response', packageResult.diagnostic);
+      } else if (packageUnavailable) {
+        console.log('Native Chrome skipping claim; configured package unavailable', packageResult.diagnostic);
       } else {
         await openConfirmationSlider(cdp);
         const confirmationDistance = await solveConfirmationSlider(cdp);
@@ -1897,8 +1966,11 @@ async function main() {
         TELECOM_CLEAR_BROWSER_DATA: 'false',
         TELECOM_REUSE_VALIDATED_PAGE: 'true',
         TELECOM_LOGIN_ALREADY_COMPLETE: 'true',
-        TELECOM_CONFIRM_SMS_ALREADY_SENT: 'true',
+        TELECOM_CONFIRM_SMS_ALREADY_SENT: packageUnavailable || alreadyClaimed ? 'false' : 'true',
         TELECOM_ALREADY_CLAIMED: alreadyClaimed ? 'true' : 'false',
+        TELECOM_PACKAGE_UNAVAILABLE: packageUnavailable ? 'true' : 'false',
+        TELECOM_PAGE_FAMILY: pageFamily || '',
+        TELECOM_OFFER_LABELS: (offerLabels || []).join('|'),
       },
     });
     if (result.code !== 0) process.exitCode = result.code || 1;

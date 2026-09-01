@@ -69,6 +69,13 @@ function loadConfig() {
     loginAlreadyComplete: process.env.TELECOM_LOGIN_ALREADY_COMPLETE === 'true',
     confirmationSmsAlreadySent: process.env.TELECOM_CONFIRM_SMS_ALREADY_SENT === 'true',
     alreadyClaimed: process.env.TELECOM_ALREADY_CLAIMED === 'true',
+    packageUnavailable: process.env.TELECOM_PACKAGE_UNAVAILABLE === 'true',
+    pageFamily: optionalEnv('TELECOM_PAGE_FAMILY', ''),
+    offerLabels: String(process.env.TELECOM_OFFER_LABELS || '')
+      .split('|')
+      .map(value => value.trim())
+      .filter(Boolean)
+      .slice(0, 20),
     actionDelayMs: numberEnv('TELECOM_ACTION_DELAY_MS', 800),
     postSuccessWaitMs: numberEnv('TELECOM_POST_SUCCESS_WAIT_MS', 8000),
     openwrtProxy: process.env.OPENWRT_HTTP_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '',

@@ -102,13 +102,30 @@ Review its data policy and do not assume it will improve every challenge.
 
 ## State behavior
 
-The monthly workflow writes `state/YYYY-MM.json` to `main`. A `success` state
-skips an ordinary run for that month. A later failure does not overwrite an
-existing success state.
+The monthly workflow writes `state/YYYY-MM.json` to `main`.
 
-`force_run=true` bypasses the skip but does not erase the earlier success. If
-the carrier page clearly reports an already-completed claim, the run records
+| Status | Meaning | Schedule / Issue |
+| --- | --- | --- |
+| `success` | Claimed or already claimed | Skip later ordinary runs |
+| `skipped_unavailable` | Logged in, but configured SKU not in cold-session offers | Soft skip; not an engineering failure issue |
+| `failed` | Login / slider / proxy / submit error | Retry; issue only on final retry day |
+
+A later engineering failure does not overwrite an existing `success` or
+`skipped_unavailable` state.
+`force_run=true` bypasses the success skip but does not erase earlier success.
+
+If the carrier page clearly reports an already-completed claim, the run records
 that page as success evidence instead of requesting another confirmation SMS.
+
+### Warm browser vs cold automation
+
+Your personal browser often keeps WAF cookies and may stay on the `wap2017`
+entry UI with a fuller offer list and no slider. GitHub Actions uses a fresh
+Chrome profile (`TELECOM_CLEAR_BROWSER_DATA=true`) and the SMS unlog path, which
+commonly lands on `echnwap` and can show a different offer set. Do not treat a
+warm local session as proof that CI will see the same packages. Change
+`TELECOM_PRODUCT_NAME` / plan id only when you intentionally want to claim a
+different SKU; otherwise leave `skipped_unavailable` alone.
 
 ## Additional guides
 
