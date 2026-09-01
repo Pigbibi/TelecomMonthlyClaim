@@ -201,7 +201,7 @@ async function estimateWithCodexGatewayService({
     ask_for_approval: 'never',
     model: (process.env.CAPTCHA_CODEX_MODEL || process.env.CODEX_GATEWAY_MODEL || '').trim(),
     reasoning_effort: (process.env.CODEX_GATEWAY_REASONING_EFFORT || '').trim(),
-    task: 'captcha',
+    task: 'slider',
     complexity: 'high',
     // Service only accepts codex; Gemini fallback stays in this caller.
     provider_chain: 'codex',
@@ -290,7 +290,7 @@ function estimateWithCodexGatewayCli({ bgPngBase64, blockPngBase64, imageWidth, 
       '--timeout-seconds', String(timeoutSeconds),
       '--sandbox', 'read-only',
       '--ask-for-approval', 'never',
-      '--task', 'captcha',
+      '--task', 'slider',
       '--complexity', 'high',
       '--providers', providerChain,
     );
@@ -518,6 +518,13 @@ async function estimateSliderDistanceWithVision(options = {}) {
   }
 
   const http = await estimateWithHttpVision(normalized);
+  if (!http.ok && gatewayError) {
+    console.warn('Direct Gemini/HTTP slider vision also failed', {
+      httpReason: http.reason,
+      body: http.body,
+      gatewayReason: gatewayError.reason,
+    });
+  }
   if (http.ok || !gatewayError) return http;
   return {
     ok: false,

@@ -101,7 +101,7 @@ test('uses CodexGateway service HTTP before direct Gemini when SERVICE_URL is se
   assert.equal(calls[1].init.headers.Authorization, 'Bearer oidc-token');
   const body = JSON.parse(calls[1].init.body);
   assert.equal(body.provider_chain, 'codex');
-  assert.equal(body.task, 'captcha');
+  assert.equal(body.task, 'slider');
   const schemaJson = Buffer.from(body.output_schema.content_base64, 'base64').toString('utf8');
   const schema = JSON.parse(schemaJson);
   assert.deepEqual(schema.required, ['x', 'move', 'confidence', 'reason']);
