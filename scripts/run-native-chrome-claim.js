@@ -401,14 +401,20 @@ async function readNativePhoneState(client, { clickSmsTab = false } = {}) {
         && style.visibility !== 'hidden';
     };
     const normalize = text => String(text || '').replace(/\\s+/g, '');
-    const smsTab = [...document.querySelectorAll('button,a,span,div')]
-      .filter(visible)
-      .find(element => normalize(element.innerText || element.textContent) === '短信验证码登录');
-    if (smsTab && ${clickSmsTab ? 'true' : 'false'}) smsTab.click();
+    const actions = [...document.querySelectorAll('button,a,span,div')].filter(visible);
+    const findAction = label => actions
+      .find(element => normalize(element.innerText || element.textContent) === label);
+    const smsTab = findAction('短信验证码登录');
+    const otherLogin = smsTab ? null : findAction('其他登录方式');
+    const loginSwitch = smsTab || otherLogin;
+    if (loginSwitch && ${clickSmsTab ? 'true' : 'false'}) loginSwitch.click();
     return {
       ready: false,
       clickedSmsTab: !!smsTab && ${clickSmsTab ? 'true' : 'false'},
+      clickedLoginSwitch: !!loginSwitch && ${clickSmsTab ? 'true' : 'false'},
+      loginSwitch: smsTab ? 'sms' : (otherLogin ? 'other' : ''),
       hasSmsTab: !!smsTab,
+      hasOtherLogin: !!otherLogin,
       hostname: location.hostname,
       path: location.pathname,
       title: document.title || '',
@@ -438,7 +444,7 @@ async function waitForPhoneInput(client, timeoutMs = 45000) {
   while (Date.now() < deadline) {
     lastState = await readNativePhoneState(client, { clickSmsTab: true });
     if (lastState?.ready) return lastState;
-    await wait(lastState?.clickedSmsTab ? 1000 : 500);
+    await wait(lastState?.clickedLoginSwitch ? 1000 : 500);
   }
   throw new Error(`Native Chrome phone input did not become ready: ${JSON.stringify(lastState)}`);
 }
