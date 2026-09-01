@@ -223,8 +223,9 @@ test('native Playwright transport starts a fresh headed system Chrome before att
   assert.match(script, /collectMetaOfferLabels/);
   assert.match(script, /pageFamily/);
   assert.match(script, /summarizeEntryFingerprint/);
-  assert.match(script, /assertEntrySecretShape/);
+  assert.match(script, /assertConfiguredEntryUrl/);
   assert.match(script, /classifyActivityRoute/);
+  assert.match(script, /landed on wrong entry activity/);
   assert.match(script, /post-login route diagnostics/);
   assert.match(script, /package-unavailable/);
   assert.match(script, /wrong-activity/);
@@ -294,6 +295,19 @@ test('native package clicks return before telecom click handlers run', () => {
   assert.match(script, /setTimeout\(\(\) => element\.click\(\), 0\)/);
   assert.match(script, /Native Chrome target package click scheduled/);
   assert.match(script, /isTransientPageEvaluationError/);
+});
+
+test('validate-entry and playwright claim share entry/activity gates', () => {
+  const validate = fs.readFileSync(path.join(root, 'scripts/validate-entry-page.js'), 'utf8');
+  const claim = fs.readFileSync(path.join(root, 'scripts/telecom-monthly-claim.js'), 'utf8');
+  assert.match(validate, /assertConfiguredEntryUrl/);
+  assert.match(validate, /classifyActivityRoute/);
+  assert.match(validate, /activityOk/);
+  assert.match(claim, /assertConfiguredEntryUrl/);
+  assert.match(claim, /Wrong activity page before package select/);
+  assert.match(claim, /Wrong activity shell before package select/);
+  assert.match(claim, /TELECOM_VISION_FALLBACK/);
+  assert.doesNotMatch(claim, /pageFamily === 'echnwap'\s*\?\s*\[/);
 });
 
 test('native Chrome redacts sensitive form fields before failure screenshots', () => {

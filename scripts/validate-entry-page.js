@@ -9,6 +9,10 @@ const {
   chromeLaunchArgs,
   playwrightLaunchExtras,
 } = require('../src/browser-stealth');
+const {
+  assertConfiguredEntryUrl,
+  classifyActivityRoute,
+} = require('../src/offer-inventory');
 
 const entryUrl = process.env.TELECOM_ENTRY_URL;
 
@@ -122,6 +126,12 @@ async function validateEntry({ label, proxyServer }) {
   const response = await page.goto(entryUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
   const waf = await waitForWafPageReady(page, 45000);
   await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+  const landedUrl = page.url();
+  const landedActivity = classifyActivityRoute({
+    url: landedUrl,
+    phase: 'entry',
+    targetPackage: process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  });
   const html = await page.content();
   const body = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim());
   const phoneInputs = await page.locator(
@@ -132,7 +142,8 @@ async function validateEntry({ label, proxyServer }) {
   await page.screenshot({ path: screenshot, fullPage: true });
 
   const whiteScreen = html.length < 500;
-  const pass = !whiteScreen && html.length > 3000 && (body.length > 20 || phoneInputs > 0 || waf.ready);
+  const renderPass = !whiteScreen && html.length > 3000 && (body.length > 20 || phoneInputs > 0 || waf.ready);
+  const pass = renderPass && landedActivity.ok;
   const result = {
     label,
     mode,
@@ -144,6 +155,8 @@ async function validateEntry({ label, proxyServer }) {
     phoneInputs,
     whiteScreen,
     wafReady: waf.ready,
+    activityOk: landedActivity.ok,
+    activityReason: landedActivity.reason || '',
     pass,
     screenshot,
   };
@@ -157,6 +170,14 @@ async function validateEntry({ label, proxyServer }) {
 
 async function main() {
   if (!entryUrl) throw new Error('Missing TELECOM_ENTRY_URL');
+  const configured = assertConfiguredEntryUrl(entryUrl);
+  console.log(JSON.stringify({
+    label: 'entry-config',
+    pass: configured.ok,
+    fingerprint: configured.fingerprint,
+    reason: configured.reason || '',
+  }));
+  if (!configured.ok) process.exit(1);
   const cases = buildValidationCases();
   let ok = true;
   for (const item of cases) {

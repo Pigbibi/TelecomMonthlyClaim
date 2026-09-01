@@ -90,6 +90,51 @@ function assertEntrySecretShape(fingerprint = {}, policy = resolveEntrySecretPol
   };
 }
 
+/**
+ * Shared pre-navigation gate used by native / Playwright / validate scripts.
+ * Checks query-key shape + HighPic entry path. Never compares secret values.
+ */
+function assertConfiguredEntryUrl(url, options = {}) {
+  const env = options.env || process.env;
+  const targetPackage = options.targetPackage || env.TELECOM_TARGET_PACKAGE || 'voice200';
+  const policy = options.policy || resolveEntrySecretPolicy(env);
+  const fingerprint = summarizeEntryFingerprint(url);
+  const secret = assertEntrySecretShape(fingerprint, policy);
+  if (!secret.ok) {
+    return {
+      ok: false,
+      state: secret.state,
+      fingerprint,
+      secret,
+      activity: null,
+      reason: secret.reason,
+    };
+  }
+  const activity = classifyActivityRoute({
+    url,
+    phase: 'entry',
+    targetPackage,
+  });
+  if (!activity.ok) {
+    return {
+      ok: false,
+      state: activity.state,
+      fingerprint,
+      secret,
+      activity,
+      reason: activity.reason,
+    };
+  }
+  return {
+    ok: true,
+    state: 'ok',
+    fingerprint,
+    secret,
+    activity,
+    reason: '',
+  };
+}
+
 function safePathname(url) {
   try {
     return new URL(String(url || '')).pathname;
@@ -235,6 +280,7 @@ module.exports = {
   summarizeEntryFingerprint,
   resolveEntrySecretPolicy,
   assertEntrySecretShape,
+  assertConfiguredEntryUrl,
   looksLikeOfferLabel,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,

@@ -5,6 +5,7 @@ const {
   summarizeEntryFingerprint,
   resolveEntrySecretPolicy,
   assertEntrySecretShape,
+  assertConfiguredEntryUrl,
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
   classifyActivityRoute,
@@ -89,6 +90,29 @@ test('entry secret shape can disable required params via empty env', () => {
     'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html',
   );
   assert.equal(assertEntrySecretShape(bare, policy).ok, true);
+});
+
+test('assertConfiguredEntryUrl combines secret shape and HighPic activity', () => {
+  const good = assertConfiguredEntryUrl(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&channelId=dx531&wxopenid=x',
+    { env: {} },
+  );
+  assert.equal(good.ok, true);
+  assert.equal(good.fingerprint.hasWxopenid, true);
+
+  const missingOpenid = assertConfiguredEntryUrl(
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=1&channelId=dx531',
+    { env: {} },
+  );
+  assert.equal(missingOpenid.ok, false);
+  assert.equal(missingOpenid.state, 'wrong_entry_secret');
+
+  const wrongShell = assertConfiguredEntryUrl(
+    'https://wapbj.189.cn/echnwap/preDepositHigh_login?campaignId=1&channelId=dx531&wxopenid=x',
+    { env: {} },
+  );
+  assert.equal(wrongShell.ok, false);
+  assert.equal(wrongShell.state, 'wrong_activity');
 });
 
 test('extracts offer labels from preActiveMeta-like payloads', () => {
