@@ -1006,10 +1006,16 @@ async function selectTargetPackage(client, productName) {
           .filter(visible)
           .map(element => element.innerText || '')
           .filter(Boolean);
+        const packageLabels = [...document.querySelectorAll('li,button,[class*="card" i],[class*="package" i],[class*="plan" i]')]
+          .filter(visible)
+          .map(node => String(node.innerText || '').replace(/\s+/g, ' ').trim())
+          .filter(text => text && text.length <= 80)
+          .slice(0, 30);
         return {
           url: location.href,
           bodyText: (document.body?.innerText || '').slice(0, 2000),
           dialogText: dialogs.join('\\n').slice(0, 1000),
+          packageLabels,
         };
       })()`, 5000);
     } catch (error) {
@@ -1079,13 +1085,23 @@ async function selectTargetPackage(client, productName) {
   }
   const selected = await client.evaluate(`(() => {
     const name = ${JSON.stringify(productName)};
+    const aliases = [name, name.replace(/^互联网卡网龄享/, '')]
+      .map(value => String(value || '').replace(/\s+/g, ''))
+      .filter(Boolean);
+    if (/200分钟/.test(name)) aliases.push('200分钟国内语音', '网龄享200分钟');
+    if (/5GB|5G/.test(name)) aliases.push('5GB国内通用流量', '网龄享5GB');
     const visible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
-    const item = [...document.querySelectorAll('li')].find(node => visible(node) && (node.innerText || '').includes(name));
+    const item = [...document.querySelectorAll('li,button,[class*="card" i],[class*="package" i],[class*="plan" i]')]
+      .find(node => {
+        if (!visible(node)) return false;
+        const text = String(node.innerText || '').replace(/\s+/g, '');
+        return aliases.some(alias => text.includes(alias));
+      });
     if (!item) return false;
     setTimeout(() => item.click(), 0);
     return true;

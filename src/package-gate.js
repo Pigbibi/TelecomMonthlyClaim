@@ -2,17 +2,41 @@ function compactText(text) {
   return String(text || '').replace(/\s+/g, '');
 }
 
+function productMatchAliases(productName) {
+  const raw = String(productName || '').trim();
+  const compact = compactText(raw);
+  if (!compact) return [];
+  const aliases = new Set([compact]);
+  const withoutPrefix = compactText(raw.replace(/^互联网卡网龄享/, ''));
+  if (withoutPrefix) aliases.add(withoutPrefix);
+  if (/200分钟/.test(raw)) {
+    aliases.add(compactText('200分钟国内语音'));
+    aliases.add(compactText('网龄享200分钟'));
+  }
+  if (/5GB|5G/.test(raw)) {
+    aliases.add(compactText('5GB国内通用流量'));
+    aliases.add(compactText('网龄享5GB'));
+  }
+  return [...aliases].filter(Boolean);
+}
+
+function textContainsProduct(text, productName) {
+  const haystack = compactText(text);
+  return productMatchAliases(productName).some(alias => alias && haystack.includes(alias));
+}
+
 function classifyPackageGate(input = {}) {
   const url = String(input.url || '');
   const bodyText = String(input.bodyText || '');
   const dialogText = String(input.dialogText || '');
+  const packageLabels = Array.isArray(input.packageLabels) ? input.packageLabels : [];
   const productName = String(input.productName || '');
-  const combined = compactText(`${dialogText}\n${bodyText}`);
+  const combined = `${dialogText}\n${bodyText}\n${packageLabels.join('\n')}`;
   const productReady = /preDepositC\w*_list/i.test(url)
     && productName
-    && combined.includes(compactText(productName));
+    && textContainsProduct(combined, productName);
   if (productReady) return { ...input, state: 'ready' };
-  if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(combined)) {
+  if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(compactText(combined))) {
     return { ...input, state: 'already_claimed' };
   }
   return { ...input, state: compactText(dialogText) ? 'blocked' : 'waiting' };
@@ -37,11 +61,16 @@ function safeUrlPath(value) {
 }
 
 function summarizePackageGate(gate = {}) {
+  const labels = Array.isArray(gate.packageLabels)
+    ? gate.packageLabels.map(sanitizeDiagnosticText).filter(Boolean).slice(0, 8)
+    : [];
   return {
     state: gate.state || 'waiting',
     urlPath: safeUrlPath(gate.url),
     dialog: sanitizeDiagnosticText(gate.dialogText),
+    packageLabels: labels,
+    bodyPreview: sanitizeDiagnosticText(gate.bodyText).slice(0, 160),
   };
 }
 
-module.exports = { classifyPackageGate, summarizePackageGate };
+module.exports = { classifyPackageGate, summarizePackageGate, productMatchAliases, textContainsProduct };

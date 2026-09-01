@@ -39,3 +39,23 @@ test('keeps an unknown modal blocked and masks sensitive diagnostics', () => {
   assert.equal(summary.dialog.includes('18500000000'), false);
   assert.equal(summary.dialog.includes('123456'), false);
 });
+
+test('accepts shortened redesigned package labels', () => {
+  assert.equal(classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '请选择档位',
+    packageLabels: ['网龄享200分钟国内语音', '去办理'],
+    productName: '互联网卡网龄享200分钟国内语音',
+  }).state, 'ready');
+});
+
+test('summary includes package labels for waiting pages', () => {
+  const summary = summarizePackageGate(classifyPackageGate({
+    url: 'https://wapbj.189.cn/echnwap/preDepositCfq_list',
+    bodyText: '加载中',
+    packageLabels: ['未知套餐A', '未知套餐B'],
+    productName: '互联网卡网龄享200分钟国内语音',
+  }));
+  assert.equal(summary.state, 'waiting');
+  assert.deepEqual(summary.packageLabels, ['未知套餐A', '未知套餐B']);
+});
