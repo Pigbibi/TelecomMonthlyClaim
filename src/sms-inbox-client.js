@@ -26,7 +26,7 @@ function normalizeMessage(raw) {
     id: raw.id || raw.messageId || raw.uuid,
     sender: wrapped?.sender || wrapped?.from || wrapped?.address || raw.sender || raw.from || raw.address || raw.phone || '',
     text: wrapped?.text || wrapped?.content || wrapped?.body || wrapped?.message || raw.text || raw.content || raw.body || raw.message || raw.sms || '',
-    receivedAt: raw.receivedAt || raw.timestamp || raw.time || raw.date || Date.now(),
+    receivedAt: raw.receivedAt ?? raw.timestamp ?? raw.time ?? raw.date ?? null,
   };
 }
 
@@ -64,7 +64,7 @@ function htmlToText(html) {
 }
 
 function parsePushPlusUpdateTime(value) {
-  if (value === undefined || value === null || value === '') return Date.now();
+  if (value === undefined || value === null || value === '') return NaN;
   if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
   const text = String(value).trim();
   if (/^\d+$/.test(text)) {
@@ -73,16 +73,20 @@ function parsePushPlusUpdateTime(value) {
   }
   if (/([zZ]|[+-]\d\d:?\d\d)$/.test(text)) {
     const parsed = Date.parse(text);
-    return Number.isNaN(parsed) ? Date.now() : parsed;
+    return parsed;
   }
-  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (m) {
     const [, year, month, day, hour, minute, second = '0'] = m;
     // PushPlus updateTime is rendered as China local time in the console/API examples.
-    return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour) - 8, Number(minute), Number(second));
+    const local = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+    if (local.getUTCFullYear() !== Number(year) || local.getUTCMonth() !== Number(month) - 1
+        || local.getUTCDate() !== Number(day) || local.getUTCHours() !== Number(hour)
+        || local.getUTCMinutes() !== Number(minute) || local.getUTCSeconds() !== Number(second)) return NaN;
+    return local.getTime() - 8 * 60 * 60 * 1000;
   }
   const parsed = Date.parse(text);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
+  return parsed;
 }
 
 function pushPlusUrl(baseUrl, pathname) {
@@ -339,6 +343,7 @@ class SmsInboxClient {
   }
 
   async waitForReceipt({ since, timeoutMs, pollMs }) {
+    if (!Number.isFinite(since) || since <= 0) return null;
     const deadline = Date.now() + Math.max(0, timeoutMs);
     while (Date.now() < deadline) {
       const messages = await this.fetchMessages(since, {
@@ -347,6 +352,8 @@ class SmsInboxClient {
         titleKeyword: '',
       });
       for (const msg of messages) {
+        const receivedAt = parsePushPlusUpdateTime(msg.receivedAt);
+        if (!Number.isFinite(receivedAt) || receivedAt < since || receivedAt > Date.now()) continue;
         const key = msg.id || `${msg.sender}:${msg.receivedAt}:${msg.text}`;
         if (this.seen.has(key)) continue;
         const parsed = parseTelecomSms(msg, {

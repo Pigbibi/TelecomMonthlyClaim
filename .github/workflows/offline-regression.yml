@@ -1,0 +1,20 @@
+name: Offline regression tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Pure receipt and state tests (no browser or credentials)
+        run: node --test tests/sms-receipt-boundary.test.js tests/sms-inbox-client.test.js tests/sms-parser.test.js tests/config.test.js tests/package-gate.test.js tests/run-log-outcome.test.js tests/offer-inventory.test.js
