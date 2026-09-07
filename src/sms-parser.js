@@ -37,7 +37,7 @@ function parseTelecomSms(input, options = {}) {
 
   if (stage === 'receipt') {
     const expectedSender = String(options.sender || '10000');
-    if (sender && expectedSender && !sender.includes(expectedSender)) return null;
+    if (!sender.trim() || sender.trim() !== expectedSender.trim()) return null;
     if (!includesAll(text, ['【办理提醒】', '成功办理'])) return null;
     const parsedProduct = extractReceiptProduct(text);
     const parsedPlanId = extractPlanId(text);

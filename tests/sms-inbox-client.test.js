@@ -322,7 +322,7 @@ test('reads success receipt from PushPlus relay with a separate sender filter', 
       productName: '互联网卡网龄享200分钟国内语音',
       expectedPlanId: '24BJ102053',
     });
-    assert.deepEqual(await client.waitForReceipt({ since: 0, timeoutMs: 100, pollMs: 1 }), {
+    assert.deepEqual(await client.waitForReceipt({ since: Date.UTC(2026, 6, 13, 0, 1, 55), timeoutMs: 100, pollMs: 1 }), {
       stage: 'receipt',
       product: '互联网卡网龄享200分钟国内语音',
       planId: '24BJ102053',
@@ -371,7 +371,7 @@ test('reads success receipt from direct PushPlus without login keyword coupling'
       productName: '互联网卡网龄享200分钟国内语音',
       expectedPlanId: '24BJ102053',
     });
-    assert.equal((await client.waitForReceipt({ since: 0, timeoutMs: 100, pollMs: 1 }))?.source, 'pushplus');
+    assert.equal((await client.waitForReceipt({ since: Date.UTC(2026, 6, 12, 20, 1, 55), timeoutMs: 100, pollMs: 1 }))?.source, 'pushplus');
   } finally {
     global.fetch = originalFetch;
   }
@@ -406,7 +406,7 @@ test('reads success receipt from generic HTTP inbox mode', async () => {
       productName: '互联网卡网龄享5GB国内通用流量',
       expectedPlanId: '24BJ100433',
     });
-    assert.equal((await client.waitForReceipt({ since: 0, timeoutMs: 100, pollMs: 1 }))?.source, 'inbox');
+    assert.equal((await client.waitForReceipt({ since: Date.UTC(2026, 3, 6, 0, 1, 55), timeoutMs: 100, pollMs: 1 }))?.source, 'inbox');
   } finally {
     global.fetch = originalFetch;
   }
