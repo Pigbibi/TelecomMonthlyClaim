@@ -165,7 +165,7 @@ A personal browser often keeps WAF cookies and may show a fuller offer list
 without a slider. GitHub Actions uses a fresh Chrome profile
 (`TELECOM_CLEAR_BROWSER_DATA=true`) and the SMS unlog path.
 
-Observed cold divert (2026-09) with an incomplete or wrong entry landed on
+An incomplete or incorrect entry can redirect a cold browser session to
 `/echnwap/preDepositCfq_list` (data-only). With a complete HighPic share link
 (`campaignId` + `channelId` + `wxopenid`), cold CI reached `wap2017`
 `preDepositCfg_*` with `voice200`.

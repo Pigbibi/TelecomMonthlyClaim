@@ -2,87 +2,20 @@
 
 [简体中文](README_CN.md)
 
-[![Monthly workflow](https://github.com/Pigbibi/TelecomMonthlyClaim/actions/workflows/monthly-claim.yml/badge.svg)](https://github.com/Pigbibi/TelecomMonthlyClaim/actions/workflows/monthly-claim.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](package.json)
+Automate an authorized Beijing Telecom monthly benefit claim through Chrome, SMS verification and explicit package checks. Includes GitHub Actions workflows and a local diagnostic path.
 
-Automate the Beijing Telecom monthly benefit claim flow with a real Chrome
-session, SMS verification, explicit package validation, and month-scoped state.
-The included workflow can select either the supported voice or data package.
-
-## Important notice
-
-This is an independent, unofficial automation project. It is not affiliated
-with or endorsed by China Telecom. Carrier pages, campaigns, eligibility,
-verification challenges, package names, and terms can change without notice.
-
-Start with `probe_only=true` and `dry_run=true`. Confirm every selected product,
-plan ID, phone number, and page before allowing a final submit. Use the project
-only for an account you are authorized to manage and follow the carrier's
-applicable terms. The software cannot guarantee a successful claim or prevent
-account, billing, or service impact.
-
-## Workflow
-
-```text
-GitHub Actions or an operator
-        │
-        ▼
-real Chrome opens the configured campaign entry
-        │
-        ├── connectivity: direct or an operator-provided proxy
-        │
-        ├── SMS: PushPlus, protected relay inbox, or HTTP inbox
-        │
-        ▼
-login verification → package selection → confirmation verification
-        │
-        ▼
-validate phone, product, and plan → optional final submit
-        │
-        ▼
-month state on main + redacted run metadata on logs branch
-```
-
-The scheduled workflow starts at 08:00 Asia/Shanghai on days 1–3 of each month
-(`00:00 UTC`). Scheduled failures before the final retry day are recorded
-without raising a failure issue. A final-day failure may create a GitHub issue.
-
-Monthly runs are serialized so a delayed schedule or manual dispatch cannot
-submit the same claim concurrently. The independent log heartbeat is also
-serialized and capped at 10 minutes.
-
-## Features
-
-- GitHub-hosted Chrome workflow and a separate manual self-hosted macOS workflow
-  for diagnostics.
-- Package presets for `voice200` and `5g`, with explicit product and plan
-  validation before submission.
-- `probe_only`, dry-run, and force-run controls for staged verification.
-- Direct, HTTP proxy, SSH tunnel, and proxy-pool connectivity modes.
-- PushPlus Open API, protected relay inbox, and generic HTTP SMS inbox support.
-- Login and confirmation SMS parsing with sender, phone, product, and plan
-  checks.
-- Optional visual second opinion for the current slider challenge (off by
-  default; local canvas match first).
-- Entry URL shape checks via env (required query keys + optional channel pin)
-  without hardcoding personal campaign values.
-- Month-scoped success state that prevents an ordinary duplicate run.
-- Redacted run logs that exclude phone numbers, OTPs, tokens, private keys, and
-  page bodies.
+This is an unofficial project. Campaign availability, eligibility and terms depend on the carrier. The built-in `voice200` and `5g` presets must match the actual offer shown for your account.
 
 ## Requirements
 
-- Node.js 20 or newer
-- A current Beijing Telecom campaign entry URL for an eligible account
-- Chrome or Chrome for Testing
-- One supported SMS source
-- Network access from the selected runner to the campaign and SMS provider
-- A private deployment repository for account-specific configuration
+- Node.js 20+, Chrome or Chrome for Testing.
+- A valid campaign entry URL and an account you are authorized to manage.
+- A supported SMS source and access to the carrier's site.
+- A private deployment repository for account-specific settings.
 
 ## Quick start
 
-### 1. Validate the checkout
+Install and validate the checkout:
 
 ```bash
 npm ci
@@ -90,94 +23,49 @@ npm run lint
 npm test
 ```
 
-### 2. Configure the minimum settings
+Configure **Actions secrets and variables**:
 
-Repository secrets:
-
-| Secret | Purpose |
-| --- | --- |
-| `TELECOM_PHONE` | Authorized Beijing Telecom phone number |
-| `TELECOM_ENTRY_URL` | Full campaign share link (may include `wxopenid`); keep out of git |
-| `PUSHPLUS_TOKEN` | PushPlus user token when direct Open API access is used |
-| `PUSHPLUS_SECRET_KEY` | PushPlus Open API secret key |
-
-Repository variables:
-
-| Variable | Example | Purpose |
+| Setting | Store as | Purpose |
 | --- | --- | --- |
-| `TELECOM_TARGET_PACKAGE` | `voice200` | `voice200` or `5g` preset |
-| `TELECOM_ENTRY_REQUIRED_PARAMS` | `campaignId,channelId,wxopenid` | Query keys that must exist on the entry URL |
-| `TELECOM_EXPECTED_CHANNEL_ID` | *(unset)* | Optional exact `channelId` pin for your fork only |
-| `SMS_INBOX_PROVIDER` | `pushplus` | `pushplus` or `http` |
-| `TELECOM_CONNECTIVITY_MODE` | `direct` | Network entry mode |
+| `TELECOM_PHONE` | Secret | Authorized phone number |
+| `TELECOM_ENTRY_URL` | Secret | Complete campaign link, including required account parameters |
+| `PUSHPLUS_TOKEN`, `PUSHPLUS_SECRET_KEY` | Secrets | PushPlus credentials when using its Open API |
+| `TELECOM_TARGET_PACKAGE` | Variable | `voice200` or `5g` |
+| `SMS_INBOX_PROVIDER` | Variable | `pushplus` or `http` |
+| `TELECOM_CONNECTIVITY_MODE` | Variable | For example, `direct` |
 
-Open-source code never ships personal `campaignId` / `wxopenid` / channel pins.
-It only checks path family, required query **keys**, and an optional channel pin
-you set on your fork. See [Configuration](docs/configuration.md#entry-url-open-source-vs-deployment).
+See [Configuration](docs/configuration.md) for required URL parameters and package validation, and [SMS providers](docs/sms-providers.md) for alternative inboxes.
 
-Store the real share link as a secret. Use a repository variable for
-`TELECOM_ENTRY_URL` only when the URL contains no account identifiers.
+## Run in stages
 
-### 3. Run a probe
+In **Actions → Monthly Beijing Telecom Claim → Run workflow**:
 
-Open **Actions → Monthly Beijing Telecom Claim → Run workflow**:
+| Stage | Inputs | Effect |
+| --- | --- | --- |
+| Probe | `probe_only=true`, `dry_run=true`, `force_run=false` | Loads the entry and login challenge; does not submit the slider or request SMS |
+| Dry-run | `probe_only=false`, `dry_run=true` | May request and read verification SMS; stops before final carrier submission |
+| Claim | `probe_only=false`, `dry_run=false` | Can submit the selected package after validation |
 
-```text
-probe_only=true
-dry_run=true
-force_run=false
-connectivity_mode=direct
-```
+Start with a probe. Confirm the phone, product and plan ID before allowing a real claim. Set `connectivity_mode=direct` when no proxy is required.
 
-Probe mode loads the entry and login challenge without submitting the slider or
-requesting an SMS. Inspect the action output before proceeding.
+## Schedule, state and troubleshooting
 
-### 4. Run a dry-run
+The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Successful state in `state/YYYY-MM.json` prevents an ordinary duplicate run; `force_run=true` bypasses that skip and should be used deliberately.
 
-Set `probe_only=false` and keep `dry_run=true`. A dry-run may request and read
-verification SMS messages, but stops before the final carrier submit action.
+Run metadata is stored on the `logs` branch. Success evidence must pass sender and timestamp checks. Workflow status alone does not prove that a benefit reached the account.
 
-Verify the selected product name and plan ID. Then trigger an operator-approved
-run with `dry_run=false`.
-
-## State and logs
-
-Successful month state is stored as `state/YYYY-MM.json` on `main`. It contains
-the month, selected package, product name, plan ID, status, and bounded success
-evidence. It does not store OTP bodies or account credentials.
-
-Run metadata is written to the `logs` branch:
-
-```bash
-git fetch origin logs
-git show origin/logs:latest.json
-```
-
-`force_run=true` bypasses the normal successful-month skip. Use it only for a
-reviewed diagnostic or operator-requested rerun.
+If the carrier rejects a verification request or returns an empty response, inspect the recorded failure and allow for carrier cooldowns. Repeated retries can add risk. Never publish phone numbers, SMS bodies, OTPs, session data or full campaign links in a bug report.
 
 ## Documentation
 
-- [Configuration](docs/configuration.md)
-- [Beijing campaign setup (5GB / 200 min)](docs/beijing-campaign-setup.md)
-- [北京电信 5GB/200 分钟配置指南](docs/beijing-campaign-setup.zh-CN.md)
-- [Connectivity](docs/connectivity.md)
-- [SMS providers](docs/sms-providers.md)
-- [Development and troubleshooting](docs/development.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Support](SUPPORT.md)
+- [Campaign setup](docs/beijing-campaign-setup.md) · [中文配置指南](docs/beijing-campaign-setup.zh-CN.md)
+- [Configuration](docs/configuration.md) · [Connectivity](docs/connectivity.md)
+- [SMS providers](docs/sms-providers.md) · [Development and troubleshooting](docs/development.md)
 
-## Security
+## Support and contributing
 
-The workflow handles a phone number, one-time codes, carrier page content,
-PushPlus credentials, proxy credentials, and optionally SSH keys. Keep the
-account-specific deployment private, restrict Actions permissions, and never
-print secrets or SMS bodies. Review workflow changes before they run with
-credentials.
-
-Follow [SECURITY.md](SECURITY.md) for vulnerability reports.
+[Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## License
 
-TelecomMonthlyClaim is available under the [MIT License](LICENSE).
+[MIT](LICENSE).
