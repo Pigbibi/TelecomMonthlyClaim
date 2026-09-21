@@ -13,6 +13,14 @@ test('uses state status for attempted claim even when workflow step is green', (
   }), 'failed');
 });
 
+test('keeps a failed forced run from being masked by a prior success state', () => {
+  assert.equal(resolveClaimOutcome({
+    shouldRun: true,
+    stepOutcome: 'failure',
+    stateStatus: 'success',
+  }), 'failure');
+});
+
 test('surfaces skipped_unavailable from monthly state', () => {
   assert.equal(resolveClaimOutcome({
     shouldRun: true,

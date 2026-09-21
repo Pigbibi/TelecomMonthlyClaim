@@ -13,6 +13,7 @@ function readStateStatus(stateFile) {
 
 function resolveClaimOutcome({ shouldRun, stepOutcome, stateStatus, dryRun = false, probeOnly = false }) {
   if (probeOnly && stepOutcome === 'success') return 'probe';
+  if (stepOutcome && !['success', 'skipped'].includes(stepOutcome)) return stepOutcome;
   if (dryRun) return stepOutcome || 'skipped';
   if (shouldRun && stateStatus) return stateStatus;
   return stepOutcome || 'skipped';
