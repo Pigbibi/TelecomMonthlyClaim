@@ -2747,6 +2747,10 @@ async function runClaim(config) {
       log('Dry run observed configured package unavailable; state file was not updated.');
       return;
     }
+    if (!shouldWriteFailureState(readClaimStateStatus(stateFile()))) {
+      log('Configured package unavailable, but the existing monthly success state was preserved.');
+      return;
+    }
     log('Configured package unavailable in cold-session offers; skipping without claiming alternatives', {
       targetPackage: config.targetPackage,
       productName: config.productName,

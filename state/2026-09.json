@@ -1,19 +1,15 @@
 {
-  "status": "skipped_unavailable",
+  "status": "success",
   "month": "2026-09",
   "beijing": {
     "year": "2026",
     "month": "09",
-    "day": 21,
-    "hour": 16,
-    "minute": 29
+    "day": 2,
+    "hour": 1,
+    "minute": 21
   },
   "targetPackage": "voice200",
   "productName": "互联网卡网龄享200分钟国内语音",
   "expectedPlanId": "24BJ102053",
-  "pageFamily": "wap2017",
-  "offerLabels": [
-    "查看更多"
-  ],
-  "successEvidence": "configured_package_unavailable"
+  "successEvidence": "sms_receipt"
 }

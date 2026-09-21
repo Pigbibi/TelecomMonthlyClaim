@@ -94,3 +94,32 @@ test('records configured package unavailable as skipped_unavailable without laun
   assert.deepEqual(state.offerLabels, ['网龄享其他套餐']);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('preserves prior success when a forced repeat sees the package unavailable', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-unavailable-repeat-'));
+  const stateDir = path.join(dir, 'state');
+  const file = path.join(stateDir, `${stateMonth()}.json`);
+  const prior = {
+    status: 'success',
+    month: stateMonth(),
+    successEvidence: 'sms_receipt',
+  };
+  fs.mkdirSync(stateDir);
+  fs.writeFileSync(file, JSON.stringify(prior));
+
+  execFileSync(process.execPath, [path.resolve(__dirname, '../scripts/telecom-monthly-claim.js')], {
+    cwd: dir,
+    env: {
+      ...process.env,
+      TELECOM_PHONE: '18500000000',
+      TELECOM_ENTRY_URL: 'https://example.test/entry',
+      TELECOM_PACKAGE_UNAVAILABLE: 'true',
+      FORCE_RUN: 'true',
+      DRY_RUN_BEFORE_FINAL_SUBMIT: 'false',
+    },
+    stdio: 'pipe',
+  });
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), prior);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
