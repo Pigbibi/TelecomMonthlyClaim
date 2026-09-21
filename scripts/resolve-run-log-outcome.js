@@ -11,7 +11,8 @@ function readStateStatus(stateFile) {
   }
 }
 
-function resolveClaimOutcome({ shouldRun, stepOutcome, stateStatus, dryRun = false }) {
+function resolveClaimOutcome({ shouldRun, stepOutcome, stateStatus, dryRun = false, probeOnly = false }) {
+  if (probeOnly && stepOutcome === 'success') return 'probe';
   if (dryRun) return stepOutcome || 'skipped';
   if (shouldRun && stateStatus) return stateStatus;
   return stepOutcome || 'skipped';
@@ -31,6 +32,7 @@ function main() {
     stepOutcome: process.env.STEP_OUTCOME || 'skipped',
     stateStatus: readStateStatus(process.env.STATE_FILE || ''),
     dryRun: process.env.DRY_RUN === 'true',
+    probeOnly: process.env.PROBE_ONLY === 'true',
   });
   appendOutput('claim_outcome', outcome);
 }

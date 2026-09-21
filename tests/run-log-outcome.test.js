@@ -38,6 +38,26 @@ test('ignores stale monthly state during a successful dry run', () => {
   }), 'success');
 });
 
+test('records a successful probe separately from a real claim', () => {
+  assert.equal(resolveClaimOutcome({
+    shouldRun: true,
+    stepOutcome: 'success',
+    stateStatus: 'success',
+    dryRun: true,
+    probeOnly: true,
+  }), 'probe');
+});
+
+test('keeps a failed probe as failed', () => {
+  assert.equal(resolveClaimOutcome({
+    shouldRun: true,
+    stepOutcome: 'failure',
+    stateStatus: 'success',
+    dryRun: true,
+    probeOnly: true,
+  }), 'failure');
+});
+
 test('reads status from monthly state file', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-state-'));
   const file = path.join(dir, '2026-07.json');

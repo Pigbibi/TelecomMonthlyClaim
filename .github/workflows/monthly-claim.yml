@@ -334,7 +334,7 @@ jobs:
 
       - name: Upload claim debug screenshots
         if: always() && steps.claim_plan.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: claim-debug-${{ github.run_id }}
           path: artifacts/claim-debug/
@@ -387,6 +387,7 @@ jobs:
           STATE_FILE: ${{ steps.claim_plan.outputs.state_file || '' }}
           STEP_OUTCOME: ${{ steps.claim.outcome || 'skipped' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          PROBE_ONLY: ${{ github.event.inputs.probe_only || 'false' }}
         run: node scripts/resolve-run-log-outcome.js
 
       - name: Record run log on logs branch
