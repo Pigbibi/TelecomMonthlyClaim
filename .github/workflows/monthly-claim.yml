@@ -379,6 +379,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/create-failure-issue.js
 
+      - name: Close resolved failure issue
+        if: success() && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/resolve-failure-issue.js
+
       - name: Resolve run log outcome
         id: run_log
         if: always()
