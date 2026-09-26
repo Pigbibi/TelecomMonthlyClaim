@@ -1,3 +1,4 @@
+const { withModelRecovery } = require('./gemini-model-policy.cjs');
 /**
  * Vision estimator for telecom slider hole X / drag distance.
  *
@@ -454,41 +455,21 @@ async function estimateWithHttpVision({
     if (headers.Authorization === undefined) delete headers.Authorization;
   }
 
-  const modelFallbacks = mode === 'gemini'
-    ? [...new Set([
-      model,
-      process.env.TELECOM_VISION_FALLBACK_MODEL || '',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      DEFAULT_GEMINI_MODEL,
-    ].filter(Boolean))]
-    : [model];
-  let resp;
-  let text = '';
   let usedModel = model;
-  for (let i = 0; i < modelFallbacks.length; i += 1) {
-    usedModel = modelFallbacks[i];
+  const invoke = async (selected, remaining) => {
+    usedModel = selected;
     let attemptUrl = url;
     if (mode === 'gemini') {
-      const parsedUrl = new URL(
-        /\/models\/[^/:]+/.test(url)
-          ? url.replace(/\/models\/[^/:]+/, `/models/${usedModel}`)
-          : `https://generativelanguage.googleapis.com/v1beta/models/${usedModel}:generateContent`,
-      );
+      const parsedUrl = new URL(url.replace(/\/models\/[^/:]+/, `/models/${selected}`));
       if (!parsedUrl.searchParams.has('key')) parsedUrl.searchParams.set('key', key);
       attemptUrl = parsedUrl.toString();
-    } else if (mode !== 'anthropic') {
-      body = { ...body, model: usedModel };
-      attemptUrl = url;
     }
-    resp = await fetch(attemptUrl, { method: 'POST', headers, body: JSON.stringify(body) });
-    text = await resp.text();
-    if (resp.ok) break;
-    if (![429, 503, 500].includes(resp.status) || i === modelFallbacks.length - 1) {
-      return { ok: false, reason: `vision-http-${resp.status}`, body: text.slice(0, 300), method: mode, model: usedModel };
-    }
-    await new Promise(resolve => setTimeout(resolve, 800 * (i + 1)));
-  }
+    return fetch(attemptUrl, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(remaining) });
+  };
+  const resp = mode === 'gemini'
+    ? await withModelRecovery(invoke, {key,model})
+    : await invoke(model,30000);
+  const text = await resp.text();
   if (!resp?.ok) {
     return { ok: false, reason: `vision-http-${resp?.status || 'error'}`, body: text.slice(0, 300), method: mode, model: usedModel };
   }
