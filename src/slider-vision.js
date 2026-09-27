@@ -7,9 +7,12 @@ const { withModelRecovery } = require('./gemini-model-policy.cjs');
  *      — public repos cannot `uses:` the private AIGateway action, so we call
  *        the same /v1/codex service contract directly from Node.
  *   2) Local CODEX_GATEWAY_COMMAND CLI when present (self-hosted / private repos)
- *   3) Direct Gemini / OpenAI / Anthropic HTTP fallback
+ *   3) Explicit TELECOM_VISION_URL, or a non-Gemini custom HTTP provider
  *
- * Gateway service only runs provider=codex; gemini-free must stay caller-side.
+ * Gateway service only runs provider=codex. When TELECOM_VISION_URL is unset,
+ * the Gemini image fallback calls the existing CODEX_GATEWAY_COMMAND with
+ * --providers gemini-free. Model overrides use Gateway task variables such as
+ * CODEX_GATEWAY_SLIDER_GEMINI_MODEL; this caller does not pass --gemini-model.
  */
 
 const fs = require('node:fs');
@@ -266,17 +269,27 @@ async function estimateWithCodexGatewayService({
   return parseVisionJsonText(outText, imageWidth, 'codex-gateway-service');
 }
 
-function estimateWithCodexGatewayCli({ bgPngBase64, blockPngBase64, imageWidth, cssWidth, correctY }) {
+function estimateWithCodexGatewayCli({
+  bgPngBase64,
+  blockPngBase64,
+  imageWidth,
+  cssWidth,
+  correctY,
+  providerChain: providerChainOverride,
+  method = 'codex-gateway',
+  extraEnv = {},
+}) {
   const command = splitCommand(process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND || '');
   if (!command.length || !bgPngBase64) {
-    return { ok: false, reason: 'vision-gateway-not-configured' };
+    return { ok: false, reason: 'vision-gateway-not-configured', method };
   }
   const png = decodePngBase64(bgPngBase64);
   if (!png?.length) {
-    return { ok: false, reason: 'vision-image-missing' };
+    return { ok: false, reason: 'vision-image-missing', method };
   }
   const timeoutSeconds = Math.max(15, Number(process.env.TELECOM_VISION_TIMEOUT_SECONDS || process.env.CAPTCHA_CODEX_TIMEOUT_SECONDS || 60));
-  const providerChain = process.env.TELECOM_VISION_PROVIDER_CHAIN
+  const providerChain = providerChainOverride
+    || process.env.TELECOM_VISION_PROVIDER_CHAIN
     || process.env.CODEX_GATEWAY_PROVIDER_CHAIN
     || 'codex,gemini-free';
   const prompt = buildSliderPrompt({ imageWidth, cssWidth, correctY });
@@ -316,6 +329,7 @@ function estimateWithCodexGatewayCli({ bgPngBase64, blockPngBase64, imageWidth, 
       encoding: 'utf8',
       env: {
         ...process.env,
+        ...extraEnv,
         CODEX_GATEWAY_PROVIDER_CHAIN: providerChain,
       },
       timeout: timeoutSeconds * 1000,
@@ -324,8 +338,8 @@ function estimateWithCodexGatewayCli({ bgPngBase64, blockPngBase64, imageWidth, 
       return {
         ok: false,
         reason: 'vision-gateway-error',
-        body: String(result.error.message || result.error).slice(0, 300),
-        method: 'codex-gateway',
+        body: method === 'gemini-free' ? 'gateway invocation failed' : String(result.error.message || result.error).slice(0, 300),
+        method,
       };
     }
     if (result.status !== 0) {
@@ -333,14 +347,14 @@ function estimateWithCodexGatewayCli({ bgPngBase64, blockPngBase64, imageWidth, 
       return {
         ok: false,
         reason: 'vision-gateway-failed',
-        body: detail || `exit ${result.status}`,
-        method: 'codex-gateway',
+        body: method === 'gemini-free' ? `exit ${result.status}` : detail || `exit ${result.status}`,
+        method,
       };
     }
     const rawText = fs.existsSync(outputPath)
       ? fs.readFileSync(outputPath, 'utf8')
       : String(result.stdout || '');
-    return parseVisionJsonText(rawText, imageWidth, 'codex-gateway');
+    return parseVisionJsonText(rawText, imageWidth, method);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -351,6 +365,27 @@ async function estimateWithCodexGateway(options) {
     return estimateWithCodexGatewayService(options);
   }
   return estimateWithCodexGatewayCli(options);
+}
+
+function sliderGeminiModelEnv() {
+  const override = String(process.env.TELECOM_VISION_MODEL || '').trim();
+  if (!override) return {};
+  if (String(process.env.CODEX_GATEWAY_SLIDER_GEMINI_MODEL || '').trim()) return {};
+  if (String(process.env.CODEX_GATEWAY_SLIDER_GEMINI_FREE_MODEL || '').trim()) return {};
+  return { CODEX_GATEWAY_SLIDER_GEMINI_MODEL: override };
+}
+
+function estimateWithDefaultGeminiGateway(options) {
+  const command = splitCommand(process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND || '');
+  if (!command.length) {
+    return { ok: false, reason: 'vision-gateway-not-configured', method: 'gemini-free' };
+  }
+  return estimateWithCodexGatewayCli({
+    ...options,
+    providerChain: 'gemini-free',
+    method: 'gemini-free',
+    extraEnv: sliderGeminiModelEnv(),
+  });
 }
 
 async function estimateWithHttpVision({
@@ -378,6 +413,15 @@ async function estimateWithHttpVision({
       : (url.includes('anthropic') || url.includes('8787') ? 'anthropic' : 'openai'))).toLowerCase();
   if (!url || !key || !bgPngBase64) {
     return { ok: false, reason: 'vision-not-configured' };
+  }
+  if (mode === 'gemini' && !String(process.env.TELECOM_VISION_URL || '').trim()) {
+    return estimateWithDefaultGeminiGateway({
+      bgPngBase64,
+      blockPngBase64,
+      imageWidth,
+      cssWidth,
+      correctY,
+    });
   }
 
   const prompt = buildSliderPrompt({ imageWidth, cssWidth, correctY });

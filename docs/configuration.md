@@ -134,10 +134,14 @@ CodexGateway is not injected by the monthly claim workflow.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | unset | Only used when vision fallback is explicitly enabled |
-| `TELECOM_VISION_FALLBACK` | unset/`false` | Set `true` to allow Gemini/HTTP after local match fails |
-| `TELECOM_VISION_URL` | Gemini generate-content endpoint | API endpoint for optional fallback |
-| `TELECOM_VISION_MODE` | `gemini` | `gemini`, `openai`, or `anthropic` request format |
-| `TELECOM_VISION_MODEL` | provider default | Provider model name |
+| `TELECOM_VISION_FALLBACK` | unset/`false` | Set `true` to allow vision after local match fails |
+| `CODEX_GATEWAY_COMMAND` | unset | Existing Gateway CLI. The implicit Gemini image fallback calls it with `--providers gemini-free` |
+| `CODEX_GATEWAY_SLIDER_GEMINI_MODEL` | unset | Task Gemini model already read by Gateway main. `CODEX_GATEWAY_SLIDER_GEMINI_FREE_MODEL` and the `SLIDER_HIGH` variants take the same precedence Gateway uses |
+| `TELECOM_VISION_URL` | unset | Explicit HTTP endpoint. When set, that HTTP provider is used, including a Gemini URL |
+| `TELECOM_VISION_MODE` | inferred | `gemini`, `openai`, or `anthropic` request format for an explicit URL |
+| `TELECOM_VISION_MODEL` | unset | Copied to `CODEX_GATEWAY_SLIDER_GEMINI_MODEL` for the implicit Gemini fallback only when those Gateway task variables are unset. Explicit HTTP still sends this model name |
+
+Without `TELECOM_VISION_URL`, this repository does not call Gemini `generateContent` itself. That image fallback requires `CODEX_GATEWAY_COMMAND` and `--providers gemini-free`. It does not pass `--gemini-model`. `GEMINI_MODEL` remains Gateway's compatible fallback. A non-Gemini custom HTTP provider still uses `TELECOM_VISION_URL`. Coordinate checks, timeout, and refusal to submit on failure stay in this repository. The monthly workflow does not inject CodexGateway; an explicit vision URL there keeps the HTTP path.
 
 Using an external visual service sends challenge image data to that provider.
 Review its data policy and do not assume it will improve every challenge.
