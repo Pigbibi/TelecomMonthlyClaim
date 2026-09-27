@@ -11,8 +11,21 @@ function withVisionEnv(env, fn) {
     'CODEX_GATEWAY_SERVICE_AUDIENCE',
     'CODEX_GATEWAY_COMMAND',
     'CAPTCHA_CODEX_GATEWAY_COMMAND',
+    'CODEX_GATEWAY_PROVIDER_CHAIN',
+    'CODEX_GATEWAY_SLIDER_GEMINI_MODEL',
+    'CODEX_GATEWAY_SLIDER_GEMINI_FREE_MODEL',
     'ACTIONS_ID_TOKEN_REQUEST_URL',
     'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+    'TELECOM_VISION_URL',
+    'TELECOM_VISION_MODE',
+    'TELECOM_VISION_MODEL',
+    'TELECOM_VISION_API_KEY',
+    'TELECOM_VISION_PROVIDER_CHAIN',
+    'TELECOM_VISION_TIMEOUT_SECONDS',
+    'GEMINI_API_KEY',
+    'GEMINI_MODEL',
+    'GATEWAY_CALL_LOG',
+    'GATEWAY_GEMINI_ANSWER',
   ]) {
     delete process.env[key];
   }
@@ -309,4 +322,167 @@ printf '%s\\n' '{"x":-1,"move":-1,"confidence":0.01,"reason":"截图只显示加
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'puzzle-still-loading');
   assert.match(String(result.parsed?.reason || ''), /加载中|loading/i);
+});
+
+const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+function writeGeminiFreeFallbackScript(scriptPath) {
+  const fs = require('node:fs');
+  fs.writeFileSync(scriptPath, `#!/bin/bash
+set -euo pipefail
+providers=""
+out=""
+timeout=""
+gemini_model_flag=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --providers) providers="$2"; shift 2 ;;
+    --out) out="$2"; shift 2 ;;
+    --timeout-seconds) timeout="$2"; shift 2 ;;
+    --gemini-model) gemini_model_flag=1; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'providers=%s timeout=%s gemini_model_flag=%s slider_model=%s\\n' \\
+  "$providers" "$timeout" "$gemini_model_flag" "\${CODEX_GATEWAY_SLIDER_GEMINI_MODEL:-}" >> "\${GATEWAY_CALL_LOG:?}"
+if [[ "$providers" != "gemini-free" ]]; then
+  echo gateway-down >&2
+  exit 2
+fi
+answer='{"x":156,"move":118,"confidence":0.91,"reason":"gemini-free"}'
+if [[ -n "\${GATEWAY_GEMINI_ANSWER:-}" ]]; then
+  answer="\${GATEWAY_GEMINI_ANSWER}"
+fi
+printf '%s\\n' "$answer" > "$out"
+`);
+  fs.chmodSync(scriptPath, 0o755);
+}
+
+test('default Gemini image fallback uses CODEX_GATEWAY_COMMAND --providers gemini-free', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-gemini-free-'));
+  const scriptPath = path.join(tmpDir, 'fake-codex-gateway.sh');
+  const logPath = path.join(tmpDir, 'calls.log');
+  writeGeminiFreeFallbackScript(scriptPath);
+  let fetched = false;
+  global.fetch = async () => {
+    fetched = true;
+    throw new Error('default gemini path must not call generateContent');
+  };
+
+  const result = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    GEMINI_API_KEY: 'gemini-test-key',
+    TELECOM_VISION_MODEL: 'gemini-3.6-flash',
+    TELECOM_VISION_TIMEOUT_SECONDS: '21',
+    GATEWAY_CALL_LOG: logPath,
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: TINY_PNG,
+    blockPngBase64: TINY_PNG,
+    imageWidth: 280,
+    correctY: 92,
+  }));
+
+  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  assert.equal(fetched, false);
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'gemini-free');
+  assert.equal(result.naturalX, 156);
+  assert.equal(result.moveX, 118);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^providers=codex,gemini-free /);
+  assert.match(lines[1], /^providers=gemini-free timeout=21 gemini_model_flag=0 slider_model=gemini-3\.6-flash$/);
+});
+
+test('keeps an existing Gateway slider Gemini model ahead of TELECOM_VISION_MODEL', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-gemini-free-model-'));
+  const scriptPath = path.join(tmpDir, 'fake-codex-gateway.sh');
+  const logPath = path.join(tmpDir, 'calls.log');
+  writeGeminiFreeFallbackScript(scriptPath);
+  global.fetch = async () => {
+    throw new Error('default gemini path must not call generateContent');
+  };
+
+  const result = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    GEMINI_API_KEY: 'gemini-test-key',
+    TELECOM_VISION_MODEL: 'caller-model',
+    CODEX_GATEWAY_SLIDER_GEMINI_MODEL: 'gateway-task-model',
+    GATEWAY_CALL_LOG: logPath,
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: TINY_PNG,
+    imageWidth: 280,
+  }));
+
+  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'gemini-free');
+  assert.match(lines[1], /providers=gemini-free /);
+  assert.match(lines[1], /gemini_model_flag=0 slider_model=gateway-task-model$/);
+});
+
+test('rejects implicit Gemini fallback when CODEX_GATEWAY_COMMAND is missing', async () => {
+  let fetched = false;
+  global.fetch = async () => {
+    fetched = true;
+    throw new Error('missing gateway must not call generateContent');
+  };
+  const result = await withVisionEnv({
+    GEMINI_API_KEY: 'gemini-test-key',
+    TELECOM_VISION_MODE: 'gemini',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: TINY_PNG,
+    imageWidth: 280,
+  }));
+  assert.equal(fetched, false);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'vision-gateway-not-configured');
+  assert.equal(result.method, 'gemini-free');
+});
+
+test('keeps slider range checks on the gemini-free fallback and does not accept a failed gateway', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-gemini-free-range-'));
+  const scriptPath = path.join(tmpDir, 'fake-codex-gateway.sh');
+  const logPath = path.join(tmpDir, 'calls.log');
+  writeGeminiFreeFallbackScript(scriptPath);
+  global.fetch = async () => {
+    throw new Error('out-of-range gemini path must not call generateContent');
+  };
+
+  const outOfRange = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    GEMINI_API_KEY: 'gemini-test-key',
+    GATEWAY_CALL_LOG: logPath,
+    GATEWAY_GEMINI_ANSWER: '{"x":-1,"move":-1,"confidence":0.1,"reason":"no gap"}',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: TINY_PNG,
+    imageWidth: 280,
+  }));
+  assert.equal(outOfRange.ok, false);
+  assert.equal(outOfRange.reason, 'vision-gateway-and-http-failed');
+  assert.equal(outOfRange.httpReason, 'vision-x-out-of-range');
+
+  fs.writeFileSync(scriptPath, '#!/bin/bash\necho gateway-down >&2\nexit 2\n');
+  fs.chmodSync(scriptPath, 0o755);
+  const failed = await withVisionEnv({
+    CODEX_GATEWAY_COMMAND: scriptPath,
+    GEMINI_API_KEY: 'gemini-test-key',
+  }, () => estimateSliderDistanceWithVision({
+    bgPngBase64: TINY_PNG,
+    imageWidth: 280,
+  }));
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, 'vision-gateway-and-http-failed');
+  assert.equal(failed.body, 'exit 2');
 });
