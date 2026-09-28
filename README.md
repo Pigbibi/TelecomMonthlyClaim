@@ -1,6 +1,6 @@
 # TelecomMonthlyClaim
 
-[简体中文](README_CN.md)
+[简体中文](README.zh-CN.md)
 
 Automate an authorized Beijing Telecom monthly benefit claim through Chrome, SMS verification and explicit package checks. Includes GitHub Actions workflows and a local diagnostic path.
 
