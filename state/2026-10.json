@@ -1,0 +1,8 @@
+{
+  "status": "success",
+  "month": "2026-10",
+  "targetPackage": "voice200",
+  "expectedPlanId": "24BJ102053",
+  "successEvidence": "sms_receipt",
+  "sourceRunId": "36816472602"
+}
