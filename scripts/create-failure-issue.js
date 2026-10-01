@@ -1,6 +1,27 @@
 #!/usr/bin/env node
 const { stateMonth } = require('../src/retry-date');
 
+const FAILURE_LABELS = {
+  claim: 'claim',
+  state_read: 'state read',
+  state_persistence: 'state persistence',
+  workflow: 'workflow',
+};
+
+function failureIssueTitle(month, kind = 'claim') {
+  return `Telecom monthly ${FAILURE_LABELS[kind] || FAILURE_LABELS.workflow} failed: ${month}`;
+}
+
+function failureIssueBody(kind, runUrl) {
+  const descriptions = {
+    claim: 'The Beijing Telecom claim attempt failed. Check carrier and SMS evidence before retrying.',
+    state_read: 'Monthly state could not be loaded. The claim was stopped to prevent a duplicate submission.',
+    state_persistence: 'Monthly state could not be saved. The carrier claim may already have succeeded; inspect the run evidence before retrying. Do not rerun the claim just to repair state storage.',
+    workflow: 'The workflow failed outside the carrier claim. Inspect the failed step and existing claim evidence before retrying.',
+  };
+  return [descriptions[kind] || descriptions.workflow, '', runUrl ? `Run: ${runUrl}` : ''].join('\n');
+}
+
 async function github(path, options = {}) {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
@@ -18,26 +39,28 @@ async function github(path, options = {}) {
   return res.json();
 }
 
+async function createFailureIssue({ month, kind = 'claim', runUrl = '', github: githubRequest = github }) {
+  const title = failureIssueTitle(month, kind);
+  const issues = await githubRequest(`/issues?state=open&labels=telecom-monthly,automation&per_page=20`);
+  if (issues.some(issue => issue.title === title)) return false;
+  await githubRequest('/issues', {
+    method: 'POST',
+    body: JSON.stringify({ title, labels: ['telecom-monthly', 'automation'], body: failureIssueBody(kind, runUrl) }),
+  });
+  return true;
+}
+
 async function main() {
   const month = stateMonth();
-  const title = `Telecom monthly claim failed: ${month}`;
   const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
     ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
     : '';
-  const issues = await github(`/issues?state=open&labels=telecom-monthly,automation&per_page=20`);
-  if (issues.some(issue => issue.title === title)) {
-    console.log(`Open issue already exists for ${month}`);
-    return;
-  }
-  await github('/issues', {
-    method: 'POST',
-    body: JSON.stringify({
-      title,
-      labels: ['telecom-monthly', 'automation'],
-      body: [`Monthly Beijing Telecom package claim failed on final retry day.`, '', runUrl ? `Run: ${runUrl}` : '', '', 'Check workflow logs and SMS inbox connectivity.'].join('\n'),
-    }),
-  });
-  console.log(`Created failure issue for ${month}`);
+  const created = await createFailureIssue({ month, kind: process.env.FAILURE_KIND || 'claim', runUrl });
+  console.log(`${created ? 'Created failure issue' : 'Open issue already exists'} for ${month}`);
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+if (require.main === module) {
+  main().catch(err => { console.error(err); process.exit(1); });
+}
+
+module.exports = { failureIssueTitle, failureIssueBody, createFailureIssue };

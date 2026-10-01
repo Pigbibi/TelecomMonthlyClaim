@@ -17,6 +17,21 @@ test('does not close a failure issue without confirmed success', async () => {
   assert.deepEqual(calls, []);
 });
 
+test('closes state storage and legacy claim issues after confirmed recovery', async () => {
+  const closed = [];
+  await resolveFailureIssue({ month: '2026-10', stateStatus: 'success',
+    github: async (path) => {
+      if (path.startsWith('/issues?')) return [
+        { number: 79, title: 'Telecom monthly claim failed: 2026-10' },
+        { number: 80, title: 'Telecom monthly state persistence failed: 2026-10' },
+        { number: 81, title: 'Unrelated issue' },
+      ];
+      closed.push(path);
+      return {};
+    } });
+  assert.deepEqual(closed, ['/issues/79', '/issues/80']);
+});
+
 test('closes the matching monthly failure issue after confirmed success', async () => {
   const calls = [];
   const github = async (path, options = {}) => {
