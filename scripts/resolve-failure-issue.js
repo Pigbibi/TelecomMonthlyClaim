@@ -2,10 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { stateMonth } = require('../src/retry-date');
-
-function failureIssueTitle(month) {
-  return `Telecom monthly claim failed: ${month}`;
-}
+const { failureIssueTitle } = require('./create-failure-issue');
 
 async function github(pathname, options = {}) {
   const token = process.env.GITHUB_TOKEN;
@@ -26,15 +23,16 @@ async function github(pathname, options = {}) {
 
 async function resolveFailureIssue({ month, stateStatus, github: githubRequest = github }) {
   if (stateStatus !== 'success') return false;
-  const title = failureIssueTitle(month);
+  const titles = ['claim', 'state_read', 'state_persistence', 'workflow'].map(kind => failureIssueTitle(month, kind));
   const issues = await githubRequest('/issues?state=open&labels=telecom-monthly,automation&per_page=20');
-  const issue = issues.find(item => item.title === title);
-  if (!issue) return false;
-  await githubRequest(`/issues/${issue.number}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ state: 'closed' }),
-  });
-  return true;
+  const matching = issues.filter(item => titles.includes(item.title));
+  for (const issue of matching) {
+    await githubRequest(`/issues/${issue.number}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state: 'closed' }),
+    });
+  }
+  return matching.length > 0;
 }
 
 async function main() {

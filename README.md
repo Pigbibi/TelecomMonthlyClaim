@@ -50,9 +50,9 @@ Start with a probe. Confirm the phone, product and plan ID before allowing a rea
 
 ## Schedule, state and troubleshooting
 
-The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Successful state in `state/YYYY-MM.json` prevents an ordinary duplicate run; `force_run=true` bypasses that skip and should be used deliberately.
+The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Monthly state is stored in `state/YYYY-MM.json` on the `logs` branch and restored before claiming. Successful state prevents an ordinary duplicate run. Legacy success state on `main` is retained for migration. State read errors stop the claim; `force_run=true` bypasses the success skip and should be used deliberately.
 
-Run metadata is stored on the `logs` branch. Success evidence must pass sender and timestamp checks. Workflow status alone does not prove that a benefit reached the account.
+Run metadata is also stored on the `logs` branch. State persistence failures and carrier claim failures have separate alerts. Inspect the carrier result before retrying after a persistence failure. Success evidence must pass sender and timestamp checks. Workflow status alone does not prove that a benefit reached the account.
 
 If the carrier rejects a verification request or returns an empty response, inspect the recorded failure and allow for carrier cooldowns. Repeated retries can add risk. Never publish phone numbers, SMS bodies, OTPs, session data or full campaign links in a bug report.
 

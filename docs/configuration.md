@@ -148,7 +148,7 @@ Review its data policy and do not assume it will improve every challenge.
 
 ## State behavior
 
-The monthly workflow writes `state/YYYY-MM.json` to `main`.
+The monthly workflow restores and writes sanitized `state/YYYY-MM.json` on the `logs` branch; it does not push runtime state to protected `main`. Existing state on `main` is a migration fallback. State read errors stop claiming, and state persistence failures are reported separately from carrier claim failures.
 
 | Status | Meaning | Schedule / Issue |
 | --- | --- | --- |

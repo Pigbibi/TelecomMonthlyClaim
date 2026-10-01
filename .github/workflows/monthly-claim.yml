@@ -120,6 +120,10 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+      - name: Restore monthly state from logs branch
+        id: state_restore
+        run: node scripts/sync-claim-state.js restore
+
       - name: Decide whether claim is needed
         id: claim_plan
         run: |
@@ -359,24 +363,19 @@ jobs:
           fi
           pkill -x Xvfb 2>/dev/null || true
 
-      - name: Commit monthly state
-        if: always() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state || true
-          if git diff --cached --quiet; then
-            echo "No state changes"
-          else
-            git commit -m "Record telecom monthly claim state"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
-
-      - name: Create issue on final failure
-        if: failure() && github.event.inputs.dry_run != 'true' && steps.claim_plan.outputs.should_run == 'true'
+      - name: Persist monthly state on logs branch
+        id: state_persist
+        if: always() && steps.state_restore.outcome == 'success' && steps.claim_plan.outcome == 'success' && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RUN_LOG_STATE_FILE: ${{ steps.claim_plan.outputs.state_file }}
+        run: bash scripts/write-run-log-branch.sh --state-only
+
+      - name: Create issue for failed step
+        if: failure() && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          FAILURE_KIND: ${{ steps.state_restore.outcome == 'failure' && 'state_read' || steps.state_persist.outcome == 'failure' && 'state_persistence' || steps.claim.outcome == 'failure' && 'claim' || 'workflow' }}
         run: node scripts/create-failure-issue.js
 
       - name: Close resolved failure issue

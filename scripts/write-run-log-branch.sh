@@ -6,6 +6,20 @@ set -euo pipefail
 : "${GITHUB_RUN_ID:?Missing GITHUB_RUN_ID}"
 : "${GITHUB_WORKFLOW:?Missing GITHUB_WORKFLOW}"
 
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+state_source="${RUN_LOG_STATE_FILE:-}"
+if [ -n "$state_source" ]; then
+  state_source="$(pwd)/$state_source"
+fi
+state_only=false
+if [ "${1:-}" = "--state-only" ]; then
+  state_only=true
+  if [ -z "$state_source" ] || [ ! -f "$state_source" ]; then
+    echo "No monthly state to persist."
+    exit 0
+  fi
+fi
+
 branch="${RUN_LOG_BRANCH:-logs}"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
@@ -28,10 +42,16 @@ else
 # TelecomMonthlyClaim run logs
 
 This branch stores sanitized GitHub Actions heartbeat and workflow run metadata.
-It intentionally does not store phone numbers, SMS codes, tokens, or telecom page contents.
+It also stores sanitized monthly claim state. It intentionally does not store phone numbers, SMS codes, tokens, or telecom page contents.
 EOF
 fi
 
+if [ -n "$state_source" ] && [ -f "$state_source" ]; then
+  node "$script_dir/sync-claim-state.js" export "$state_source" "state/$(basename "$state_source")"
+  git add state
+fi
+
+if [ "$state_only" = false ]; then
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 day="$(date -u +%Y-%m-%d)"
 run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
@@ -69,11 +89,17 @@ fs.writeFileSync('latest.json', `${JSON.stringify(data, null, 2)}\n`);
 NODE
 
 git add README.md latest.json runs
-git commit -m "Record workflow run ${GITHUB_RUN_ID}" >/dev/null
+fi
+
+if git diff --cached --quiet; then
+  echo "No state or log changes."
+  exit 0
+fi
+git commit -m "Record workflow state or run ${GITHUB_RUN_ID}" >/dev/null
 
 for attempt in 1 2 3; do
   if git push origin HEAD:"$branch"; then
-    echo "Recorded run log on ${branch}: ${log_file}"
+    echo "Recorded workflow data on ${branch}."
     exit 0
   fi
   if [ "$attempt" -lt 3 ]; then

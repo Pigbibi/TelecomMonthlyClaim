@@ -17,4 +17,4 @@ jobs:
         with:
           node-version: "22"
       - name: Pure receipt and state tests (no browser or credentials)
-        run: node --test tests/sms-receipt-boundary.test.js tests/sms-inbox-client.test.js tests/sms-parser.test.js tests/config.test.js tests/package-gate.test.js tests/run-log-outcome.test.js tests/offer-inventory.test.js tests/slider-vision.test.js
+        run: node --test tests/sms-receipt-boundary.test.js tests/sms-inbox-client.test.js tests/sms-parser.test.js tests/config.test.js tests/package-gate.test.js tests/run-log-outcome.test.js tests/sync-claim-state.test.js tests/create-failure-issue.test.js tests/resolve-failure-issue.test.js tests/state-workflow-integration.test.js tests/offer-inventory.test.js tests/slider-vision.test.js

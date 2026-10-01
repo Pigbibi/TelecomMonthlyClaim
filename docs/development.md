@@ -86,7 +86,7 @@ legitimately changes a supported package.
 
 ### Duplicate month state
 
-Inspect `state/YYYY-MM.json`. Use `force_run=true` only when an operator has
+Inspect `state/YYYY-MM.json` on the `logs` branch. Use `force_run=true` only when an operator has
 verified that a rerun is safe. A successful carrier page may mean the benefit is
 already claimed even if earlier automation metadata is incomplete.
 
