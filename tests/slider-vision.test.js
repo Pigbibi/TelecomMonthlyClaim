@@ -79,46 +79,39 @@ test('uses Gemini API key and request format when configured', async () => {
   assert.equal(body.generationConfig.responseMimeType, 'application/json');
 });
 
-test('uses CodexGateway service HTTP before direct Gemini when SERVICE_URL is set', async () => {
-  const calls = [];
-  global.fetch = async (url, init) => {
-    calls.push({ url: String(url), init });
-    if (String(url).includes('audience=')) {
-      return { ok: true, text: async () => JSON.stringify({ value: 'oidc-token' }) };
-    }
-    return {
-      ok: true,
-      text: async () => JSON.stringify({
-        output: '{"x":156,"move":118,"confidence":0.9,"reason":"service"}',
-      }),
-    };
+test('retired service configuration stops without OIDC, HTTP, or CLI fallback', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-retired-gateway-'));
+  const marker = path.join(tmp, 'provider-called');
+  const script = path.join(tmp, 'must-not-run.js');
+  fs.writeFileSync(script, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'unexpected')`);
+  let fetched = false;
+  global.fetch = async () => {
+    fetched = true;
+    throw new Error('retired route must not fetch OIDC or a provider');
   };
-
-  const result = await withVisionEnv({
-    CODEX_GATEWAY_SERVICE_URL: 'https://gateway.example.invalid',
-    CODEX_GATEWAY_SERVICE_AUDIENCE: 'codex-gateway',
-    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://oidc.example.invalid/token',
-    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'req-token',
-    GEMINI_API_KEY: 'should-not-be-used',
-    TELECOM_VISION_URL: 'https://example.invalid/v1',
-  }, () => estimateSliderDistanceWithVision({
-    bgPngBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-    imageWidth: 280,
-  }));
-
-  assert.equal(result.ok, true);
-  assert.equal(result.method, 'codex-gateway-service');
-  assert.equal(result.moveX, 118);
-  assert.equal(calls.length, 2);
-  assert.match(calls[1].url, /\/v1\/codex$/);
-  assert.equal(calls[1].init.headers.Authorization, 'Bearer oidc-token');
-  const body = JSON.parse(calls[1].init.body);
-  assert.equal(body.provider_chain, 'codex');
-  assert.equal(body.task, 'slider');
-  const schemaJson = Buffer.from(body.output_schema.content_base64, 'base64').toString('utf8');
-  const schema = JSON.parse(schemaJson);
-  assert.deepEqual(schema.required, ['x', 'move', 'confidence', 'reason']);
-
+  try {
+    for (const serviceUrl of ['https://gateway.example.invalid', 'https://gateway.example.invalid/v1/codex']) {
+      const result = await withVisionEnv({
+        CODEX_GATEWAY_SERVICE_URL: serviceUrl,
+        CODEX_GATEWAY_COMMAND: `"${process.execPath}" "${script}"`,
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://oidc.example.invalid/token',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'synthetic-request-token',
+        GEMINI_API_KEY: 'synthetic-only',
+        TELECOM_VISION_URL: 'https://provider.example.invalid/v1',
+      }, () => estimateSliderDistanceWithVision({ bgPngBase64: 'synthetic-image' }));
+      assert.deepEqual(result, {
+        ok: false, reason: 'vision-gateway-service-retired', method: 'codex-gateway-service',
+      });
+      assert.equal(fetched, false);
+      assert.equal(fs.existsSync(marker), false);
+      assert.equal(JSON.stringify(result).includes(serviceUrl), false);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('uses CodexGateway CLI before direct Gemini when CODEX_GATEWAY_COMMAND is set', async () => {
