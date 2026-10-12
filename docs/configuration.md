@@ -131,6 +131,12 @@ Slider geometry defaults to **local canvas matching** (`flat-component` /
 rendered crop). Vision AI is off unless `TELECOM_VISION_FALLBACK=true`.
 CodexGateway is not injected by the monthly claim workflow.
 
+The old `CODEX_GATEWAY_SERVICE_URL` integration is retired. If it is explicitly
+configured, the source returns `vision-gateway-service-retired` before requesting
+OIDC credentials, sending HTTP requests, or selecting another provider. Remove
+the obsolete setting from a deployment after reviewing its configuration; this
+change does not configure or enable a replacement service.
+
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | unset | Only used when vision fallback is explicitly enabled |
