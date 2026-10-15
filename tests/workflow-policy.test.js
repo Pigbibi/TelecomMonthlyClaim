@@ -29,7 +29,7 @@ test('monthly workflow uses Gemini credentials optionally; slider defaults to lo
   assert.match(workflowText, /vars\.TELECOM_VISION_FALLBACK == 'true' && secrets\.GEMINI_API_KEY/);
   // CodexGateway is no longer injected into the claim step; captcha geometry is local-first.
   assert.doesNotMatch(workflowText, /CODEX_GATEWAY_SERVICE_URL:\s+\$\{\{\s*vars\.CODEX_GATEWAY_SERVICE_URL/);
-  assert.doesNotMatch(workflowText, /Pigbibi\/AIGateway\/actions\/setup-codex-gateway/);
+  assert.doesNotMatch(workflowText, /Pigbibi\/PersonalAIService\/actions\/setup-codex-gateway/);
 });
 
 test('monthly workflow uses GitHub-hosted Linux with generic proxy modes', () => {
