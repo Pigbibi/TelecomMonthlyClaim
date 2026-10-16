@@ -36,8 +36,10 @@ npm test
 
 必需 URL 参数和套餐校验见[配置说明](docs/configuration.md)，其他短信接入方式见[短信来源](docs/sms-providers.md)。
 
-源码不再调用已退役的 AIGateway v1 服务。显式设置旧 `CODEX_GATEWAY_SERVICE_URL`
+源码不再调用已退役的 AIGateway v1 服务或本机 Gateway CLI。显式设置旧 `CODEX_GATEWAY_SERVICE_URL`
 时会以 `vision-gateway-service-retired` 停止，不申请 OIDC 凭据、不自动转交其他 provider。
+旧 `CODEX_GATEWAY_COMMAND` / `CAPTCHA_CODEX_GATEWAY_COMMAND` 配置会以
+`vision-gateway-cli-retired` 停止。视觉服务需要显式配置 HTTP URL 和 key。
 本次清理不启用替代服务，也不改变月度调度。
 
 ## 分阶段运行

@@ -1,21 +1,9 @@
 const { withModelRecovery } = require('./gemini-model-policy.cjs');
 /**
  * Vision estimator for telecom slider hole X / drag distance.
- *
- * The AIGateway v1 HTTP route is retired. Explicit legacy service configuration
- * stops without OIDC, a provider call, or automatic fallback.
- * Existing local CLI and explicit HTTP paths are otherwise unchanged.
- *
- * When TELECOM_VISION_URL is unset, the Gemini image fallback calls the
- * existing CODEX_GATEWAY_COMMAND with
- * --providers gemini-free. Model overrides use Gateway task variables such as
- * CODEX_GATEWAY_SLIDER_GEMINI_MODEL; this caller does not pass --gemini-model.
+ * Legacy Gateway HTTP/CLI settings stop before any provider call.
+ * Vision requires an explicit TELECOM_VISION_URL and provider key.
  */
-
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
@@ -39,15 +27,6 @@ function pickFirstNumber(obj, keys) {
   return NaN;
 }
 
-function splitCommand(command) {
-  const parts = [];
-  const pattern = /"([^"]*)"|'([^']*)'|[^\s"']+/g;
-  for (const match of String(command || '').matchAll(pattern)) {
-    parts.push(match[1] ?? match[2] ?? match[0]);
-  }
-  return parts;
-}
-
 function buildSliderPrompt({ imageWidth, cssWidth, correctY }) {
   const cssHint = Number.isFinite(Number(cssWidth)) && Number(cssWidth) > 40
     ? Number(cssWidth)
@@ -63,16 +42,10 @@ function buildSliderPrompt({ imageWidth, cssWidth, correctY }) {
   ].filter(Boolean).join('');
 }
 
-function decodePngBase64(value) {
-  const raw = String(value || '').replace(/^data:image\/png;base64,/, '');
-  if (!raw) return null;
-  return Buffer.from(raw, 'base64');
-}
-
 function finalizeVisionParse(parsed, imageWidth, method) {
   let x = pickFirstNumber(parsed, ['x', 'gapX', 'holeX', 'targetX', 'offsetX']);
   let move = pickFirstNumber(parsed, ['move', 'distance', 'sliderDistance', 'drag', 'dragX']);
-  // Codex sometimes returns ratios instead of pixels.
+  // Providers sometimes return ratios instead of pixels.
   if (Number.isFinite(x) && x > 0 && x <= 1.5) x *= imageWidth;
   if (Number.isFinite(move) && move > 0 && move <= 1.5) {
     const asImageFrac = move * imageWidth;
@@ -136,132 +109,6 @@ function parseVisionJsonText(outText, imageWidth, method) {
   return finalizeVisionParse(parsed, imageWidth, method);
 }
 
-function sliderOutputSchema() {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      x: { type: 'number' },
-      move: { type: 'number' },
-      confidence: { type: 'number' },
-      reason: { type: 'string' },
-    },
-    required: ['x', 'move', 'confidence', 'reason'],
-  };
-}
-
-function estimateWithCodexGatewayCli({
-  bgPngBase64,
-  blockPngBase64,
-  imageWidth,
-  cssWidth,
-  correctY,
-  providerChain: providerChainOverride,
-  method = 'codex-gateway',
-  extraEnv = {},
-}) {
-  const command = splitCommand(process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND || '');
-  if (!command.length || !bgPngBase64) {
-    return { ok: false, reason: 'vision-gateway-not-configured', method };
-  }
-  const png = decodePngBase64(bgPngBase64);
-  if (!png?.length) {
-    return { ok: false, reason: 'vision-image-missing', method };
-  }
-  const timeoutSeconds = Math.max(15, Number(process.env.TELECOM_VISION_TIMEOUT_SECONDS || process.env.CAPTCHA_CODEX_TIMEOUT_SECONDS || 60));
-  const providerChain = providerChainOverride
-    || process.env.TELECOM_VISION_PROVIDER_CHAIN
-    || process.env.CODEX_GATEWAY_PROVIDER_CHAIN
-    || 'codex,gemini-free';
-  const prompt = buildSliderPrompt({ imageWidth, cssWidth, correctY });
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-slider-vision-'));
-  try {
-    const imagePath = path.join(tmpDir, 'slider.png');
-    const promptPath = path.join(tmpDir, 'prompt.md');
-    const schemaPath = path.join(tmpDir, 'schema.json');
-    const outputPath = path.join(tmpDir, 'answer.json');
-    fs.writeFileSync(imagePath, png);
-    if (blockPngBase64) {
-      const block = decodePngBase64(blockPngBase64);
-      if (block?.length) fs.writeFileSync(path.join(tmpDir, 'block.png'), block);
-    }
-    fs.writeFileSync(promptPath, prompt);
-    fs.writeFileSync(schemaPath, JSON.stringify(sliderOutputSchema()));
-    const args = [
-      ...command.slice(1),
-      '--prompt-file', promptPath,
-      '--image', imagePath,
-    ];
-    const blockPath = path.join(tmpDir, 'block.png');
-    if (fs.existsSync(blockPath)) {
-      args.push('--image', blockPath);
-    }
-    args.push(
-      '--output-schema', schemaPath,
-      '--out', outputPath,
-      '--timeout-seconds', String(timeoutSeconds),
-      '--sandbox', 'read-only',
-      '--ask-for-approval', 'never',
-      '--task', 'slider',
-      '--complexity', 'high',
-      '--providers', providerChain,
-    );
-    const result = spawnSync(command[0], args, {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        ...extraEnv,
-        CODEX_GATEWAY_PROVIDER_CHAIN: providerChain,
-      },
-      timeout: timeoutSeconds * 1000,
-    });
-    if (result.error) {
-      return {
-        ok: false,
-        reason: 'vision-gateway-error',
-        body: method === 'gemini-free' ? 'gateway invocation failed' : String(result.error.message || result.error).slice(0, 300),
-        method,
-      };
-    }
-    if (result.status !== 0) {
-      const detail = String(result.stderr || result.stdout || '').trim().slice(-600);
-      return {
-        ok: false,
-        reason: 'vision-gateway-failed',
-        body: method === 'gemini-free' ? `exit ${result.status}` : detail || `exit ${result.status}`,
-        method,
-      };
-    }
-    const rawText = fs.existsSync(outputPath)
-      ? fs.readFileSync(outputPath, 'utf8')
-      : String(result.stdout || '');
-    return parseVisionJsonText(rawText, imageWidth, method);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-}
-
-function sliderGeminiModelEnv() {
-  const override = String(process.env.TELECOM_VISION_MODEL || '').trim();
-  if (!override) return {};
-  if (String(process.env.CODEX_GATEWAY_SLIDER_GEMINI_MODEL || '').trim()) return {};
-  if (String(process.env.CODEX_GATEWAY_SLIDER_GEMINI_FREE_MODEL || '').trim()) return {};
-  return { CODEX_GATEWAY_SLIDER_GEMINI_MODEL: override };
-}
-
-function estimateWithDefaultGeminiGateway(options) {
-  const command = splitCommand(process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND || '');
-  if (!command.length) {
-    return { ok: false, reason: 'vision-gateway-not-configured', method: 'gemini-free' };
-  }
-  return estimateWithCodexGatewayCli({
-    ...options,
-    providerChain: 'gemini-free',
-    method: 'gemini-free',
-    extraEnv: sliderGeminiModelEnv(),
-  });
-}
-
 async function estimateWithHttpVision({
   bgPngBase64,
   blockPngBase64,
@@ -278,26 +125,13 @@ async function estimateWithHttpVision({
     || process.env.GEMINI_MODEL
     || process.env.ANTHROPIC_MODEL
     || DEFAULT_GEMINI_MODEL;
-  let url = process.env.TELECOM_VISION_URL || '';
-  if (!url && key && (process.env.GEMINI_API_KEY || process.env.TELECOM_VISION_MODE === 'gemini')) {
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-  }
+  const url = process.env.TELECOM_VISION_URL || '';
   const mode = (process.env.TELECOM_VISION_MODE
     || (url.includes('generativelanguage.googleapis.com') || url.includes('googleapis.com') || url.includes('gemini') ? 'gemini'
       : (url.includes('anthropic') || url.includes('8787') ? 'anthropic' : 'openai'))).toLowerCase();
   if (!url || !key || !bgPngBase64) {
     return { ok: false, reason: 'vision-not-configured' };
   }
-  if (mode === 'gemini' && !String(process.env.TELECOM_VISION_URL || '').trim()) {
-    return estimateWithDefaultGeminiGateway({
-      bgPngBase64,
-      blockPngBase64,
-      imageWidth,
-      cssWidth,
-      correctY,
-    });
-  }
-
   const prompt = buildSliderPrompt({ imageWidth, cssWidth, correctY });
   let body;
   let headers = { 'content-type': 'application/json' };
@@ -427,7 +261,7 @@ function visionProvidersConfigured() {
     || process.env.GEMINI_API_KEY
     || process.env.OPENAI_API_KEY
     || process.env.ANTHROPIC_AUTH_TOKEN);
-  const url = !!(process.env.TELECOM_VISION_URL || process.env.GEMINI_API_KEY);
+  const url = !!process.env.TELECOM_VISION_URL;
   return gateway || (key && url);
 }
 
@@ -447,6 +281,9 @@ async function estimateSliderDistanceWithVision(options = {}) {
   if (process.env.CODEX_GATEWAY_SERVICE_URL) {
     return { ok: false, reason: 'vision-gateway-service-retired', method: 'codex-gateway-service' };
   }
+  if (process.env.CODEX_GATEWAY_COMMAND || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND) {
+    return { ok: false, reason: 'vision-gateway-cli-retired', method: 'codex-gateway-cli' };
+  }
   const normalized = {
     imageWidth: 280,
     cssWidth: null,
@@ -460,49 +297,7 @@ async function estimateSliderDistanceWithVision(options = {}) {
     return { ok: false, reason: 'vision-not-configured' };
   }
 
-  let gatewayError = null;
-  if (
-    process.env.CODEX_GATEWAY_COMMAND
-    || process.env.CAPTCHA_CODEX_GATEWAY_COMMAND
-  ) {
-    const gateway = await estimateWithCodexGatewayCli(normalized);
-    if (gateway.ok) return gateway;
-    gatewayError = gateway;
-    if (!(process.env.GEMINI_API_KEY || process.env.TELECOM_VISION_API_KEY || process.env.TELECOM_VISION_URL)) {
-      return gateway;
-    }
-    console.warn(`CodexGateway slider vision failed (${gateway.reason}); falling back to direct Gemini/HTTP`, {
-      body: gateway.body,
-      parsed: gateway.parsed,
-      x: gateway.x,
-      move: gateway.move,
-      imageWidth: gateway.imageWidth,
-    });
-  }
-
-  const http = await estimateWithHttpVision(normalized);
-  if (!http.ok && gatewayError) {
-    console.warn('Direct Gemini/HTTP slider vision also failed', {
-      httpReason: http.reason,
-      body: http.body,
-      gatewayReason: gatewayError.reason,
-    });
-  }
-  if (http.ok || !gatewayError) return http;
-  const combined = {
-    ok: false,
-    reason: 'vision-gateway-and-http-failed',
-    gatewayReason: gatewayError.reason,
-    gatewayBody: gatewayError.body,
-    httpReason: http.reason,
-    body: http.body || gatewayError.body,
-    parsed: http.parsed || gatewayError.parsed,
-    method: 'codex-gateway+http',
-  };
-  if (isVisionPuzzleLoading(gatewayError) || isVisionPuzzleLoading(http) || isVisionPuzzleLoading(combined)) {
-    return { ...combined, reason: 'puzzle-still-loading' };
-  }
-  return combined;
+  return estimateWithHttpVision(normalized);
 }
 
 module.exports = {

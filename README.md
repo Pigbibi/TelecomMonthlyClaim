@@ -36,10 +36,12 @@ Configure **Actions secrets and variables**:
 
 See [Configuration](docs/configuration.md) for required URL parameters and package validation, and [SMS providers](docs/sms-providers.md) for alternative inboxes.
 
-The retired AIGateway v1 service is no longer called. An explicit legacy
+The retired AIGateway v1 service and local Gateway CLI are no longer called. An explicit legacy
 `CODEX_GATEWAY_SERVICE_URL` stops with `vision-gateway-service-retired`, without
 requesting OIDC credentials or falling back to another provider. This source cleanup
-does not enable a replacement service or change the monthly schedule.
+does not enable a replacement service or change the monthly schedule. Legacy
+`CODEX_GATEWAY_COMMAND` / `CAPTCHA_CODEX_GATEWAY_COMMAND` settings likewise stop
+with `vision-gateway-cli-retired`. Vision requires an explicit HTTP URL and key.
 
 ## Run in stages
 
