@@ -36,7 +36,7 @@ Configure **Actions secrets and variables**:
 
 See [Configuration](docs/configuration.md) for required URL parameters and package validation, and [SMS providers](docs/sms-providers.md) for alternative inboxes.
 
-> **Upgrading from an older checkout?** The AIGateway v1 service and the local Gateway CLI are no longer called. Leaving a legacy `CODEX_GATEWAY_SERVICE_URL` in place makes the run stop with `vision-gateway-service-retired` instead of silently falling back. Legacy `CODEX_GATEWAY_COMMAND` / `CAPTCHA_CODEX_GATEWAY_COMMAND` stop with `vision-gateway-cli-retired`. Vision now needs an explicit HTTP URL and key. See [CHANGELOG](CHANGELOG.md).
+> **Upgrading from an older checkout?** The AIGateway v1 service and the local Gateway CLI are no longer called. Leaving a legacy `CODEX_GATEWAY_SERVICE_URL` in place makes the run stop with `vision-gateway-service-retired` instead of silently falling back. Legacy `CODEX_GATEWAY_COMMAND` / `CAPTCHA_CODEX_GATEWAY_COMMAND` stop with `vision-gateway-cli-retired`. Vision now needs an explicit HTTP URL and key.
 
 ## Run in stages
 
