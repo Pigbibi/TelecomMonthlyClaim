@@ -2,20 +2,9 @@
 
 Security fixes target the latest release and `main` branch.
 
-## Reporting
+## Reporting a vulnerability
 
-Do not open a public issue containing phone numbers, OTPs, activity URLs with
-account identifiers, PushPlus or visual-provider credentials, SMS inbox tokens,
-proxy credentials, SSH keys, browser profiles, private screenshots, or exploit
-details. Use GitHub's
-[private vulnerability reporting](https://github.com/Pigbibi/TelecomMonthlyClaim/security/advisories/new).
-If that form is unavailable, ask for a private contact through information on
-the repository owner's GitHub profile without sharing technical details
-publicly.
-
-Include the affected commit and workflow, required attacker access,
-reproduction steps, possible carrier action, exposed data, and mitigation in
-the private report.
+Report security vulnerabilities through [GitHub private vulnerability reporting](https://github.com/Pigbibi/TelecomMonthlyClaim/security/advisories/new). Do not post exploit details, credentials, private sessions or personal data in public issues or PRs. Include the affected version, impact and minimal redacted reproduction. The maintainer handles reports on a best-effort basis; no bounty or response-time guarantee is implied.
 
 ## Relevant issues
 
