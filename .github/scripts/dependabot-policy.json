@@ -1,0 +1,17 @@
+{
+  "repo": "Pigbibi/TelecomMonthlyClaim",
+  "branch": "main",
+  "files": [
+    "package-lock.json",
+    "package.json"
+  ],
+  "directories": [
+    "/",
+    "/.github"
+  ],
+  "required_checks": [
+    "offline-tests",
+    "Repository hygiene",
+    "Safe dependency update"
+  ]
+}
