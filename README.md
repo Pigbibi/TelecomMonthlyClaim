@@ -36,12 +36,7 @@ Configure **Actions secrets and variables**:
 
 See [Configuration](docs/configuration.md) for required URL parameters and package validation, and [SMS providers](docs/sms-providers.md) for alternative inboxes.
 
-The retired AIGateway v1 service and local Gateway CLI are no longer called. An explicit legacy
-`CODEX_GATEWAY_SERVICE_URL` stops with `vision-gateway-service-retired`, without
-requesting OIDC credentials or falling back to another provider. This source cleanup
-does not enable a replacement service or change the monthly schedule. Legacy
-`CODEX_GATEWAY_COMMAND` / `CAPTCHA_CODEX_GATEWAY_COMMAND` settings likewise stop
-with `vision-gateway-cli-retired`. Vision requires an explicit HTTP URL and key.
+> **Upgrading from an older checkout?** The AIGateway v1 service and the local Gateway CLI are no longer called. Leaving a legacy `CODEX_GATEWAY_SERVICE_URL` in place makes the run stop with `vision-gateway-service-retired` instead of silently falling back. Legacy `CODEX_GATEWAY_COMMAND` / `CAPTCHA_CODEX_GATEWAY_COMMAND` stop with `vision-gateway-cli-retired`. Vision now needs an explicit HTTP URL and key. See [CHANGELOG](CHANGELOG.md).
 
 ## Run in stages
 
@@ -57,9 +52,13 @@ Start with a probe. Confirm the phone, product and plan ID before allowing a rea
 
 ## Schedule, state and troubleshooting
 
-The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Monthly state is stored in `state/YYYY-MM.json` on the `logs` branch and restored before claiming. Successful state prevents an ordinary duplicate run. Legacy success state on `main` is retained for migration. State read errors stop the claim; `force_run=true` bypasses the success skip and should be used deliberately.
+The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Monthly state is stored in `state/YYYY-MM.json` on the `logs` branch and restored before claiming.
 
-Run metadata is also stored on the `logs` branch. State persistence failures and carrier claim failures have separate alerts. Inspect the carrier result before retrying after a persistence failure. Success evidence must pass sender and timestamp checks. Workflow status alone does not prove that a benefit reached the account.
+Successful state prevents an ordinary duplicate run. Legacy success state on `main` is retained for migration. State read errors stop the claim; `force_run=true` bypasses the success skip and should be used deliberately.
+
+Run metadata is also stored on the `logs` branch. State persistence failures and carrier claim failures raise separate alerts — inspect the carrier result before retrying after a persistence failure.
+
+Success evidence must pass sender and timestamp checks. Workflow status alone does not prove that a benefit reached the account.
 
 If the carrier rejects a verification request or returns an empty response, inspect the recorded failure and allow for carrier cooldowns. Repeated retries can add risk. Never publish phone numbers, SMS bodies, OTPs, session data or full campaign links in a bug report.
 
