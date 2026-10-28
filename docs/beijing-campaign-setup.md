@@ -1,5 +1,7 @@
 # Beijing Telecom monthly 5GB / 200-minute setup
 
+English | [简体中文](beijing-campaign-setup.zh-CN.md)
+
 This guide helps open-source users map the public **Beijing Telecom**
 “网龄 / 成长” style monthly benefit (5GB data **or** 200 minutes voice) onto
 this repository’s configuration.
