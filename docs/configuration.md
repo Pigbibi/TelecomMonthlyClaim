@@ -128,7 +128,7 @@ Notes:
 ## Slider matching
 
 Slider geometry defaults to **local canvas matching** (`flat-component` /
-rendered crop). Vision AI is off unless `TELECOM_VISION_FALLBACK=true`.
+rendered crop). Workflows default `TELECOM_VISION_FALLBACK=true` for Gemini vision after local match fails.
 CodexGateway is not injected by the monthly claim workflow.
 
 The old Gateway service and CLI integrations are retired. An explicit
@@ -140,7 +140,7 @@ settings before adopting an explicit HTTP provider.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `TELECOM_VISION_FALLBACK` | unset/`false` | Set `true` to allow vision after local match fails |
+| `TELECOM_VISION_FALLBACK` | `true` (workflow default) | Set `false` to disable vision after local match fails |
 | `TELECOM_VISION_URL` | unset | Required explicit HTTP endpoint, including for Gemini |
 | `TELECOM_VISION_API_KEY` | unset | Key for the explicitly configured provider; existing provider-specific key variables remain supported |
 | `TELECOM_VISION_MODE` | inferred | `gemini`, `openai`, or `anthropic` request format |

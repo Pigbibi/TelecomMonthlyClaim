@@ -63,7 +63,7 @@ jobs:
       PUSHPLUS_DEBUG: ${{ vars.PUSHPLUS_DEBUG || 'false' }}
       PUSHPLUS_RELAY_INBOX_URL: ${{ vars.PUSHPLUS_RELAY_INBOX_URL || '' }}
       PUSHPLUS_RELAY_INBOX_TOKEN: ${{ secrets.PUSHPLUS_RELAY_INBOX_TOKEN }}
-      TELECOM_VISION_FALLBACK: ${{ vars.TELECOM_VISION_FALLBACK || '' }}
+      TELECOM_VISION_FALLBACK: ${{ vars.TELECOM_VISION_FALLBACK || 'true' }}
       GEMINI_API_KEY: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && secrets.GEMINI_API_KEY || '' }}
       TELECOM_VISION_URL: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && (vars.TELECOM_VISION_URL || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent') || '' }}
       TELECOM_VISION_MODE: ${{ vars.TELECOM_VISION_FALLBACK == 'true' && (vars.TELECOM_VISION_MODE || 'gemini') || '' }}
