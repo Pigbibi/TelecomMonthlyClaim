@@ -22,3 +22,11 @@ Describe submission, account, SMS, credential, proxy, state, and workflow risk.
 - [ ] Logs and fixtures contain no account-specific or secret data.
 - [ ] State and retries remain bounded and preserve confirmed success.
 - [ ] English and Simplified Chinese documentation remain aligned.
+
+## AI assistance
+
+Which AI tool and model were used? Write `None` if no AI was used.
+
+## What changed
+
+Describe the change and its purpose.
