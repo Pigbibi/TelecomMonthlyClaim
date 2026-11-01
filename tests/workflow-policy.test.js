@@ -26,7 +26,8 @@ test('monthly workflow does not depend on Pigbibi private home proxy actions', (
 
 test('monthly workflow uses Gemini credentials optionally; slider defaults to local canvas match', () => {
   assert.match(workflowText, /TELECOM_VISION_FALLBACK:/);
-  assert.match(workflowText, /vars\.TELECOM_VISION_FALLBACK == 'true' && secrets\.GEMINI_API_KEY/);
+  assert.match(workflowText, /\(vars\.TELECOM_VISION_FALLBACK \|\| 'true'\) == 'true' && secrets\.GEMINI_API_KEY/);
+  assert.match(localWorkflowText, /\(vars\.TELECOM_VISION_FALLBACK \|\| 'true'\) == 'true' && secrets\.GEMINI_API_KEY/);
   // CodexGateway is no longer injected into the claim step; captcha geometry is local-first.
   assert.doesNotMatch(workflowText, /CODEX_GATEWAY_SERVICE_URL:\s+\$\{\{\s*vars\.CODEX_GATEWAY_SERVICE_URL/);
   assert.doesNotMatch(workflowText, /Pigbibi\/PersonalAIService\/actions\/setup-codex-gateway/);
