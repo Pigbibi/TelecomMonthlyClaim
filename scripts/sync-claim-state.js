@@ -30,18 +30,39 @@ function parseState(text, options) {
   return sanitizeState(state, options);
 }
 
-function restoreState({ month = stateMonth(), targetPackage = process.env.TELECOM_TARGET_PACKAGE || 'voice200',
-  directory = 'state', runGit = args => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
-  const relativeFile = `state/${month}.json`;
-  let remoteText = null;
-  try {
-    runGit(['fetch', '--no-tags', '--depth=1', 'origin', 'refs/heads/logs']);
-    const found = runGit(['ls-tree', '--name-only', 'FETCH_HEAD', '--', relativeFile]).trim();
-    if (found === relativeFile) remoteText = runGit(['show', `FETCH_HEAD:${relativeFile}`]);
-    else if (found) throw new Error('Unexpected state path');
-  } catch {
-    throw new Error('Unable to read monthly state from logs; claim stopped.');
+function stateUri() {
+  const bucket = process.env.PRIVATE_STATE_BUCKET || '';
+  if (!/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(bucket)) {
+    throw new Error('Configure PRIVATE_STATE_BUCKET before running claims.');
   }
+  return `gs://${bucket}/TelecomMonthlyClaim/state.json`;
+}
+
+function runStorage(args) {
+  try {
+    return execFileSync('gcloud', ['storage', ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    throw new Error('Private state storage unavailable; claim stopped.');
+  }
+}
+
+function readLedger(runGcloud, uri = stateUri()) {
+  try {
+    const ledger = JSON.parse(runGcloud(['cat', uri]));
+    if (!ledger || typeof ledger.months !== 'object' || Array.isArray(ledger.months)
+      || ledger.months === null) throw new Error('Invalid ledger');
+    return ledger;
+  } catch {
+    throw new Error('Unable to read monthly state from private storage; claim stopped.');
+  }
+}
+
+function restoreState({ month = stateMonth(), targetPackage = process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  directory = 'state', runGcloud = runStorage } = {}) {
+  const ledger = readLedger(runGcloud);
+  const remoteText = Object.hasOwn(ledger.months, month) ? JSON.stringify(ledger.months[month]) : null;
   const options = { month, targetPackage };
   const file = path.join(directory, `${month}.json`);
   const remote = remoteText !== null ? parseState(remoteText, options) : null;
@@ -67,17 +88,43 @@ function exportState(source, destination, { targetPackage = process.env.TELECOM_
   fs.writeFileSync(destination, `${JSON.stringify(state, null, 2)}\n`);
 }
 
+function persistState(source, { targetPackage = process.env.TELECOM_TARGET_PACKAGE || 'voice200',
+  runGcloud = runStorage } = {}) {
+  if (!source || !fs.existsSync(source)) throw new Error('Monthly state missing; persistence stopped.');
+  const month = path.basename(source, '.json');
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error('Invalid monthly state filename');
+  const uri = stateUri();
+  const generation = runGcloud(['objects', 'describe', uri, '--format=value(generation)']).trim();
+  if (!/^\d+$/.test(generation)) throw new Error('Private state generation missing; persistence stopped.');
+  const ledger = readLedger(runGcloud, `${uri}#${generation}`);
+  const options = { month, targetPackage };
+  const current = parseState(fs.readFileSync(source, 'utf8'), options);
+  const prior = Object.hasOwn(ledger.months, month)
+    ? sanitizeState(ledger.months[month], options) : null;
+  ledger.months[month] = prior?.status === 'success' ? prior : current;
+  const temporary = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'private-claim-state-'));
+  const file = path.join(temporary, 'state.json');
+  try {
+    fs.writeFileSync(file, JSON.stringify(ledger), { mode: 0o600 });
+    runGcloud(['cp', file, uri, `--if-generation-match=${generation}`]);
+  } finally {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    fs.rmdirSync(temporary);
+  }
+}
+
 if (require.main === module) {
   try {
-    if (process.argv[2] === 'export') exportState(process.argv[3], process.argv[4]);
+    if (process.argv[2] === 'persist') persistState(process.argv[3]);
+    else if (process.argv[2] === 'export') exportState(process.argv[3], process.argv[4]);
     else if (process.argv[2] === 'restore') {
       const state = restoreState();
       console.log(state ? `Restored monthly state: ${state.status}` : 'No state recorded for this month.');
-    } else throw new Error('Use restore or export');
+    } else throw new Error('Use restore, persist or export');
   } catch (err) {
     console.error(err.message);
     process.exitCode = 1;
   }
 }
 
-module.exports = { sanitizeState, parseState, restoreState, exportState };
+module.exports = { sanitizeState, parseState, restoreState, exportState, persistState };

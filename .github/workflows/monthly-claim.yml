@@ -24,7 +24,7 @@ on:
         default: "false"
 
 permissions:
-  contents: write
+  contents: read
   issues: write
   id-token: write
 
@@ -37,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
+      PRIVATE_STATE_BUCKET: ${{ vars.PRIVATE_STATE_BUCKET }}
       TELECOM_PHONE: ${{ secrets.TELECOM_PHONE }}
       TELECOM_ENTRY_URL: ${{ secrets.TELECOM_ENTRY_URL || vars.TELECOM_ENTRY_URL || '' }}
       TELECOM_ENTRY_REQUIRED_PARAMS: ${{ vars.TELECOM_ENTRY_REQUIRED_PARAMS || 'campaignId,channelId,wxopenid' }}
@@ -121,7 +122,16 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-      - name: Restore monthly state from logs branch
+      - name: Authenticate private state storage
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up private state storage client
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Restore monthly state from private storage
         id: state_restore
         run: node scripts/sync-claim-state.js restore
 
@@ -337,8 +347,15 @@ jobs:
         continue-on-error: true
         run: node scripts/manage-intercept-lease.js release telecom-claim-silent
 
+      - name: Scan claim diagnostics before publication
+        id: scan-claim-debug
+        if: always() && steps.claim_plan.outputs.should_run == 'true' && hashFiles('artifacts/claim-debug/**') != ''
+        uses: QuantStrategyLab/.github/actions/scan-before-publish@0da4da68433b803cda17d3f84e29875a94a32273
+        with:
+          path: artifacts/claim-debug
+
       - name: Upload claim debug screenshots
-        if: always() && steps.claim_plan.outputs.should_run == 'true'
+        if: always() && steps.scan-claim-debug.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: claim-debug-${{ github.run_id }}
@@ -364,7 +381,7 @@ jobs:
           fi
           pkill -x Xvfb 2>/dev/null || true
 
-      - name: Persist monthly state on logs branch
+      - name: Persist monthly state in private storage
         id: state_persist
         if: always() && steps.state_restore.outcome == 'success' && steps.claim_plan.outcome == 'success' && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true'
         env:
@@ -396,7 +413,7 @@ jobs:
           PROBE_ONLY: ${{ github.event.inputs.probe_only || 'false' }}
         run: node scripts/resolve-run-log-outcome.js
 
-      - name: Record run log on logs branch
+      - name: Record last success time
         if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}

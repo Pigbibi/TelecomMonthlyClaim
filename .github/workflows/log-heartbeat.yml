@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: repository-log-heartbeat
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Record heartbeat on logs branch
+      - name: Record last success time
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_LOG_KIND: heartbeat

@@ -52,7 +52,7 @@ Start with a probe. Confirm the phone, product and plan ID before allowing a rea
 
 ## Schedule, state and troubleshooting
 
-The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Monthly state is stored in `state/YYYY-MM.json` on the `logs` branch and restored before claiming.
+The monthly workflow is scheduled for 08:00 Asia/Shanghai on days 1–3. Runs are serialized. Monthly state is restored from private GCS storage before claiming.
 
 Successful state prevents an ordinary duplicate run. Legacy success state on `main` is retained for migration. State read errors stop the claim; `force_run=true` bypasses the success skip and should be used deliberately.
 
