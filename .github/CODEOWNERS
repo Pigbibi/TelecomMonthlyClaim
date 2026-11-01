@@ -10,3 +10,19 @@
 /.env.example @Pigbibi
 /.github/CODEOWNERS @Pigbibi
 /.github/workflows/ @Pigbibi
+
+# Dependency-only files do not automatically request a human review.
+# CODEOWNERS is path-based: these exceptions also apply to human PRs.
+/.github/requirements-ci.txt
+/.github/workflows/dependabot-auto-merge.yml
+/.github/workflows/dependabot-policy.yml
+/.github/workflows/engineering-governance.yml
+/.github/workflows/gemini-provider-probe.yml
+/.github/workflows/local-selfhosted-claim.yml
+/.github/workflows/log-heartbeat.yml
+/.github/workflows/monthly-claim.yml
+/.github/workflows/offline-regression.yml
+/.github/workflows/repository-hygiene.yml
+/.github/workflows/risk-gate.yml
+/package-lock.json
+/package.json
