@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-11-01T10:10:06Z",
+  "kind": "workflow",
+  "repository": "Pigbibi/TelecomMonthlyClaim",
+  "workflow": "Monthly Beijing Telecom Claim",
+  "runId": "41296153485",
+  "runNumber": "256",
+  "runAttempt": "1",
+  "runUrl": "https://github.com/Pigbibi/TelecomMonthlyClaim/actions/runs/41296153485",
+  "eventName": "workflow_dispatch",
+  "refName": "main",
+  "sha": "9b78a722bb4a959020b239437d9842c49eabd87f",
+  "actor": "Pigbibi",
+  "status": "failure",
+  "claimOutcome": "failure",
+  "forceRun": "true",
+  "dryRun": "true"
+}
