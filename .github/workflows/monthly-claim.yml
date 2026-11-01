@@ -381,9 +381,16 @@ jobs:
           fi
           pkill -x Xvfb 2>/dev/null || true
 
+      - name: Scan monthly state before publishing
+        id: state_scan
+        if: always() && steps.state_restore.outcome == 'success' && steps.claim_plan.outcome == 'success' && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true' && hashFiles(steps.claim_plan.outputs.state_file) != ''
+        uses: QuantStrategyLab/.github/actions/scan-before-publish@0da4da68433b803cda17d3f84e29875a94a32273
+        with:
+          path: ${{ steps.claim_plan.outputs.state_file }}
+
       - name: Persist monthly state in private storage
         id: state_persist
-        if: always() && steps.state_restore.outcome == 'success' && steps.claim_plan.outcome == 'success' && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true'
+        if: always() && steps.state_restore.outcome == 'success' && steps.claim_plan.outcome == 'success' && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true' && steps.state_scan.outcome != 'failure' && steps.state_scan.outcome != 'cancelled'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_LOG_STATE_FILE: ${{ steps.claim_plan.outputs.state_file }}
@@ -393,7 +400,7 @@ jobs:
         if: failure() && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          FAILURE_KIND: ${{ steps.state_restore.outcome == 'failure' && 'state_read' || steps.state_persist.outcome == 'failure' && 'state_persistence' || steps.claim.outcome == 'failure' && 'claim' || 'workflow' }}
+          FAILURE_KIND: ${{ steps.state_restore.outcome == 'failure' && 'state_read' || steps.state_scan.outcome == 'failure' && 'state_persistence' || steps.state_persist.outcome == 'failure' && 'state_persistence' || steps.claim.outcome == 'failure' && 'claim' || 'workflow' }}
         run: node scripts/create-failure-issue.js
 
       - name: Close resolved failure issue

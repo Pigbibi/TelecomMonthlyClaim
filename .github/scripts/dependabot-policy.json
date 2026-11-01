@@ -16,15 +16,6 @@
     "Safe dependency update"
   ],
   "action_files": [
-    ".github/workflows/dependabot-auto-merge.yml",
-    ".github/workflows/dependabot-policy.yml",
-    ".github/workflows/engineering-governance.yml",
-    ".github/workflows/gemini-provider-probe.yml",
-    ".github/workflows/local-selfhosted-claim.yml",
-    ".github/workflows/log-heartbeat.yml",
-    ".github/workflows/monthly-claim.yml",
-    ".github/workflows/offline-regression.yml",
-    ".github/workflows/repository-hygiene.yml",
-    ".github/workflows/risk-gate.yml"
+    ".github/workflows/offline-regression.yml"
   ]
 }
