@@ -9,7 +9,19 @@ const {
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
   classifyActivityRoute,
+  isEndedCampaignPage,
 } = require('../src/offer-inventory');
+
+test('detects an ended activity before login without mistaking an active form for expiry', () => {
+  const ended = { hostname: 'wapbj.189.cn', readyState: 'complete', ready: false,
+    bodySummary: '温馨提示 非常抱歉，该活动已结束。欢迎关注更多精彩活动信息~ 我知道了' };
+  assert.equal(isEndedCampaignPage(ended), true);
+  for (const change of [{hostname: 'example.test'}, {ready: true}, {readyState: 'loading'},
+    {bodySummary: '请输入手机号码'}, {bodySummary: null}]) {
+    assert.equal(isEndedCampaignPage({...ended, ...change}), false);
+  }
+  assert.equal(isEndedCampaignPage(null), false);
+});
 
 test('classifies page families from telecom urls', () => {
   assert.equal(pageFamilyFromUrl('https://wapbj.189.cn/echnwap/preDepositCfq_list'), 'echnwap');
@@ -41,14 +53,14 @@ test('rejects Cfq post-login divert as wrong activity', () => {
 
 test('summarizes entry fingerprint without raw secrets', () => {
   const fingerprint = summarizeEntryFingerprint(
-    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239231179147085&version=V1&channelId=dx531&wxopenid=abcdef1234567890deadbeef',
+    'https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=10000000000000001&version=V1&channelId=dx531&wxopenid=abcdef1234567890deadbeef',
   );
   assert.equal(fingerprint.pageFamily, 'wap2017');
   assert.equal(fingerprint.channelId, 'dx531');
   assert.equal(fingerprint.version, 'V1');
   assert.equal(fingerprint.hasWxopenid, true);
   assert.equal(fingerprint.hasCampaignId, true);
-  assert.equal(fingerprint.campaignIdHint, '1623***7085');
+  assert.equal(fingerprint.campaignIdHint, '1000***0001');
   assert.deepEqual(fingerprint.queryKeys, ['campaignId', 'channelId', 'version', 'wxopenid']);
   assert.doesNotMatch(JSON.stringify(fingerprint), /abcdef1234567890deadbeef/);
 });
