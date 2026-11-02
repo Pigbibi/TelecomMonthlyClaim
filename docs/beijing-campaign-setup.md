@@ -2,7 +2,19 @@
 
 English | [简体中文](beijing-campaign-setup.zh-CN.md)
 
-This guide helps open-source users map the public **Beijing Telecom**
+## Campaign ended
+
+The previously configured Beijing campaign has ended. The owner confirmed that
+automatic claims are stopped; the old entry URL should not be expected to
+produce a successful claim. Keep the claim workflows disabled. Resuming requires
+a new eligible campaign URL and explicit owner re-enablement of the workflows.
+
+[PR #117](https://github.com/Pigbibi/TelecomMonthlyClaim/pull/117) added
+`telecom-campaign-ended`, which stops before login or submission when the page
+reports an ended activity. See the [repository status](../README.md#campaign-ended--automatic-claims-stopped).
+
+The rest of this guide is historical configuration reference. It described how
+to map the public **Beijing Telecom**
 “网龄 / 成长” style monthly benefit (5GB data **or** 200 minutes voice) onto
 this repository’s configuration.
 
@@ -11,7 +23,7 @@ WeChat keywords, product names, and eligibility rules change without notice.
 Always confirm what **your** account sees on the live page before enabling
 final submit.
 
-## What the public campaign usually is
+## Historical public campaign descriptions
 
 Community write-ups commonly describe a Beijing-only monthly perk for eligible
 internet-card / 无忧卡 style lines (examples: 星卡、京粉卡、米粉卡、无忧卡):
@@ -34,10 +46,10 @@ Reference examples (third-party roundups; links rot):
 - [爱吾线报 · 网龄与成长权益入口汇总](https://25xianbao.com/archives/18286)
 - [线报酷 · App/客服分享入口讨论](https://new.ixbk.net/douban-maizu/6194874.html)
 
-## What this repository automates
+## Former automation path
 
-Stock automation targets the **成长礼 / HighPic** WAP shell that cold CI has
-successfully used for package selection on `wap2017`:
+Stock automation targeted the **成长礼 / HighPic** WAP shell used for package
+selection on `wap2017`:
 
 | Stage | Expected page family |
 | --- | --- |
@@ -56,14 +68,14 @@ That `campaignId` appears repeatedly in community posts for **成长礼**. It is
 share link may add `channelId` and `wxopenid`; cold GitHub runners usually need
 those query keys present.
 
-### Campaigns this stock recipe does **not** claim
+### Campaigns outside the stock recipe
 
 Do not point `TELECOM_ENTRY_URL` at unrelated or alternate shells unless you
 intentionally change gates and product validation:
 
 | Public label (examples) | Typical host path | Stock recipe |
 | --- | --- | --- |
-| 成长礼 / HighPic monthly choose | `wap2017/.../preDepositHighPic_check.html` | Supported target |
+| 成长礼 / HighPic monthly choose | `wap2017/.../preDepositHighPic_check.html` | Former target; configured campaign ended |
 | 网龄礼包 login | `echnwap/preDepositHigh_login?...` | Not the stock entry gate |
 | Cfq data-only list | `echnwap/preDepositCfq_*` | Hard-fail (`wrong_activity`) |
 | 签到送流量 / 充值礼 / 见面礼 / 福袋 | other HighPic `campaignId`s | Different campaigns — do not reuse blindly |
@@ -89,6 +101,9 @@ TELECOM_EXPECTED_PLAN_ID=<exact plan id>
 ```
 
 ## Step-by-step: obtain your entry URL
+
+These steps apply only to a new eligible campaign. An entry URL does not
+authorize enabling workflows; the owner must explicitly re-enable them.
 
 1. Prefer an official path you control:
    - WeChat **北京电信** → reply the current keyword (community posts often cite `533`), **or**
