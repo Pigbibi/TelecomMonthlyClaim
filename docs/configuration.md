@@ -1,5 +1,17 @@
 # Configuration
 
+## Campaign ended
+
+The previously configured Beijing campaign has ended and automatic claims are
+stopped. Do not expect the old entry URL to produce successful claims. Keep the
+claim workflows disabled; resuming requires a new eligible campaign URL and
+explicit owner re-enablement. The settings below are historical reference.
+See the [repository status](../README.md#campaign-ended--automatic-claims-stopped).
+
+[PR #117](https://github.com/Pigbibi/TelecomMonthlyClaim/pull/117) added
+`telecom-campaign-ended`: an ended-activity page stops the runner before login
+or submission. Replacing a URL alone does not authorize restarting claims.
+
 Use GitHub Actions **secrets** for credentials and account-bound data. Use
 repository **variables** only for non-secret behavior.
 
@@ -21,7 +33,7 @@ defaults.
 | `connectivity_mode` | `auto` in monthly workflow | Select `auto`, `direct`, `http_proxy`, `ssh_tunnel`, or `proxy_pool` |
 
 The self-hosted diagnostic workflow defaults to `dry_run=true` and
-`force_run=true`. It is not part of the monthly schedule.
+`force_run=true`. Both it and the monthly workflow are manually disabled.
 
 Probe mode is the safest first check. Dry-run may still request and process SMS
 verification codes.
@@ -92,7 +104,10 @@ Notes:
 - Forks that always use one channel (for example `dx531`) should set
   `TELECOM_EXPECTED_CHANNEL_ID` as a repository variable — not in source.
 
-### Monthly operator checklist
+### Checks for a future campaign
+
+Apply this checklist only after a new eligible campaign is available and the
+owner explicitly re-enables the claim workflows.
 
 1. Confirm `TELECOM_ENTRY_URL` still matches the placeholder shape and required keys.
 2. Prefer a private-window check of the **same** URL before relying on a warm browser.
@@ -148,15 +163,18 @@ settings before adopting an explicit HTTP provider.
 
 A provider key alone does not enable vision. There is no implicit Gemini CLI
 or direct HTTP fallback. Coordinate checks, timeout, and refusal to submit on
-failure stay in this repository. This change does not enable a replacement
-service or change the monthly schedule.
+failure stay in this repository. Claim workflows remain disabled.
 
 Using an external visual service sends challenge image data to that provider.
 Review its data policy and do not assume it will improve every challenge.
 
 ## State behavior
 
-The monthly workflow restores and writes sanitized monthly state in private GCS; it does not push runtime state to public Git branches. Existing state on `main` is a migration fallback. State read errors stop claiming, and state persistence failures are reported separately from carrier claim failures.
+The disabled monthly workflow retains logic to restore and write sanitized
+monthly state in private GCS; it does not push runtime state to public Git
+branches. Existing state on `main` is a migration fallback. State read errors
+stop claiming; state persistence failures are reported separately from carrier
+claim failures. Storage configuration does not authorize re-enabling the workflow.
 
 | Status | Meaning | Schedule / Issue |
 | --- | --- | --- |
@@ -182,7 +200,7 @@ An incomplete or incorrect entry can redirect a cold browser session to
 (`campaignId` + `channelId` + `wxopenid`), cold CI reached `wap2017`
 `preDepositCfg_*` with `voice200`.
 
-Recovery order:
+For a future eligible campaign explicitly re-enabled by the owner, the diagnostic order is:
 
 1. Private-window check of the same entry. Data-only there means the cold
    catalog likely has no voice for that link.

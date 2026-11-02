@@ -1,5 +1,10 @@
 # SMS providers
 
+The configured Beijing campaign has ended and automatic claims are stopped.
+Keep the claim workflows disabled; resuming requires a new eligible campaign
+URL and explicit owner re-enablement. The provider setup below is historical
+reference. See the [repository status](../README.md#campaign-ended--automatic-claims-stopped).
+
 The workflow needs the login and confirmation SMS generated for the authorized
 phone number. It supports PushPlus and a generic HTTP inbox.
 

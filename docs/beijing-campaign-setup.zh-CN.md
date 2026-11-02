@@ -2,11 +2,17 @@
 
 [English](beijing-campaign-setup.md) | 简体中文
 
-帮助开源用户把公开的北京电信「网龄 / 成长」类月度权益（**5GB 流量或 200 分钟语音，二选一**）映射到本仓库的配置项。
+## 活动已结束
+
+此前配置的北京电信活动已结束，仓库所有者已确认停止自动领取。不要期待旧入口 URL 能成功领取，领取工作流应保持停用。恢复必须取得新的、账户有资格参与的活动 URL，并由仓库所有者明确重新启用工作流。
+
+[PR #117](https://github.com/Pigbibi/TelecomMonthlyClaim/pull/117) 增加了 `telecom-campaign-ended`，页面显示活动结束时，在登录和提交前停止。工作流状态见[仓库说明](../README.zh-CN.md#活动已结束自动领取已停止)。
+
+下文仅供历史配置参考，说明原北京电信「网龄 / 成长」类月度权益（**5GB 流量或 200 分钟语音，二选一**）如何映射到本仓库的配置项。
 
 **非官方文档。** 活动页、短链、公众号口令、产品名和资格规则都会变。最终以你账号在页面上看到的规则为准；未确认前不要开最终提交。
 
-## 公开活动通常长什么样
+## 公开活动的历史描述
 
 第三方线报常见描述（北京号、互联网卡 / 无忧卡一类）：
 
@@ -25,9 +31,9 @@
 - [爱吾线报 · 网龄与成长入口汇总](https://25xianbao.com/archives/18286)
 - [线报酷 · 入口讨论](https://new.ixbk.net/douban-maizu/6194874.html)
 
-## 本仓库实际自动化的是哪条路径
+## 原自动化路径
 
-默认 recipe 针对冷启动 CI 已跑通的 **成长礼 / HighPic** 壳：
+原默认配置针对 **成长礼 / HighPic** 页面：
 
 | 阶段 | 期望 |
 | --- | --- |
@@ -47,7 +53,7 @@ https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239
 
 | 公开称呼（示例） | 典型路径 | 默认 recipe |
 | --- | --- | --- |
-| 成长礼 / HighPic 月领 | `wap2017/.../preDepositHighPic_check.html` | 支持 |
+| 成长礼 / HighPic 月领 | `wap2017/.../preDepositHighPic_check.html` | 原目标；已配置活动已结束 |
 | 网龄礼包登录页 | `echnwap/preDepositHigh_login?...` | 不是默认入口门 |
 | Cfq 仅流量列表 | `echnwap/preDepositCfq_*` | 硬失败 |
 | 签到 / 充值礼 / 见面礼 / 福袋 | 其他 HighPic `campaignId` | 别的活动，勿Blind复用 |
@@ -64,6 +70,8 @@ https://wapbj.189.cn/wap2017/index/preDepositHighPic_check.html?campaignId=16239
 页上即使两个都有，也只会办理你配置的那一个。
 
 ## 如何拿到你自己的入口 URL
+
+以下步骤只适用于新的合资格活动。取得入口不代表可以启用工作流，仍须仓库所有者明确重新启用。
 
 1. 用你可控的官方路径：公众号回复当前口令（线报常写 `533`）、App 搜网龄礼/成长礼、或客服发来的 WAP 链。
 2. 打开后复制 **跳转完成** 的最终 URL（不要只留短链）。
