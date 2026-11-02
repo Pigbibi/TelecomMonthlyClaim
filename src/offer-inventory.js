@@ -273,7 +273,16 @@ function mergeOfferLabels(...lists) {
   return out.slice(0, 20);
 }
 
+function isEndedCampaignPage(state) {
+  return state?.hostname === 'wapbj.189.cn'
+    && state.readyState === 'complete'
+    && state.ready === false
+    && typeof state.bodySummary === 'string'
+    && /(?:该|本)活动已结束/.test(state.bodySummary);
+}
+
 module.exports = {
+  isEndedCampaignPage,
   pageFamilyFromUrl,
   expectedActivityForTarget,
   classifyActivityRoute,

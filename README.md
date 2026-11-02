@@ -60,6 +60,12 @@ Run metadata is also stored on the `logs` branch. State persistence failures and
 
 Success evidence must pass sender and timestamp checks. Workflow status alone does not prove that a benefit reached the account.
 
+`telecom-campaign-ended` means the configured carrier page explicitly says the
+activity has ended. The run stops before login or submission. Obtain a current
+eligible offer from the carrier and replace `TELECOM_ENTRY_URL` through the
+protected Secret settings, then probe and check the package before claiming.
+Retrying the expired link cannot restore the offer.
+
 If the carrier rejects a verification request or returns an empty response, inspect the recorded failure and allow for carrier cooldowns. Repeated retries can add risk. Never publish phone numbers, SMS bodies, OTPs, session data or full campaign links in a bug report.
 
 ## Documentation

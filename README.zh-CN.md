@@ -62,6 +62,8 @@ npm test
 
 运营商拒绝验证请求或返回空响应时，先检查失败记录并考虑冷却时间，不要连续重试。问题报告中不要包含手机号、短信正文、验证码、会话信息或完整活动链接。
 
+`telecom-campaign-ended` 表示运营商页面明确显示活动已结束，流程在登录和提交前停止。请从运营商取得当前账户可用的活动，通过受保护的 Secret 设置更新 `TELECOM_ENTRY_URL`，再探测并核对套餐后办理。重跑已过期链接不能恢复活动。
+
 ## 文档
 
 - [中文活动配置指南](docs/beijing-campaign-setup.zh-CN.md) · [English setup](docs/beijing-campaign-setup.md)

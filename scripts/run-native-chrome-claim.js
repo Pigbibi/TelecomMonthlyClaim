@@ -26,6 +26,7 @@ const {
   extractOfferLabelsFromMeta,
   mergeOfferLabels,
   classifyActivityRoute,
+  isEndedCampaignPage,
 } = require('../src/offer-inventory');
 
 const root = path.resolve(__dirname, '..');
@@ -544,6 +545,9 @@ async function navigateToEntryPage(client) {
   const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
     lastState = await readNativePhoneState(client, { clickSmsTab: true });
+    if (isEndedCampaignPage(lastState)) {
+      throw new Error('telecom-campaign-ended: update TELECOM_ENTRY_URL from the carrier; no claim was submitted');
+    }
     if (lastState?.hostname === 'wapbj.189.cn' && lastState?.ready) {
       const landed = classifyActivityRoute({
         url: `https://${lastState.hostname}${lastState.path || ''}`,
