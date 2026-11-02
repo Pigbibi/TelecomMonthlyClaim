@@ -1,5 +1,10 @@
 # Connectivity
 
+The configured Beijing campaign has ended and automatic claims are stopped.
+Keep the claim workflows disabled; resuming requires a new eligible campaign
+URL and explicit owner re-enablement. The network setup and probe instructions
+below are historical reference. See the [repository status](../README.md#campaign-ended--automatic-claims-stopped).
+
 The runner must reach the carrier campaign and the selected SMS provider. This
 repository accepts explicit network entry points but does not deploy a VPN,
 router tunnel, proxy server, or private network.

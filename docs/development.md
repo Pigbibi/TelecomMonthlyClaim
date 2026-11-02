@@ -1,5 +1,10 @@
 # Development and troubleshooting
 
+The previously configured Beijing campaign has ended and automatic claims are
+stopped. Keep the claim workflows disabled. The old entry URL cannot be relied
+on for successful claims. Resuming requires a new eligible campaign URL and
+explicit owner re-enablement. See the [repository status](../README.md#campaign-ended--automatic-claims-stopped).
+
 ## Local checks
 
 Use Node.js 20 or newer:
@@ -27,6 +32,9 @@ load the file with your preferred local shell tooling.
 
 ## Chrome CDP dry-run
 
+This is historical reference for a future eligible campaign authorized by the
+owner. Do not run it against the ended campaign.
+
 The helper starts a real Chrome process and stops before final submission by
 default:
 
@@ -46,6 +54,13 @@ set `TELECOM_VISION_FALLBACK=true`. Use workflow probe mode when the goal is
 only to verify page loading without submitting the login challenge.
 
 ## Common failures
+
+### Campaign ended (`telecom-campaign-ended`)
+
+[PR #117](https://github.com/Pigbibi/TelecomMonthlyClaim/pull/117) added an early
+stop when the carrier page explicitly reports an ended activity. It stops before
+login or submission. Retrying the old URL will not restore the offer; keep
+claims stopped until the owner explicitly re-enables them for a new campaign.
 
 ### Entry URL shape / activity rejected
 
