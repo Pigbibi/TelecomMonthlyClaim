@@ -11,73 +11,73 @@ const plan = workflow.split('      - name: Decide whether claim is needed')[1]
   .split('        run: |\n')[1].split('\n      - ')[0]
   .split('\n').map(line => line.replace(/^          /, '')).join('\n');
 const month = require('../src/retry-date').stateMonth();
-const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 
 function fixture(t) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-state-workflow-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'telecom-private-state-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const remote = path.join(directory, 'remote.git');
   const checkout = path.join(directory, 'checkout');
-  fs.mkdirSync(checkout);
-  const git = (...args) => execFileSync(realGit, args, { cwd: checkout, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init', '--bare', remote);
-  git('init', '-b', 'main');
-  git('config', 'user.name', 'Synthetic Test');
-  git('config', 'user.email', 'synthetic@example.test');
-  git('remote', 'add', 'origin', remote);
-  fs.writeFileSync(path.join(checkout, 'README.md'), 'Synthetic state test\n');
-  git('add', 'README.md');
-  git('commit', '-m', 'Synthetic main');
-  git('checkout', '--orphan', 'logs');
-  git('commit', '-m', 'Synthetic logs');
-  git('push', 'origin', 'logs');
-  git('checkout', 'main');
   const bin = path.join(directory, 'bin');
+  fs.mkdirSync(checkout);
   fs.mkdirSync(bin);
-  // Only the fixture writer's remote URL is redirected; no GitHub calls occur.
-  fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env bash
-if [ "$1" = remote ] && [ "$2" = add ] && [ "$3" = origin ]; then
-  exec "$TEST_REAL_GIT" remote add origin "$TEST_LOCAL_REMOTE"
-fi
-if [ "$1" = push ] && [ "\${TEST_REJECT_PUSH:-}" = true ]; then
-  echo 'Synthetic state persistence rejection' >&2
-  exit 1
-fi
-exec "$TEST_REAL_GIT" "$@"
+  const ledger = path.join(directory, 'ledger.json');
+  fs.writeFileSync(ledger, JSON.stringify({ months: {} }));
+  fs.writeFileSync(path.join(bin, 'gcloud'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] !== 'storage') process.exit(2);
+if (args[1] === 'objects') process.stdout.write('1');
+else if (args[1] === 'cat') process.stdout.write(fs.readFileSync(process.env.TEST_LEDGER));
+else if (args[1] === 'cp') {
+  if (process.env.TEST_REJECT_WRITE === 'true' || !args.includes('--if-generation-match=1')) process.exit(1);
+  fs.copyFileSync(args[2], process.env.TEST_LEDGER);
+} else process.exit(2);
 `, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REAL_GIT: realGit,
-    TEST_LOCAL_REMOTE: remote, GITHUB_TOKEN: 'synthetic-only', GITHUB_REPOSITORY: 'synthetic/fixture',
-    GITHUB_RUN_ID: '123', GITHUB_WORKFLOW: 'Synthetic workflow', TELECOM_TARGET_PACKAGE: 'voice200',
-    RUN_LOG_STATE_FILE: `state/${month}.json`, RUN_LOG_BRANCH: 'logs', FORCE_RUN: 'false',
-    GITHUB_OUTPUT: path.join(directory, 'output') };
-  return { git, env, checkout, directory };
+  return { checkout, ledger, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
+    TEST_LEDGER: ledger, PRIVATE_STATE_BUCKET: 'synthetic-private-state',
+    TELECOM_TARGET_PACKAGE: 'voice200', RUN_LOG_STATE_FILE: `state/${month}.json`,
+    FORCE_RUN: 'false', GITHUB_OUTPUT: path.join(directory, 'output') } };
 }
 
-test('persists state on logs and the next workflow skips claiming without changing main', t => {
-  const { git, env, checkout } = fixture(t);
-  const mainHead = git('rev-parse', 'main');
+test('persists private state and the next workflow skips claiming', t => {
+  const { env, checkout, ledger } = fixture(t);
   fs.mkdirSync(path.join(checkout, 'state'));
-  fs.writeFileSync(path.join(checkout, `state/${month}.json`), JSON.stringify({
-    status: 'success', month, targetPackage: 'voice200', successEvidence: 'sms_receipt', error: 'synthetic-private' }));
+  const stateFile = path.join(checkout, `state/${month}.json`);
+  fs.writeFileSync(stateFile, JSON.stringify({ status: 'success', month, targetPackage: 'voice200',
+    successEvidence: 'sms_receipt', error: 'synthetic-private' }));
   execFileSync('bash', [path.join(root, 'scripts/write-run-log-branch.sh'), '--state-only'],
     { cwd: checkout, env, stdio: ['ignore', 'pipe', 'pipe'] });
-  assert.equal(git('rev-parse', 'main'), mainHead);
-  fs.rmSync(path.join(checkout, 'state'), { recursive: true });
-  execFileSync(process.execPath, [path.join(root, 'scripts/sync-claim-state.js'), 'restore'], { cwd: checkout, env });
+  fs.unlinkSync(stateFile);
+  execFileSync(process.execPath, [path.join(root, 'scripts/sync-claim-state.js'), 'restore'],
+    { cwd: checkout, env });
   execFileSync('bash', ['-e', '-c', plan], { cwd: checkout, env });
   assert.match(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), /should_run=false/);
-  const restored = fs.readFileSync(path.join(checkout, `state/${month}.json`), 'utf8');
-  assert.doesNotMatch(restored, /synthetic-private/);
-  assert.equal(JSON.parse(restored).status, 'success');
+  assert.equal(JSON.parse(fs.readFileSync(stateFile)).status, 'success');
+  assert.doesNotMatch(fs.readFileSync(ledger, 'utf8'), /synthetic-private/);
+  // A later failure cannot replace a prior success.
+  fs.writeFileSync(stateFile, JSON.stringify({ status: 'failed', month, targetPackage: 'voice200' }));
+  execFileSync('bash', [path.join(root, 'scripts/write-run-log-branch.sh'), '--state-only'],
+    { cwd: checkout, env });
+  assert.equal(JSON.parse(fs.readFileSync(ledger)).months[month].status, 'success');
 });
 
-test('state write rejection remains a failing step and keeps local success for diagnosis', t => {
+test('private state write rejection fails and keeps local success', t => {
   const { env, checkout } = fixture(t);
   fs.mkdirSync(path.join(checkout, 'state'));
-  fs.writeFileSync(path.join(checkout, `state/${month}.json`), JSON.stringify({ status: 'success', month, targetPackage: 'voice200' }));
+  const file = path.join(checkout, `state/${month}.json`);
+  fs.writeFileSync(file, JSON.stringify({ status: 'success', month, targetPackage: 'voice200' }));
   const result = spawnSync('bash', [path.join(root, 'scripts/write-run-log-branch.sh'), '--state-only'],
-    { cwd: checkout, env: { ...env, TEST_REJECT_PUSH: 'true' }, encoding: 'utf8' });
+    { cwd: checkout, env: { ...env, TEST_REJECT_WRITE: 'true' }, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Synthetic state persistence rejection/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(checkout, `state/${month}.json`))).status, 'success');
+  assert.doesNotMatch(result.stderr, /gs:\/\/|synthetic-private-state/);
+  assert.equal(JSON.parse(fs.readFileSync(file)).status, 'success');
+});
+
+test('missing private storage stops restore before the claim decision', t => {
+  const { env, checkout, ledger } = fixture(t);
+  fs.unlinkSync(ledger);
+  const result = spawnSync(process.execPath, [path.join(root, 'scripts/sync-claim-state.js'), 'restore'],
+    { cwd: checkout, env, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /claim stopped/);
+  assert.equal(fs.existsSync(env.GITHUB_OUTPUT), false);
 });

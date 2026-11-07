@@ -171,10 +171,10 @@ Review its data policy and do not assume it will improve every challenge.
 ## State behavior
 
 The disabled monthly workflow retains logic to restore and write sanitized
-`state/YYYY-MM.json` on the `logs` branch. It does not push runtime state to
-protected `main`. Existing state on `main` is a migration fallback. State read
-errors stop claiming; state persistence failures are reported separately from
-carrier claim failures.
+monthly state in private GCS; it does not push runtime state to public Git
+branches. Existing state on `main` is a migration fallback. State read errors
+stop claiming; state persistence failures are reported separately from carrier
+claim failures. Storage configuration does not authorize re-enabling the workflow.
 
 | Status | Meaning | Schedule / Issue |
 | --- | --- | --- |
@@ -216,3 +216,18 @@ Do not treat a warm local session as proof that CI will see the same packages.
 - [Connectivity](connectivity.md)
 - [SMS providers](sms-providers.md)
 - [Development and troubleshooting](development.md)
+
+Private state configuration: set `PRIVATE_STATE_BUCKET`,
+`GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` repository variables to
+an existing private bucket and identity. This PR creates none of them and changes
+no cloud permissions. The object is `gs://<bucket>/TelecomMonthlyClaim/state.json`,
+with envelope `{"months":{}}` before the first verified month. Import existing
+confirmed successes before enabling the workflow; missing or unreadable storage
+stops claims instead of permitting repeats.
+
+Keep this object beyond 30 days to
+preserve confirmed monthly successes. Persistence preserves an existing success
+and uses generation preconditions to reject a concurrent write.
+
+Public summaries
+contain only the last success time. Historical public commits are unchanged.
