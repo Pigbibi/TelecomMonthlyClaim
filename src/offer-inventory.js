@@ -2,6 +2,28 @@ function compactText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
+// Provider URL vocabulary. `packageList` matches both the Cfg and the Cfq
+// shelf; only `cfg` is the shelf this campaign may act on, so the two stay
+// separate patterns even though they look alike.
+const CARRIER_PATHS = {
+  entry: /preDepositHighPic_check\.html/i,
+  cfg: /preDepositCfg_/i,
+  cfq: /preDepositCfq_/i,
+  packageList: /preDepositC\w*_list/i,
+};
+
+function isCfgPackageShell(url) {
+  return CARRIER_PATHS.cfg.test(String(url || ''));
+}
+
+function isCfqDivertUrl(url) {
+  return CARRIER_PATHS.cfq.test(String(url || ''));
+}
+
+function isPackageListUrl(url) {
+  return CARRIER_PATHS.packageList.test(String(url || ''));
+}
+
 function pageFamilyFromUrl(url) {
   const value = String(url || '');
   if (/\/echnwap\//i.test(value)) return 'echnwap';
@@ -17,14 +39,12 @@ function pageFamilyFromUrl(url) {
  * Query-shape pins (required params / exact channelId) stay out of this
  * recipe — forks configure them via TELECOM_ENTRY_* env (see assertEntrySecretShape).
  */
-function expectedActivityForTarget(targetPackage = 'voice200') {
-  void targetPackage;
+function expectedActivity() {
   return {
     id: 'wap2017_cfg',
     pageFamily: 'wap2017',
-    entryPathPattern: /preDepositHighPic_check\.html/i,
-    postLoginPathPattern: /preDepositCfg_/i,
-    forbiddenPostLoginPathPattern: /preDepositCfq_/i,
+    entryPathPattern: CARRIER_PATHS.entry,
+    forbiddenPostLoginPathPattern: CARRIER_PATHS.cfq,
   };
 }
 
@@ -96,7 +116,6 @@ function assertEntrySecretShape(fingerprint = {}, policy = resolveEntrySecretPol
  */
 function assertConfiguredEntryUrl(url, options = {}) {
   const env = options.env || process.env;
-  const targetPackage = options.targetPackage || env.TELECOM_TARGET_PACKAGE || 'voice200';
   const policy = options.policy || resolveEntrySecretPolicy(env);
   const fingerprint = summarizeEntryFingerprint(url);
   const secret = assertEntrySecretShape(fingerprint, policy);
@@ -113,7 +132,6 @@ function assertConfiguredEntryUrl(url, options = {}) {
   const activity = classifyActivityRoute({
     url,
     phase: 'entry',
-    targetPackage,
   });
   if (!activity.ok) {
     return {
@@ -147,7 +165,7 @@ function safePathname(url) {
 
 function classifyActivityRoute(input = {}) {
   const phase = input.phase === 'entry' ? 'entry' : 'post_login';
-  const expected = input.expected || expectedActivityForTarget(input.targetPackage);
+  const expected = input.expected || expectedActivity();
   const url = String(input.url || '');
   const path = safePathname(url);
   const pageFamily = pageFamilyFromUrl(url);
@@ -284,7 +302,10 @@ function isEndedCampaignPage(state) {
 module.exports = {
   isEndedCampaignPage,
   pageFamilyFromUrl,
-  expectedActivityForTarget,
+  isCfgPackageShell,
+  isCfqDivertUrl,
+  isPackageListUrl,
+  expectedActivity,
   classifyActivityRoute,
   summarizeEntryFingerprint,
   resolveEntrySecretPolicy,
