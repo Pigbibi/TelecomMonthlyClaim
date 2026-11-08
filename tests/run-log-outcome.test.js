@@ -3,7 +3,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { readStateStatus, resolveClaimOutcome } = require('../scripts/resolve-run-log-outcome');
+const { resolveClaimOutcome } = require('../scripts/resolve-run-log-outcome');
+const { readClaimStateStatus } = require('../src/claim-state');
 
 test('uses state status for attempted claim even when workflow step is green', () => {
   assert.equal(resolveClaimOutcome({
@@ -71,5 +72,5 @@ test('reads status from monthly state file', () => {
   const file = path.join(dir, '2026-07.json');
   fs.writeFileSync(file, JSON.stringify({ status: 'failed' }));
 
-  assert.equal(readStateStatus(file), 'failed');
+  assert.equal(readClaimStateStatus(file), 'failed');
 });

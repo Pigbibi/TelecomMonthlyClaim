@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { stateMonth } = require('../src/retry-date');
+const { claimStateFile } = require('../src/claim-state');
 
 function sanitizeState(state, { month, targetPackage }) {
   if (!state || state.month !== month || state.targetPackage !== targetPackage
@@ -32,7 +33,7 @@ function parseState(text, options) {
 
 function restoreState({ month = stateMonth(), targetPackage = process.env.TELECOM_TARGET_PACKAGE || 'voice200',
   directory = 'state', runGit = args => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
-  const relativeFile = `state/${month}.json`;
+  const relativeFile = claimStateFile(month);
   let remoteText = null;
   try {
     runGit(['fetch', '--no-tags', '--depth=1', 'origin', 'refs/heads/logs']);
@@ -43,7 +44,7 @@ function restoreState({ month = stateMonth(), targetPackage = process.env.TELECO
     throw new Error('Unable to read monthly state from logs; claim stopped.');
   }
   const options = { month, targetPackage };
-  const file = path.join(directory, `${month}.json`);
+  const file = claimStateFile(month, directory);
   const remote = remoteText !== null ? parseState(remoteText, options) : null;
   const legacy = fs.existsSync(file) ? parseState(fs.readFileSync(file, 'utf8'), options) : null;
   // A confirmed success must survive a stale or failed repeat attempt.
