@@ -108,5 +108,4 @@ function classifyTelecomPageObservation(observation = {}) {
 
 module.exports = {
   classifyTelecomPageObservation,
-  normalizeText,
 };

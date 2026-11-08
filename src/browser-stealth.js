@@ -51,26 +51,6 @@ function browserProfileContextOptions(profile = 'wechat') {
   return mobileContextOptions('');
 }
 
-async function installAntiAutomationScripts(target) {
-  if (!target?.addInitScript) return;
-  await target.addInitScript(() => {
-    try {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    } catch {}
-    try {
-      window.chrome = window.chrome || { runtime: {} };
-    } catch {}
-  });
-}
-
-async function applyBrowserProfileEmulation(page, profile = 'wechat') {
-  if (!page?.setViewportSize) return;
-  const size = profile === 'desktop'
-    ? { width: 1280, height: 900 }
-    : { width: 393, height: 873 };
-  await page.setViewportSize(size).catch(() => {});
-}
-
 function resolveCdpProfileMode(mode = 'auto', { minimalLogin = false } = {}) {
   const normalized = String(mode || 'auto').toLowerCase();
   if (normalized === 'native' || normalized === 'off' || normalized === 'none') return 'native';
@@ -191,11 +171,9 @@ function mobileContextOptions(browserVersion) {
 
 module.exports = {
   applyCdpBrowserProfile,
-  applyBrowserProfileEmulation,
   browserProfileContextOptions,
   chromeLaunchArgs,
   getStealthChromium,
-  installAntiAutomationScripts,
   mobileContextOptions,
   mobileUserAgent,
   playwrightLaunchExtras,
