@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { chooseSliderDistanceCandidate } = require('../scripts/telecom-monthly-claim');
+const { chooseSliderDistanceCandidate } = require('../src/slider-decision');
 
 const inRangeNatural = d => d != null && d >= 45 && d <= 240;
 
