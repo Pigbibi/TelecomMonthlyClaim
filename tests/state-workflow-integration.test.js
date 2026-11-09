@@ -6,10 +6,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname, '..');
-const workflow = fs.readFileSync(path.join(root, '.github/workflows/monthly-claim.yml'), 'utf8');
-const plan = workflow.split('      - name: Decide whether claim is needed')[1]
-  .split('        run: |\n')[1].split('\n      - ')[0]
-  .split('\n').map(line => line.replace(/^          /, '')).join('\n');
+const planScript = path.join(root, 'scripts/plan-claim.js');
+const { decideClaimPlan } = require('../scripts/plan-claim');
 const month = require('../src/retry-date').stateMonth();
 
 function fixture(t) {
@@ -46,10 +44,9 @@ test('persists private state and the next workflow skips claiming', t => {
     successEvidence: 'sms_receipt', error: 'synthetic-private' }));
   execFileSync('bash', [path.join(root, 'scripts/write-run-log-branch.sh'), '--state-only'],
     { cwd: checkout, env, stdio: ['ignore', 'pipe', 'pipe'] });
-  fs.unlinkSync(stateFile);
-  execFileSync(process.execPath, [path.join(root, 'scripts/sync-claim-state.js'), 'restore'],
-    { cwd: checkout, env });
-  execFileSync('bash', ['-e', '-c', plan], { cwd: checkout, env });
+  fs.rmSync(path.join(checkout, 'state'), { recursive: true });
+  execFileSync(process.execPath, [path.join(root, 'scripts/sync-claim-state.js'), 'restore'], { cwd: checkout, env });
+  execFileSync(process.execPath, [planScript], { cwd: checkout, env });
   assert.match(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), /should_run=false/);
   assert.equal(JSON.parse(fs.readFileSync(stateFile)).status, 'success');
   assert.doesNotMatch(fs.readFileSync(ledger, 'utf8'), /synthetic-private/);
@@ -58,6 +55,13 @@ test('persists private state and the next workflow skips claiming', t => {
   execFileSync('bash', [path.join(root, 'scripts/write-run-log-branch.sh'), '--state-only'],
     { cwd: checkout, env });
   assert.equal(JSON.parse(fs.readFileSync(ledger)).months[month].status, 'success');
+});
+
+test('force run overrides a recorded success in the plan step', () => {
+  const stateFile = `state/${month}.json`;
+  assert.equal(decideClaimPlan({ forceRun: false, stateStatus: 'success', stateFile }).shouldRun, false);
+  assert.equal(decideClaimPlan({ forceRun: true, stateStatus: 'success', stateFile }).shouldRun, true);
+  assert.equal(decideClaimPlan({ forceRun: false, stateStatus: '', stateFile }).shouldRun, true);
 });
 
 test('private state write rejection fails and keeps local success', t => {

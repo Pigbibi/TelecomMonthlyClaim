@@ -552,7 +552,6 @@ async function navigateToEntryPage(client) {
       const landed = classifyActivityRoute({
         url: `https://${lastState.hostname}${lastState.path || ''}`,
         phase: 'entry',
-        targetPackage: process.env.TELECOM_TARGET_PACKAGE || 'voice200',
       });
       if (!landed.ok) {
         throw new Error(`Native Chrome landed on wrong entry activity: ${landed.reason}`);

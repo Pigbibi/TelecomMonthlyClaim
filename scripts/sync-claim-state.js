@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { stateMonth } = require('../src/retry-date');
+const { claimStateFile } = require('../src/claim-state');
 
 function sanitizeState(state, { month, targetPackage }) {
   if (!state || state.month !== month || state.targetPackage !== targetPackage
@@ -64,7 +65,7 @@ function restoreState({ month = stateMonth(), targetPackage = process.env.TELECO
   const ledger = readLedger(runGcloud);
   const remoteText = Object.hasOwn(ledger.months, month) ? JSON.stringify(ledger.months[month]) : null;
   const options = { month, targetPackage };
-  const file = path.join(directory, `${month}.json`);
+  const file = claimStateFile(month, directory);
   const remote = remoteText !== null ? parseState(remoteText, options) : null;
   const legacy = fs.existsSync(file) ? parseState(fs.readFileSync(file, 'utf8'), options) : null;
   // A confirmed success must survive a stale or failed repeat attempt.

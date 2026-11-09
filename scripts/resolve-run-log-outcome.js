@@ -1,15 +1,6 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
-
-function readStateStatus(stateFile) {
-  if (!stateFile || !fs.existsSync(stateFile)) return '';
-  try {
-    const status = JSON.parse(fs.readFileSync(stateFile, 'utf8')).status;
-    return typeof status === 'string' ? status : '';
-  } catch {
-    return '';
-  }
-}
+const { readClaimStateStatus } = require('../src/claim-state');
 
 function resolveClaimOutcome({ shouldRun, stepOutcome, stateStatus, dryRun = false, probeOnly = false }) {
   if (probeOnly && stepOutcome === 'success') return 'probe';
@@ -31,7 +22,7 @@ function main() {
   const outcome = resolveClaimOutcome({
     shouldRun: process.env.SHOULD_RUN === 'true',
     stepOutcome: process.env.STEP_OUTCOME || 'skipped',
-    stateStatus: readStateStatus(process.env.STATE_FILE || ''),
+    stateStatus: readClaimStateStatus(process.env.STATE_FILE || ''),
     dryRun: process.env.DRY_RUN === 'true',
     probeOnly: process.env.PROBE_ONLY === 'true',
   });
@@ -42,4 +33,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { readStateStatus, resolveClaimOutcome };
+module.exports = { resolveClaimOutcome };

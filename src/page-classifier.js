@@ -1,3 +1,5 @@
+const { isPackageListUrl } = require('./offer-inventory');
+
 function normalizeText(value, limit = 4000) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
@@ -63,7 +65,7 @@ function classifyTelecomPageObservation(observation = {}) {
     };
   }
 
-  if (/preDepositC\w*_list/i.test(url) || observation.hasConductBtn || /请选择档位|去办理/.test(text)) {
+  if (isPackageListUrl(url) || observation.hasConductBtn || /请选择档位|去办理/.test(text)) {
     return {
       state: 'package_list',
       confidence: 0.95,
@@ -106,5 +108,4 @@ function classifyTelecomPageObservation(observation = {}) {
 
 module.exports = {
   classifyTelecomPageObservation,
-  normalizeText,
 };

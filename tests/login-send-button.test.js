@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const {
   LOGIN_PHONE_SELECTORS,
   clickLoginSmsButton,
-  detectLoginFormState,
+  detectClaimPageState,
   ensureSmsLoginForm,
   fillInputField,
   findReusableCdpEntryPage,
@@ -123,7 +123,7 @@ test('phone selectors include Vant field fallback for minimal login page', () =>
   assert.equal(LOGIN_PHONE_SELECTORS.includes('input.van-field__control'), true);
 });
 
-test('detectLoginFormState uses broad selector lists for minimal login readiness', async () => {
+test('detectClaimPageState uses broad selector lists for minimal login readiness', async () => {
   let payload = null;
   const page = {
     evaluate: async (_fn, args) => {
@@ -143,7 +143,7 @@ test('detectLoginFormState uses broad selector lists for minimal login readiness
     },
   };
 
-  const state = await detectLoginFormState(page);
+  const state = await detectClaimPageState(page);
 
   assert.equal(payload.phoneSelectors.includes('input.van-field__control'), true);
   assert.equal(payload.codeSelectors.includes('input.checknum-input'), true);
