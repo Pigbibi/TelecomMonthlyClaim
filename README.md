@@ -82,8 +82,8 @@ Start with a probe. Confirm the phone, product and plan ID before allowing a rea
 ## Former schedule, state and troubleshooting
 
 The disabled monthly workflow retains its former schedule of 08:00 Asia/Shanghai
-on days 1–3; it no longer runs claims. Runs were serialized, with monthly state
-stored in `state/YYYY-MM.json` on the `logs` branch and restored before claiming.
+on days 1–3; it no longer runs claims. Its retained state implementation restores
+monthly state from private GCS before any separately authorized future claim.
 
 Successful state prevents an ordinary duplicate run. Legacy success state on `main` is retained for migration. State read errors stop the claim; `force_run=true` bypasses the success skip and should be used deliberately.
 
