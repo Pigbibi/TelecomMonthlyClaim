@@ -2,7 +2,8 @@ const {
   mergeOfferLabels,
   pageFamilyFromUrl,
   classifyActivityRoute,
-  expectedActivityForTarget,
+  expectedActivity,
+  isCfgPackageShell,
 } = require('./offer-inventory');
 
 function compactText(text) {
@@ -38,14 +39,12 @@ function classifyPackageGate(input = {}) {
   const dialogText = String(input.dialogText || '');
   const packageLabels = mergeOfferLabels(input.packageLabels, input.metaOffers);
   const productName = String(input.productName || '');
-  const targetPackage = String(input.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200');
-  const expected = input.expectedActivity || expectedActivityForTarget(targetPackage);
+  const expected = input.expectedActivity || expectedActivity();
   const combined = `${dialogText}\n${bodyText}\n${packageLabels.join('\n')}`;
   const activity = classifyActivityRoute({
     url,
     phase: 'post_login',
     expected,
-    targetPackage,
   });
   if (!activity.ok) {
     return {
@@ -59,7 +58,7 @@ function classifyPackageGate(input = {}) {
   if (/(?:已(?:经|成功)?办理|已经办理|重复办理|无需重复(?:办理|领取)|本月已(?:办理|领取)|已领取)/.test(compactText(combined))) {
     return { ...input, packageLabels, state: 'already_claimed' };
   }
-  const productReady = /preDepositCfg_/i.test(url)
+  const productReady = isCfgPackageShell(url)
     && productName
     && textContainsProduct(combined, productName);
   if (productReady) return { ...input, packageLabels, state: 'ready' };
@@ -69,7 +68,7 @@ function classifyPackageGate(input = {}) {
       && !/^(提交订单|确认|确定|取消|加载中|温馨提示|去办理)$/.test(label)
       && !/验证码已下发|请注意查收/.test(label));
   // Soft-unavailable only on the configured Cfg activity shell, never on Cfq divert.
-  if (/preDepositCfg_/i.test(url) && offerLabels.length > 0 && productName && !textContainsProduct(combined, productName)) {
+  if (isCfgPackageShell(url) && offerLabels.length > 0 && productName && !textContainsProduct(combined, productName)) {
     return { ...input, packageLabels: offerLabels, state: 'unavailable' };
   }
   return { ...input, packageLabels, state: compactText(dialogText) ? 'blocked' : 'waiting' };

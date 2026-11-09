@@ -75,4 +75,4 @@ function parseTelecomSms(input, options = {}) {
   return null;
 }
 
-module.exports = { parseTelecomSms, normalizeText };
+module.exports = { parseTelecomSms };

@@ -17,18 +17,20 @@ const { observeTelecomPage } = require('../src/page-observer');
 const { planTelecomPageAction } = require('../src/page-planner');
 const { estimateSliderDistanceWithVision } = require('../src/slider-vision');
 const { evaluateSliderImageMatch } = require('../src/slider-local-match');
-const { readClaimStateStatus, shouldWriteFailureState } = require('../src/claim-state');
+const { chooseSliderDistanceCandidate } = require('../src/slider-decision');
+const { readClaimStateStatus, shouldWriteFailureState, claimStateFile } = require('../src/claim-state');
 const {
   assertConfiguredEntryUrl,
   classifyActivityRoute,
+  pageFamilyFromUrl,
+  isCfqDivertUrl,
 } = require('../src/offer-inventory');
-const { classifyPackageGate, summarizePackageGate } = require('../src/package-gate');
+const { classifyPackageGate, summarizePackageGate, productMatchAliases } = require('../src/package-gate');
 
-function assertLandedLoginEntryActivity(page, config) {
+function assertLandedLoginEntryActivity(page) {
   const activity = classifyActivityRoute({
     url: page.url(),
     phase: 'entry',
-    targetPackage: config.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200',
   });
   if (!activity.ok) {
     throw new Error(`Wrong activity page after entry navigation: ${activity.reason}`);
@@ -285,66 +287,6 @@ function sliderFailureHint(page) {
 
 function hasProxyTunnelFailures(page) {
   return /ERR_TUNNEL_CONNECTION_FAILED|ERR_PROXY_CONNECTION_FAILED/i.test(JSON.stringify(page.__telecomDiagnostics || []));
-}
-
-function chooseSliderDistanceCandidate({
-  localNaturalX = null,
-  localMethod = '',
-  localMatchStrong = false,
-  localHoleScore = 0,
-  localEdgeScore = 0,
-  localSceneGreen = null,
-  vision = null,
-  inRangeNatural = () => true,
-  forceVision = false,
-}) {
-  const localInRange = Number.isFinite(localNaturalX) && inRangeNatural(localNaturalX);
-  const visionInRange = !!(vision?.ok && Number.isFinite(vision?.naturalX) && inRangeNatural(vision.naturalX));
-  const diffPx = localInRange && visionInRange ? Math.abs(localNaturalX - vision.naturalX) : null;
-  const localSource = localMethod || 'local';
-  const localStrength = /cream-edge/i.test(localMethod)
-    ? Number(localHoleScore || 0)
-    : Number(localEdgeScore || localHoleScore || 0);
-  const localVeryStrong = /cream-edge/i.test(localMethod) && localStrength >= 220;
-
-  if (forceVision && visionInRange) {
-    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'forced-vision', diffPx };
-  }
-  if (!localInRange && visionInRange) {
-    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'local-out-of-range', diffPx };
-  }
-  if (!visionInRange) {
-    return { naturalX: localNaturalX, matchSource: localSource, reason: 'vision-unavailable', diffPx };
-  }
-  if (!localInRange) {
-    return { naturalX: localNaturalX, matchSource: localSource, reason: 'no-usable-candidate', diffPx };
-  }
-  if (!localMatchStrong) {
-    if (diffPx != null && diffPx <= 6) {
-      return {
-        naturalX: Math.round((localNaturalX + vision.naturalX) / 2),
-        matchSource: `${localSource}+vision`,
-        reason: 'weak-local-close-to-vision',
-        diffPx,
-      };
-    }
-    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'weak-local-overridden', diffPx };
-  }
-  if (diffPx != null && diffPx <= 6) {
-    return {
-      naturalX: Math.round((localNaturalX + vision.naturalX) / 2),
-      matchSource: `${localSource}+vision`,
-      reason: 'strong-local-confirmed-by-vision',
-      diffPx,
-    };
-  }
-  if (localVeryStrong) {
-    return { naturalX: localNaturalX, matchSource: localSource, reason: 'very-strong-local-kept', diffPx };
-  }
-  if (localSceneGreen != null && localSceneGreen < 18) {
-    return { naturalX: vision.naturalX, matchSource: 'vision', reason: 'low-green-scene-prefers-vision', diffPx };
-  }
-  return { naturalX: localNaturalX, matchSource: localSource, reason: 'strong-local-kept', diffPx };
 }
 
 function isBlankSliderChallengeRejection(info, page) {
@@ -944,10 +886,6 @@ async function waitForLoginEntry(page, timeoutMs = 25000) {
   return false;
 }
 
-async function detectLoginFormState(page) {
-  return detectClaimPageState(page);
-}
-
 async function detectClaimPageState(page) {
   return observeTelecomPage(page, {
     phoneSelectors: LOGIN_PHONE_SELECTORS,
@@ -1049,7 +987,7 @@ async function advanceLoginGoal(page, config, goal, options = {}) {
       }
       const phoneField = await waitForVisibleLocator(page, LOGIN_PHONE_SELECTORS, Math.max(Number(config?.actionDelayMs || 0) * 2, 12000));
       if (phoneField && goal === 'ensure_sms_login_form') {
-        return { observed: await detectLoginFormState(page), plan: { action: 'done', reason: 'sms login form became ready after tab switch' } };
+        return { observed: await detectClaimPageState(page), plan: { action: 'done', reason: 'sms login form became ready after tab switch' } };
       }
       continue;
     }
@@ -1068,11 +1006,9 @@ async function advanceLoginGoal(page, config, goal, options = {}) {
 }
 
 async function executeTargetPackageSelection(page, config) {
-  const { productMatchAliases } = require('../src/package-gate');
-  const { pageFamilyFromUrl } = require('../src/offer-inventory');
   const aliases = productMatchAliases(config.productName);
   const pageFamily = pageFamilyFromUrl(page.url());
-  if (pageFamily === 'echnwap' || /preDepositCfq_/i.test(page.url())) {
+  if (pageFamily === 'echnwap' || isCfqDivertUrl(page.url())) {
     throw new Error(`Wrong activity shell before package select: ${pageFamily} ${page.url()}`);
   }
   log('Selecting target package', { pageFamily, productName: config.productName, aliases });
@@ -1166,7 +1102,7 @@ async function ensureSmsLoginForm(page, config) {
     if (phoneField) return phoneField;
 
     const goalResult = await advanceLoginGoal(page, config, 'ensure_sms_login_form', { maxSteps: 3 });
-    const observed = goalResult.observed || await detectLoginFormState(page);
+    const observed = goalResult.observed || await detectClaimPageState(page);
     log('Observed login page state', {
       attempt,
       pageState: observed.pageState,
@@ -1662,10 +1598,10 @@ async function gotoLoginEntryPage(page, config, reason) {
     if (config.minimalLogin) {
       if (pageMatchesEntryUrl(page.url(), candidate.url)) {
         const entryReady = await waitForLoginEntry(page, 8000);
-        const form = await detectLoginFormState(page);
+        const form = await detectClaimPageState(page);
         if (entryReady) {
           await warmupTelecomBehavior(page, config);
-          assertLandedLoginEntryActivity(page, config);
+          assertLandedLoginEntryActivity(page);
           log('Reused validated login entry page', {
             reason,
             strategy: `${candidate.label}-reuse`,
@@ -1706,10 +1642,10 @@ async function gotoLoginEntryPage(page, config, reason) {
       // Extra settle after 412 avoids clicking send before the challenge session is ready.
       await sleep(status === 412 ? 12000 : 5000);
       const entryReady = await waitForLoginEntry(page, status === 412 ? 25000 : 15000);
-      const form = await detectLoginFormState(page);
+      const form = await detectClaimPageState(page);
       if (entryReady) {
         await warmupTelecomBehavior(page, config);
-        assertLandedLoginEntryActivity(page, config);
+        assertLandedLoginEntryActivity(page);
         log('Login entry ready', {
           reason,
           strategy: candidate.label,
@@ -1755,7 +1691,7 @@ async function gotoLoginEntryPage(page, config, reason) {
     }
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     if (await waitForLoginEntry(page, entryTimeoutMs)) {
-      assertLandedLoginEntryActivity(page, config);
+      assertLandedLoginEntryActivity(page);
       log('Login entry ready', { reason, strategy: candidate.label, status: response?.status?.() || null, url: page.url() });
       return;
     }
@@ -1764,7 +1700,7 @@ async function gotoLoginEntryPage(page, config, reason) {
     await waitForWafPageReady(page, 20000);
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     if (await waitForLoginEntry(page, 20000)) {
-      assertLandedLoginEntryActivity(page, config);
+      assertLandedLoginEntryActivity(page);
       log('Login entry ready after WAF wait', { reason, strategy: candidate.label, url: page.url() });
       return;
     }
@@ -2094,7 +2030,7 @@ function latestTelecomApiResponse(page, pattern) {
 
 async function readPageRenderState(page) {
   try {
-    return await detectLoginFormState(page);
+    return await detectClaimPageState(page);
   } catch {
     return { htmlLength: 0, bodyLength: 0, title: '', formReady: false, navigating: true };
   }
@@ -2220,7 +2156,6 @@ async function choosePackage(page, config) {
     url: page.url(),
     bodyText,
     productName: config.productName,
-    targetPackage: config.targetPackage || process.env.TELECOM_TARGET_PACKAGE || 'voice200',
   });
   if (gate.state === 'wrong_activity') {
     log('Wrong activity page before package select', summarizePackageGate(gate));
@@ -2710,22 +2645,21 @@ async function waitForSuccess(page, timeoutMs, config, receiptContext = null) {
 }
 
 function ensureStateDir() { fs.mkdirSync('state', { recursive: true }); }
-function stateFile(month = stateMonth()) { return path.join('state', `${month}.json`); }
 
 function alreadySucceeded(config) {
   if (config.forceRun) return false;
-  return readClaimStateStatus(stateFile()) === 'success';
+  return readClaimStateStatus(claimStateFile()) === 'success';
 }
 
 function writeState(status, details) {
   ensureStateDir();
   const payload = { status, month: stateMonth(), beijing: beijingParts(), ...details };
-  fs.writeFileSync(stateFile(), `${mask(JSON.stringify(payload, null, 2))}\n`);
+  fs.writeFileSync(claimStateFile(), `${mask(JSON.stringify(payload, null, 2))}\n`);
 }
 
 async function runClaim(config) {
   if (alreadySucceeded(config)) {
-    log(`State ${stateFile()} already records success; skip. Set FORCE_RUN=true to override.`);
+    log(`State ${claimStateFile()} already records success; skip. Set FORCE_RUN=true to override.`);
     return;
   }
   if (config.alreadyClaimed) {
@@ -2747,7 +2681,7 @@ async function runClaim(config) {
       log('Dry run observed configured package unavailable; state file was not updated.');
       return;
     }
-    if (!shouldWriteFailureState(readClaimStateStatus(stateFile()))) {
+    if (!shouldWriteFailureState(readClaimStateStatus(claimStateFile()))) {
       log('Configured package unavailable, but the existing monthly success state was preserved.');
       return;
     }
@@ -2839,7 +2773,7 @@ async function runClaimWithOptionalDirectFallback(config) {
 
 async function main() {
   const config = loadConfig();
-  const priorStateStatus = readClaimStateStatus(stateFile());
+  const priorStateStatus = readClaimStateStatus(claimStateFile());
   try {
     await runClaimWithOptionalDirectFallback(config);
   } catch (err) {
@@ -2871,7 +2805,6 @@ module.exports = {
   LOGIN_PHONE_SELECTORS,
   LOGIN_SMS_SEND_SELECTORS,
   clickLoginSmsButton,
-  detectLoginFormState,
   detectClaimPageState,
   ensureSmsLoginForm,
   fillInputField,
@@ -2884,7 +2817,6 @@ module.exports = {
   shouldInstallRequestInterception,
   advanceLoginGoal,
   advanceClaimGoal,
-  chooseSliderDistanceCandidate,
   findReusableCdpEntryPage,
   maskUrlForLog,
   pageMatchesEntryUrl,
