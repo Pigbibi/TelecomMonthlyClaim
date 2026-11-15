@@ -43,7 +43,6 @@ test('monthly workflow uses GitHub-hosted Linux with generic proxy modes', () =>
   assert.match(workflowText, /Unsupported TELECOM_CONNECTIVITY_MODE/);
   assert.match(workflowText, /Auto connectivity selected/);
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE=proxy_pool/);
-  assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE=ssh_tunnel/);
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE=http_proxy/);
   assert.match(workflowText, /TELECOM_CONNECTIVITY_MODE=direct/);
 });
@@ -63,20 +62,17 @@ test('repository does not ship Pigbibi internal home proxy automation', () => {
   }
 });
 
-test('monthly workflow supports generic ssh tunnel proxy configuration', () => {
-  assert.match(workflowText, /ssh_tunnel/);
-  assert.match(workflowText, /PROXY_SSH_HOST/);
-  assert.match(workflowText, /PROXY_SSH_PRIVATE_KEY/);
-  assert.match(workflowText, /PROXY_TUNNEL_REMOTE_ENDPOINT/);
-  assert.match(workflowText, /PROXY_TUNNEL_PROXY_SCHEME/);
-  assert.match(workflowText, /ssh-keyscan/);
-  assert.match(workflowText, /nc -z 127\.0\.0\.1 "\$\{PROXY_TUNNEL_LOCAL_PORT\}"/);
-  assert.match(workflowText, /proxy_url="\$\{PROXY_TUNNEL_PROXY_SCHEME:-http\}:\/\/127\.0\.0\.1:\$\{PROXY_TUNNEL_LOCAL_PORT\}"/);
-  assert.match(workflowText, /OPENWRT_HTTP_PROXY=\$proxy_url/);
+test('monthly workflow retires ssh tunnel egress in favor of public HTTP proxy', () => {
+  assert.doesNotMatch(workflowText, /ssh_tunnel/);
+  assert.doesNotMatch(workflowText, /PROXY_SSH_HOST/);
+  assert.doesNotMatch(workflowText, /PROXY_SSH_PRIVATE_KEY/);
+  assert.doesNotMatch(workflowText, /PROXY_TUNNEL_REMOTE_ENDPOINT/);
+  assert.doesNotMatch(workflowText, /PROXY_TUNNEL_PROXY_SCHEME/);
+  assert.doesNotMatch(workflowText, /ssh-keyscan/);
+  assert.match(workflowText, /OPENWRT_HTTP_PROXY/);
   assert.doesNotMatch(workflowText, /ControlMaster=/);
   assert.doesNotMatch(workflowText, /ControlPath=/);
   assert.doesNotMatch(workflowText, /ControlPersist=/);
-  assert.match(workflowText, /proxy stress check passed/);
   assert.match(workflowText, /Upload claim debug screenshots/);
   assert.match(workflowText, /artifacts\/claim-debug/);
   assert.match(workflowText, /retention-days:\s*3/);

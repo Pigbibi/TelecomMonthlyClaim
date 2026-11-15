@@ -9,14 +9,17 @@ The runner must reach the carrier campaign and the selected SMS provider. This
 repository accepts explicit network entry points but does not deploy a VPN,
 router tunnel, proxy server, or private network.
 
+SSH local-forward egress is retired. Prefer a public HTTP(S) proxy such as the
+home WAN mixed inbound published through frp (`OPENWRT_HTTP_PROXY` /
+`HOME_HTTP_PROXY`).
+
 ## Modes
 
 | Mode | Behavior |
 | --- | --- |
-| `auto` | Select configured `proxy_pool`, then `ssh_tunnel`, then `http_proxy`; use direct when none is configured |
+| `auto` | Select configured `http_proxy`, then `proxy_pool`; use direct when none is configured |
 | `direct` | Connect from the runner without a proxy |
 | `http_proxy` | Use an HTTP or SOCKS proxy already reachable from the runner |
-| `ssh_tunnel` | Create an SSH local forward from the runner to a remote proxy endpoint |
 | `proxy_pool` | Use one configured proxy-pool endpoint |
 
 Keep `ALLOW_DIRECT_PROXY_FALLBACK=false` when a proxy is required for policy or
@@ -44,39 +47,7 @@ OPENWRT_HTTP_PROXY=http://user:password@proxy.example:8080
 ```
 
 The address must be reachable from the runner. `127.0.0.1` and `localhost`
-refer to the runner itself. Do not use a loopback URL on a GitHub-hosted runner
-unless another workflow step creates the listener.
-
-## SSH tunnel
-
-Variables:
-
-```text
-TELECOM_CONNECTIVITY_MODE=ssh_tunnel
-PROXY_SSH_USER=runner
-PROXY_SSH_PORT=22
-PROXY_TUNNEL_LOCAL_PORT=13128
-PROXY_TUNNEL_REMOTE_ENDPOINT=127.0.0.1:13128
-PROXY_TUNNEL_PROXY_SCHEME=http
-PROXY_HEALTH_URL=https://wapbj.189.cn/
-```
-
-Secrets:
-
-```text
-PROXY_SSH_HOST=jump.example.com
-PROXY_SSH_PRIVATE_KEY=<dedicated private key>
-PROXY_SSH_KNOWN_HOSTS=<pinned known_hosts entry>
-```
-
-Traffic path:
-
-```text
-runner:127.0.0.1:local-port → SSH host → configured remote proxy endpoint
-```
-
-Use a dedicated key with restricted server-side permissions. Configure
-`PROXY_SSH_KNOWN_HOSTS`; relying on a dynamic scan weakens host verification.
+refer to the runner itself. Do not use a loopback URL on a GitHub-hosted runner.
 
 ## Proxy pool
 
