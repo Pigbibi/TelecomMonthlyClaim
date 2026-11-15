@@ -70,6 +70,7 @@ test('monthly workflow retires ssh tunnel egress in favor of public HTTP proxy',
   assert.doesNotMatch(workflowText, /PROXY_TUNNEL_PROXY_SCHEME/);
   assert.doesNotMatch(workflowText, /ssh-keyscan/);
   assert.match(workflowText, /OPENWRT_HTTP_PROXY/);
+  assert.match(workflowText, /PROXY_HEALTH_URL/);
   assert.doesNotMatch(workflowText, /ControlMaster=/);
   assert.doesNotMatch(workflowText, /ControlPath=/);
   assert.doesNotMatch(workflowText, /ControlPersist=/);

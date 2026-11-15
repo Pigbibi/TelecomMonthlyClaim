@@ -67,6 +67,7 @@ jobs:
       SMS_POLL_MS: ${{ vars.SMS_POLL_MS || '' }}
       PROXY_POOL_HTTP_PROXY: ${{ secrets.PROXY_POOL_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || '' }}
       OPENWRT_HTTP_PROXY: ${{ secrets.OPENWRT_HTTP_PROXY || secrets.HOME_HTTP_PROXY || secrets.PUBLIC_HTTP_PROXY || secrets.SCHWAB_PROXY_URL || secrets.BROWSER_PROXY_SERVER || '' }}
+      PROXY_HEALTH_URL: ${{ vars.PROXY_HEALTH_URL || 'https://wapbj.189.cn/' }}
       HEADLESS: "false"
       BROWSER_CHANNEL: chrome
       TELECOM_BROWSER_TRANSPORT: "native_playwright"
