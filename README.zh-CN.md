@@ -89,6 +89,12 @@ npm test
 - [配置](docs/configuration.md) · [网络接入](docs/connectivity.md)
 - [短信来源](docs/sms-providers.md) · [开发与排障](docs/development.md)
 
+## 每周密钥扫描
+
+`Weekly all-branch secret scan` 已手动停用。YAML 仍保留每周一 04:23 UTC（北京时间 12:23）的原调度，但停用期间不会定时扫描。保持停用；PR 的 Gitleaks 检查仍然启用。
+
+`Secret scan / Gitleaks` 成功表示扫描器完成，不会执行应用的真实账户流程。发现问题时只保留路径和规则名，不把密钥值复制到日志、Issue 或文档。
+
 ## 支持与贡献
 
 [问题与支持](SUPPORT.md) · [贡献指南](CONTRIBUTING.md) · [安全问题](SECURITY.md) · [行为准则](CODE_OF_CONDUCT.md)
@@ -96,9 +102,3 @@ npm test
 ## 许可证
 
 [MIT](LICENSE)。
-
-## 每周密钥扫描
-
-`Weekly all-branch secret scan` 已手动停用。YAML 仍保留每周一 04:23 UTC（北京时间 12:23）的原调度，但停用期间不会定时扫描。保持停用；PR 的 Gitleaks 检查仍然启用。
-
-`Secret scan / Gitleaks` 成功表示扫描器完成，不会执行应用的真实账户流程。发现问题时只保留路径和规则名，不把密钥值复制到日志、Issue 或文档。
