@@ -252,7 +252,7 @@ jobs:
       - name: Scan monthly state before publishing
         id: state_scan
         if: always() && steps.state_restore.outcome == 'success' && steps.claim_plan.outcome == 'success' && github.event.inputs.dry_run != 'true' && github.event.inputs.probe_only != 'true' && hashFiles(steps.claim_plan.outputs.state_file) != ''
-        uses: QuantStrategyLab/.github/actions/scan-before-publish@925d718e440bd5cc7c4537ffef2fd53a2f0e654d
+        uses: QuantStrategyLab/.github/actions/scan-before-publish@a851c1987c432d683caf7c018f79bcc0a75bb722
         with:
           path: ${{ steps.claim_plan.outputs.state_file }}
 
