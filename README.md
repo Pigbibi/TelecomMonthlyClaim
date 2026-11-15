@@ -103,14 +103,6 @@ If the carrier rejects a verification request or returns an empty response, insp
 - [Configuration](docs/configuration.md) · [Connectivity](docs/connectivity.md)
 - [SMS providers](docs/sms-providers.md) · [Development and troubleshooting](docs/development.md)
 
-## Support and contributing
-
-[Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
-
-## License
-
-[MIT](LICENSE).
-
 ## Weekly secret scan
 
 `Weekly all-branch secret scan` is manually disabled. Its YAML retains the former
@@ -120,3 +112,11 @@ expected while it is disabled. Keep it disabled; PR Gitleaks checks remain activ
 A successful `Secret scan / Gitleaks` job verifies the scanner completed. It
 does not run the application's account workflow. Findings retain paths and
 rule names only; never copy secret values into logs, issues or documentation.
+
+## Support and contributing
+
+[Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
+
+## License
+
+[MIT](LICENSE).
