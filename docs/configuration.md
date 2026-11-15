@@ -30,7 +30,7 @@ defaults.
 | `probe_only` | `false` | Load the entry and login challenge without submitting it or sending SMS |
 | `dry_run` | `false` in monthly workflow | Stop before the final carrier submit action |
 | `force_run` | `false` in monthly workflow | Ignore successful month state and run again |
-| `connectivity_mode` | `auto` in monthly workflow | Select `auto`, `direct`, `http_proxy`, `ssh_tunnel`, or `proxy_pool` |
+| `connectivity_mode` | `auto` in monthly workflow | Select `auto`, `direct`, `http_proxy`, or `proxy_pool` |
 
 The self-hosted diagnostic workflow defaults to `dry_run=true` and
 `force_run=true`. Both it and the monthly workflow are manually disabled.
